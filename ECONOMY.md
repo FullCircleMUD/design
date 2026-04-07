@@ -74,6 +74,16 @@ Every trade path contributes to economic health. Withdrawal to a private wallet 
 | Rare NFT items | XRPL NFTs (NFTokens) | Evennia objects in game world | Player-driven auction / external marketplace |
 | Scrolls & Recipes | XRPL NFTs (NFTokens) | Consumable Evennia objects | Not shopkeeper-tradeable — earned only |
 
+### NFT Token Pool Design
+
+All XRPL NFTs are minted with **taxon 0** (uncategorized). NFTs are interchangeable containers — the on-chain token is just an opaque ID + URI. What an NFT *represents* changes constantly: when an item is destroyed the token's DB record is wiped and the same token is reused for another item when it is created. The game DB (`NFTGameState`) tracks what each token currently represents, not the on-chain metadata.
+
+This means:
+- No on-chain categorization (taxon is always 0)
+- Token identity is decoupled from item identity
+- The NFT pool is pre-minted and recycled indefinitely
+- Item type, stats, and metadata are resolved server-side via the token's URI
+
 ---
 
 ## AMM Trade Accounting
