@@ -84,6 +84,8 @@ This means:
 - The NFT pool is pre-minted and recycled indefinitely
 - Item type, stats, and metadata are resolved server-side via the token's URI
 
+**Why this works for game items but wouldn't for other domains:** Game NFTs exist to let players move items out of the game onto the blockchain, where they can trade them between wallets or hold them independently of the game. But the token is only meaningful insofar as it can be reimported into the game — the item's identity, utility, stats, and behavior exist entirely within the game server. This is fundamentally different from domains like real estate or identity, where an NFT must carry self-contained proof of what it represents because multiple independent systems need to verify ownership without a central authority. Game items have a single authoritative system (the game), so the on-chain token only needs to track *ownership* — not *identity*.
+
 ---
 
 ## AMM Trade Accounting
