@@ -161,7 +161,10 @@ Railway lets you set environment variables per environment. The game needs:
 | `DATABASE_URL` | PostgreSQL connection string | Railway (automatic) | Auto-set when you add the PostgreSQL plugin. Controls the SQLite/PostgreSQL toggle — see [DATABASE.md § How the Toggle Works](DATABASE.md#how-the-toggle-works) |
 | `SECRET_KEY` | Django secret key for cryptographic signing | You | Generate a random string per environment |
 | `XRPL_NETWORK_URL` | XRPL websocket endpoint | You | Testnet: `wss://s.altnet.rippletest.net:51233` (default if not set). Mainnet: `wss://s1.ripple.com:51233`. Only production needs this set — staging and local dev use the testnet default |
-| `XRPL_VAULT_WALLET_SEED` | Vault signer key for server-signed transactions | You | Staging: testnet seed. Production: will become `XRPL_VAULT_SIGNER_A_SEED` when multisig is implemented — see [Vault Signing & Multisig](#vault-signing--multisig) |
+| `XRPL_VAULT_WALLET_SEED` | Vault signer key A for server-signed transactions | You | Single-sig: vault master seed. Multisig: signer key A's seed. See [Vault Signing & Multisig](#vault-signing--multisig) |
+| `XRPL_MULTISIG_ENABLED` | Enable multisig co-signing flow | You | `true` or `false`. When false, single-sig flow unchanged |
+| `XRPL_COSIGNER_URL` | Co-signing service URL | You | Only when multisig enabled. e.g. `https://cosigner-xxxx.onrender.com` |
+| `XRPL_COSIGNER_API_KEY` | Co-signer API authentication key | You | Shared secret between game server and co-signer |
 | `XRPL_ROOT_ADDRESS` | Dev/superuser wallet address | You | |
 | `XAMAN_API_KEY` | Xaman wallet API key | You | |
 | `XAMAN_API_SECRET` | Xaman wallet API secret | You | |
@@ -176,42 +179,80 @@ Locally, these secrets live in `server/conf/secret_settings.py` (not in Git). On
 
 ## Vault Signing & Multisig
 
-### Current state (testnet / staging)
+### Current State (Testnet / Staging)
 
 The game server holds `XRPL_VAULT_WALLET_SEED` — a single key with full signing authority over the vault wallet. This is acceptable for testnet where the tokens have no real value.
 
-### Production requirement (mainnet)
+### Production Requirement (Mainnet)
 
-For mainnet, the vault wallet must use **XRPL native multisig**. No single compromised key should be able to move funds.
+For mainnet, no single compromised key should be able to move funds. Both the **vault** and **issuer** wallets use **XRPL native multisig** with a 2-of-3 signer configuration.
 
-**Architecture:**
+### Key Architecture
+
+Each multisig wallet (vault, issuer) has 4 associated keys:
+
+| Key | Location | Purpose |
+|-----|----------|---------|
+| **Master key** | Deep cold storage (offline, physical safe) | Emergency recovery only. Stays enabled but never touches a server. Last resort if 2+ signer keys are lost. |
+| **Signer key A** | Game server (Railway env var) | First signature. Game server builds transaction and signs with A. |
+| **Signer key B** | Co-signing service (Render env var) | Second signature. Co-signer validates business rules, signs with B, submits to XRPL. |
+| **Signer key C** | Cold storage (offline) | Recovery key. Used with A or B to rotate a compromised key. |
+
+Signer keys A, B, and C are unfunded XRPL addresses — they don't need to exist on-chain or hold any XRP. They're purely signing identities. This means rotating a compromised key costs nothing: generate a new keypair, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
+
+The vault/issuer master keys are used once during initial setup (to submit `SignerListSet`), then locked away in cold storage permanently. They remain enabled on-chain as a disaster recovery fallback — if 2+ signer keys are lost, the master key can still authorise transactions. The risk of physical theft from a safe is far lower than the risk of catastrophic key loss.
+
+### On-Chain Configuration
+
+Both wallets use `SignerListSet` with quorum 2:
 
 ```
-Game Server (Railway)                Co-signing Service (separate infra)
-┌─────────────────────┐             ┌──────────────────────────┐
-│                     │             │                          │
-│  Player exports     │  POST /sign │  1. Validate request     │
-│  gold/NFT           │────────────→│  2. Check business rules │
-│                     │             │  3. Co-sign transaction  │
-│  Server builds tx   │             │  4. Submit to XRPL       │
-│  Signs with key A   │←────────────│  5. Return tx result     │
-│                     │   response  │                          │
-│  Holds key A only   │             │  Holds key B only        │
-└─────────────────────┘             └──────────────────────────┘
+Vault:  key A (weight 1) + key B (weight 1) + key C (weight 1), quorum 2
+Issuer: key A (weight 1) + key B (weight 1) + key C (weight 1), quorum 2
 ```
 
-**How XRPL multisig works:**
-- A wallet has a **SignerList** — a set of authorized signing keys with weights
-- Each transaction requires signatures meeting a **quorum** (weight threshold)
-- Example: key A (weight 1) + key B (weight 1), quorum 2 = both must sign
+Normal operations use **A + B** (automatic, game server + co-signer). Any 2-of-3 can sign, so recovery scenarios are:
+- Key A compromised → rotate using B + C
+- Key B compromised → rotate using A + C
+- Key A lost → use B + C until new A is provisioned
+- Catastrophic (2+ keys lost) → master key from cold storage
 
-**The co-signing service** is a small, separate API (not part of the game server) that:
-1. Receives a partially-signed transaction from the game server
-2. Validates against business rules (expected transaction type, known destination wallet, amount within limits, reasonable request rate)
-3. Co-signs with key B and submits to XRPL
-4. Returns the result
+### Infrastructure Separation
 
-**Why separate infrastructure:** The whole point is that compromising one system isn't enough. Game server compromised = attacker has key A but can't submit without key B. Co-signer compromised = attacker has key B but can't build valid game transactions without key A.
+```
+Game Server (Railway)                Co-Signing Service (Render)
+┌──────────────────┐                ┌──────────────────────────┐
+│                  │                │                          │
+│ Build tx         │  POST /cosign │ 1. Authenticate (API key)│
+│ Autofill         │───────────────→│ 2. Look up wallet config │
+│ Sign with key A  │               │ 3. Validate rules        │
+│ (multisign=True) │               │ 4. Co-sign with key B    │
+│                  │  {tx_hash,    │ 5. Combine signatures    │
+│                  │   result}     │ 6. Submit to XRPL        │
+│ Holds key A only │←──────────────│ Holds key B only         │
+└──────────────────┘               └──────────────────────────┘
+```
+
+**Why separate providers:** Compromising Railway gives an attacker key A + the API key, but not key B. Compromising Render gives key B, but no ability to build valid game transactions. Both must be compromised simultaneously to steal funds.
+
+### Co-Signing Service
+
+The co-signing service (`FullCircleMUD/cosigner` repo) is a standalone FastAPI app deployed on **Render** (separate provider from the game server on Railway). It is **multi-wallet capable** — it can hold signing keys for any number of XRPL accounts with per-wallet business rules. Adding a new wallet = add a JSON config entry + set an env var.
+
+**Endpoints:**
+- `POST /cosign` — co-sign and submit a partially-signed XRPL transaction (requires `X-API-Key` header)
+- `GET /health` — health check (no auth)
+
+**Per-wallet business rules** (configured in `wallets.json`):
+
+| Rule | Description |
+|------|-------------|
+| `allowed_tx_types` | Transaction type must be in allow list (e.g. Payment, OfferCreate) |
+| `blocked_tx_types` | Transaction type must NOT be in block list (e.g. AccountDelete, SignerListSet) |
+| `require_issuer` | All issued currency amounts must reference the game's issuer address |
+| `max_per_minute` | Rate limit per wallet |
+
+Wallet seeds are stored in Render env vars, not in the config file. The JSON config (which maps addresses to rules and env var names) can safely live in the repo.
 
 **Tiered approval (future):**
 
@@ -221,13 +262,43 @@ Game Server (Railway)                Co-signing Service (separate infra)
 | Delayed | Medium exports (100-1000 gold) | 5-minute delay before co-signing |
 | Manual | Large exports (> 1000 gold), bulk, unusual | Queued for manual approval |
 
-**The same signing keys work on both testnet and mainnet** — they're just cryptographic keypairs. The `XRPL_NETWORK_URL` environment variable determines which network receives the signed transaction. This means the full multisig flow can be tested on staging (testnet) before going live.
+### Game Server Changes
 
-**Migration path:**
-1. Set up the vault wallet's SignerList on-ledger (key A + key B, quorum 2)
-2. Deploy the co-signing service with key B on separate infrastructure
-3. Update game server's `xrpl_tx.py` to partial-sign and forward to co-signer
-4. Rename env var from `XRPL_VAULT_WALLET_SEED` to `XRPL_VAULT_SIGNER_A_SEED`
+When `XRPL_MULTISIG_ENABLED=true`, the 4 vault-signing functions in `xrpl_tx.py` and `xrpl_amm.py` use a `_cosign_and_submit()` helper instead of `submit_and_wait()`:
+1. Autofill the transaction (sequence number, fee, last ledger)
+2. Sign with key A (`sign(tx, wallet, multisign=True)`)
+3. POST the serialised blob to the co-signer service
+4. Return the tx_hash from the response
+
+When `XRPL_MULTISIG_ENABLED=false` (default), existing single-sig flow is unchanged.
+
+**New env vars on game server (Railway):**
+
+| Variable | Purpose |
+|----------|---------|
+| `XRPL_MULTISIG_ENABLED` | Feature flag (`true`/`false`) |
+| `XRPL_COSIGNER_URL` | Co-signer service URL (e.g. `https://cosigner-xxxx.onrender.com`) |
+| `XRPL_COSIGNER_API_KEY` | Shared secret for co-signer authentication |
+
+`XRPL_VAULT_WALLET_SEED` stays as-is — when multisig is enabled it becomes key A's seed.
+
+### Setup Tools
+
+The `cosigner` repo includes setup scripts:
+- `setup/generate_keys.py` — generate XRPL keypairs for signer keys A, B, C
+- `setup/configure_signerlist.py` — submit `SignerListSet` on any XRPL account (set, verify, or remove)
+
+### Migration Path (Testnet → Mainnet)
+
+1. **Generate keypairs** — 3 keys per wallet (A, B, C) using `generate_keys.py`
+2. **Configure SignerList** on testnet — `configure_signerlist.py` with vault's master key
+3. **Deploy co-signer** to Render with key B's seed
+4. **Enable multisig** on game server — set `XRPL_MULTISIG_ENABLED=true` + cosigner URL/key
+5. **Test on testnet** — verify shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
+6. **Repeat for mainnet** — same keys work on both networks (only `XRPL_NETWORK_URL` changes)
+7. **Store master key** in cold storage — it stays enabled on-chain but never online
+
+**The same signing keys work on both testnet and mainnet** — they're just cryptographic keypairs. The `XRPL_NETWORK_URL` environment variable determines which network receives the signed transaction.
 
 ---
 
