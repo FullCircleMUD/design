@@ -265,12 +265,13 @@ Wallet seeds are stored in Render env vars, not in the config file. The JSON con
 ### Game Server Changes
 
 When `XRPL_MULTISIG_ENABLED=true`, the 4 vault-signing functions in `xrpl_tx.py` and `xrpl_amm.py` use a `_cosign_and_submit()` helper instead of `submit_and_wait()`:
-1. Autofill the transaction (sequence number, fee, last ledger)
-2. Sign with key A (`sign(tx, wallet, multisign=True)`)
-3. POST the serialised blob to the co-signer service
-4. Return the tx_hash from the response
+1. Set `account` to `settings.XRPL_VAULT_ADDRESS` (not `wallet.address` — since key A's seed derives a different address than the vault)
+2. Autofill the transaction (sequence number, fee, last ledger)
+3. Sign with key A (`sign(tx, wallet, multisign=True)`)
+4. POST the serialised blob to the co-signer service via `httpx`
+5. Co-signer returns `tx_hash`, `engine_result`, and full `meta` (AffectedNodes etc.) — the game server uses meta to extract NFT offer IDs
 
-When `XRPL_MULTISIG_ENABLED=false` (default), existing single-sig flow is unchanged.
+When `XRPL_MULTISIG_ENABLED=false` (default), existing single-sig flow is unchanged — `wallet.address` equals vault address because the seed IS the master key.
 
 **New env vars on game server (Railway):**
 
