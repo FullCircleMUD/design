@@ -65,13 +65,14 @@ Player pays $20 RLUSD ──→ Issuer Wallet
                               ├──→ 90% ($18 RLUSD) ──→ Retained in issuer
                               │    (treasury management — RLUSD / T-Bill allocation)
                               │
-                              └──→ Issuer issues POLICY_GOLD_AMOUNT ──→ Vault (RESERVE)
-                                   (game economy provisioning — decoupled from revenue)
+                              └──→ Active player signal received
+                                   ──→ Issuer issues GOLD_PER_SUBSCRIPTION ──→ Vault (RESERVE)
+                                   (per-player economy provisioning — see Active Player Signal below)
 ```
 
-### Gold Issuance — Decoupled from Revenue
+### Gold Provisioning — Per-Player Economy Allocation
 
-The gold issuance amount is **not derived from the RLUSD value**. It is a game design parameter:
+Each active player's presence in the game economy requires a monthly gold allocation to be provisioned into the vault. This is a game design parameter — the amount of gold the economy needs per active player per month — and is **completely independent of subscription revenue**.
 
 | Parameter | Value | Set By |
 |---|---|---|
@@ -79,12 +80,24 @@ The gold issuance amount is **not derived from the RLUSD value**. It is a game d
 | Review frequency | Periodic (e.g. monthly/quarterly) | Admin discretion |
 | Adjustment criteria | In-game inflation rate, gold velocity, active supply, player count | Economic health indicators |
 
-**Why decoupled?** If gold issuance were calculated from RLUSD value, it would create an implicit exchange rate — exactly what the compliance model prohibits. The gold amount should be a non-round number that bears no obvious arithmetic relationship to the subscription price or the retained RLUSD amount (e.g. 5000 gold, not 1800 — which would look suspiciously like $18.00 × 100). When this value is adjusted, it's a *game balance patch*, not a monetary policy change. Instead:
+**Why decoupled from revenue?** If gold issuance were calculated from RLUSD value, it would create an implicit exchange rate — exactly what the compliance model prohibits. The gold amount should be a non-round number that bears no obvious arithmetic relationship to the subscription price or the retained RLUSD amount (e.g. 5000 gold, not 1800 — which would look suspiciously like $18.00 × 100). When this value is adjusted, it's a *game balance patch*, not a monetary policy change.
 
 - The RLUSD is **revenue** (business income)
 - The gold is **game economy provisioning** (content creation)
 - They happen at the same time but one does not determine the other
 - The admin can adjust `GOLD_PER_SUBSCRIPTION` independently of subscription price
+
+### Active Player Signal — How Do We Know a Player Is Active?
+
+Gold provisioning requires a reliable signal that a player can be counted as active for the coming month. The system needs to know *when* to provision each player's gold allocation and *how many* active players the economy is supporting.
+
+**Options considered:**
+
+1. **Login-based activity tracking** — Count a player as active if they log in at least N times in the preceding period (e.g. 5 logins in 30 days). This has the advantage of measuring actual engagement, but introduces complexity: when exactly do you provision the gold? At the Nth login? At month-end for qualifying players? It creates edge cases (player logs in 4 times, misses the threshold by one), requires a batch provisioning job, and could be gamed by trivial login-and-logout cycles. It also means gold provisioning happens at unpredictable times, complicating treasury monitoring.
+
+2. **Subscription receipt** — When a player pays their monthly subscription, they have made a concrete commitment to play for the coming month. This is a clean, discrete event: one payment, one provisioning. No ambiguity about timing, no threshold edge cases, no gaming potential (it costs real money). The subscription receipt is already processed server-side, so gold provisioning piggybacks on existing infrastructure.
+
+**Current approach:** Subscription receipt is used as the active player signal. It is the most reliable and least gameable indicator available, and it produces a clean 1:1 mapping between payment events and gold provisioning events. This may be revisited if the game introduces free-to-play tiers or alternative access models that decouple player activity from subscription payments.
 
 ### Server-Side Implementation
 
@@ -94,7 +107,7 @@ XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 2. **Payment detection** — filter for incoming RLUSD Payment transactions
 3. **Subscription verification** — match against pending subscription requests (existing `verify_fungible_payment()` pattern)
 4. **Operating split** — issuer sends 10% RLUSD to operating wallet
-5. **Gold provisioning** — issuer issues `GOLD_PER_SUBSCRIPTION` gold to vault via Payment
+5. **Active player provisioning** — subscription receipt triggers the active player signal; issuer issues `GOLD_PER_SUBSCRIPTION` gold to vault via Payment
 6. **Subscription activation** — existing `extend_subscription()` flow
 7. **Memo tagging** — all transactions carry structured memos (see Memo System below)
 
@@ -104,7 +117,7 @@ XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 # Subscription processing
 SUBSCRIPTION_PAYMENT_DESTINATION = XRPL_ISSUER_ADDRESS    # issuer is the fiscal centre
 SUBSCRIPTION_OPS_SPLIT_PCT = 10          # % of subscription RLUSD to operating wallet
-GOLD_PER_SUBSCRIPTION = 5000            # gold issued per subscription (game balance parameter)
+GOLD_PER_SUBSCRIPTION = 5000            # gold provisioned per active player per month (game balance parameter)
 
 # Operating wallet (business expenses — hosting, LLM, dev, fiat conversion)
 XRPL_OPERATING_ADDRESS = "<operating_address>"
@@ -183,9 +196,9 @@ SINK (daily reallocation)
   └──→ 10% ──→ Burned (issuer reclaims — reduces total issued supply)
 ```
 
-The 10% burn is a **deflationary mechanism** — it reduces total gold supply, counteracting issuance from subscriptions and other sources. It is NOT a revenue mechanism (burning gold doesn't generate RLUSD or any external value).
+The 10% burn is a **deflationary mechanism** — it reduces total gold supply, counteracting issuance from active player provisioning and other sources. It is NOT a revenue mechanism (burning gold doesn't generate RLUSD or any external value).
 
-> **Relationship to subscription issuance:** Over time, the system should tend toward equilibrium — gold issued via subscriptions is offset by gold burned via sinks. The admin monitors this balance and adjusts `GOLD_PER_SUBSCRIPTION` if issuance consistently outpaces sinks (inflationary) or vice versa (deflationary squeeze).
+> **Relationship to player provisioning:** Over time, the system should tend toward equilibrium — gold provisioned for active players is offset by gold burned via sinks. The admin monitors this balance and adjusts `GOLD_PER_SUBSCRIPTION` if provisioning consistently outpaces sinks (inflationary) or vice versa (deflationary squeeze).
 
 ---
 
@@ -231,7 +244,7 @@ Each transaction includes one Memo with:
 
 | MemoType | Trigger | MemoData Example |
 |---|---|---|
-| `fcm/subscription` | Gold provisioned from subscription | `{"goldAmount":1000,"policyRate":"GOLD_PER_SUBSCRIPTION"}` |
+| `fcm/subscription` | Active player gold provisioning | `{"goldAmount":5000,"policyRate":"GOLD_PER_SUBSCRIPTION"}` |
 | `fcm/ops-split` | Operating split from subscription | `{"subscriptionTx":"<hash>","splitPct":10,"amount":"2.00"}` |
 | `fcm/rebalance` | Treasury RLUSD/T-Bill rebalance | `{"direction":"buy-tbill","amount":"100","rlusdPctBefore":25,"rlusdPctAfter":20}` |
 | `fcm/sink-burn` | Gold burned from SINK (10%) | `{"amount":"500","sinkTotal":"5000","burnPct":10}` |
