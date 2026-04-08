@@ -75,11 +75,11 @@ The gold issuance amount is **not derived from the RLUSD value**. It is a game d
 
 | Parameter | Value | Set By |
 |---|---|---|
-| `GOLD_PER_SUBSCRIPTION` | e.g. 1000 gold | Game policy (admin) |
+| `GOLD_PER_SUBSCRIPTION` | e.g. 5000 gold | Game policy (admin) |
 | Review frequency | Periodic (e.g. monthly/quarterly) | Admin discretion |
 | Adjustment criteria | In-game inflation rate, gold velocity, active supply, player count | Economic health indicators |
 
-**Why decoupled?** If gold issuance were calculated from RLUSD value, it would create an implicit exchange rate — exactly what the compliance model prohibits. Instead:
+**Why decoupled?** If gold issuance were calculated from RLUSD value, it would create an implicit exchange rate — exactly what the compliance model prohibits. The gold amount should be a non-round number that bears no obvious arithmetic relationship to the subscription price or the retained RLUSD amount (e.g. 5000 gold, not 1800 — which would look suspiciously like $18.00 × 100). When this value is adjusted, it's a *game balance patch*, not a monetary policy change. Instead:
 
 - The RLUSD is **revenue** (business income)
 - The gold is **game economy provisioning** (content creation)
@@ -104,7 +104,7 @@ XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 # Subscription processing
 SUBSCRIPTION_PAYMENT_DESTINATION = XRPL_ISSUER_ADDRESS    # issuer is the fiscal centre
 SUBSCRIPTION_OPS_SPLIT_PCT = 10          # % of subscription RLUSD to operating wallet
-GOLD_PER_SUBSCRIPTION = 1000            # gold issued per subscription (game policy)
+GOLD_PER_SUBSCRIPTION = 5000            # gold issued per subscription (game balance parameter)
 
 # Operating wallet (business expenses — hosting, LLM, dev, fiat conversion)
 XRPL_OPERATING_ADDRESS = "<operating_address>"
