@@ -33,22 +33,22 @@
 
 ### Proposed (Three Wallets)
 
-| Wallet | Role | Funding Source |
+| Wallet | Role | Holds |
 |---|---|---|
-| **Issuer** | Issues all FCM currencies, mints NFTs | Minimal XRP for fees only |
-| **Vault** | Holds game asset inventory, executes AMM swaps, processes imports/exports | Initial seed funding |
-| **Treasury** (NEW) | Receives subscription payments, holds business revenue (RLUSD + T-Bills), pays operating expenses | Subscription revenue |
+| **Issuer** | Central financial authority — issues all FCM currencies, mints NFTs, receives subscription payments, holds treasury (RLUSD + T-Bills), issues gold on subscription events | Subscription revenue, RLUSD, T-Bills, game currency issuance authority |
+| **Vault** | Game operations — holds game asset inventory, executes AMM swaps, processes imports/exports | Game gold, resources, NFTs, AMM LP tokens |
+| **Operating** (NEW) | Business expenses — hosting, LLM API fees, development costs | RLUSD allocated from subscription splits; funds may be moved to exchange for fiat conversion |
 
-### Why a Separate Treasury Wallet?
+### Why a Separate Operating Wallet?
 
-The issuer wallet's purpose is currency issuance — it should not also serve as the business bank account. Separating concerns:
+The issuer is the game's central financial authority — it receives revenue, holds treasury assets, and controls currency issuance. That role should not be muddied with day-to-day expense payments. Separating the operating wallet:
 
-- **Issuer** has minimal balance and tightly scoped signing rules (issue tokens, mint NFTs, nothing else)
-- **Treasury** handles all revenue and expenses with its own signing rules
-- **Vault** remains the game operations wallet
-- Each wallet can have distinct multisig cosigner rules appropriate to its role
+- **Issuer** remains the fiscal centre — revenue in, gold out, treasury management. Tightly controlled.
+- **Operating** receives its allocation (10% of subscription revenue) and is used freely for business expenses without touching the issuer's treasury position.
+- **Vault** remains the game operations wallet — player-facing transactions only.
+- Each wallet has distinct multisig cosigner rules appropriate to its role.
 
-> **Migration:** Change `SUBSCRIPTION_PAYMENT_DESTINATION` from `XRPL_ISSUER_ADDRESS` to the new treasury wallet address. Update Xaman subscription payment payloads accordingly.
+> **No migration needed** — subscription payments already go to the issuer. The issuer sends the operating split to the new operating wallet.
 
 ---
 
@@ -57,17 +57,16 @@ The issuer wallet's purpose is currency issuance — it should not also serve as
 ### Flow
 
 ```
-Player pays $20 RLUSD ──→ Treasury Wallet
+Player pays $20 RLUSD ──→ Issuer Wallet
                               │
-                              ├──→ 10% ($2 RLUSD) ──→ Operating expenses
-                              │    (Payment to ops wallet or held in treasury)
+                              ├──→ 10% ($2 RLUSD) ──→ Operating Wallet
+                              │    (business expenses — hosting, LLM, dev)
                               │
-                              └──→ 90% ($18 RLUSD) ──→ Retained in treasury
-                                   (Cash management — RLUSD / T-Bill allocation)
-
-Separately, triggered by the subscription event:
-
-Issuer Wallet ──→ issues POLICY_GOLD_AMOUNT ──→ Vault (RESERVE)
+                              ├──→ 90% ($18 RLUSD) ──→ Retained in issuer
+                              │    (treasury management — RLUSD / T-Bill allocation)
+                              │
+                              └──→ Issuer issues POLICY_GOLD_AMOUNT ──→ Vault (RESERVE)
+                                   (game economy provisioning — decoupled from revenue)
 ```
 
 ### Gold Issuance — Decoupled from Revenue
@@ -91,10 +90,10 @@ The gold issuance amount is **not derived from the RLUSD value**. It is a game d
 
 XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 
-1. **Transaction monitoring** — game server subscribes to the treasury wallet's transaction stream via XRPL WebSocket (`subscribe` command)
+1. **Transaction monitoring** — game server subscribes to the issuer wallet's transaction stream via XRPL WebSocket (`subscribe` command)
 2. **Payment detection** — filter for incoming RLUSD Payment transactions
 3. **Subscription verification** — match against pending subscription requests (existing `verify_fungible_payment()` pattern)
-4. **Revenue split** — execute RLUSD Payment from treasury → ops allocation (if separate wallet) or record internally
+4. **Operating split** — issuer sends 10% RLUSD to operating wallet
 5. **Gold provisioning** — issuer issues `GOLD_PER_SUBSCRIPTION` gold to vault via Payment
 6. **Subscription activation** — existing `extend_subscription()` flow
 7. **Memo tagging** — all transactions carry structured memos (see Memo System below)
@@ -103,13 +102,13 @@ XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 
 ```python
 # Subscription processing
-SUBSCRIPTION_PAYMENT_DESTINATION = XRPL_TREASURY_ADDRESS  # changed from issuer
-SUBSCRIPTION_OPS_SPLIT_PCT = 10          # % of subscription to operating expenses
+SUBSCRIPTION_PAYMENT_DESTINATION = XRPL_ISSUER_ADDRESS    # issuer is the fiscal centre
+SUBSCRIPTION_OPS_SPLIT_PCT = 10          # % of subscription RLUSD to operating wallet
 GOLD_PER_SUBSCRIPTION = 1000            # gold issued per subscription (game policy)
 
-# Treasury wallet
-XRPL_TREASURY_ADDRESS = "<treasury_address>"
-XRPL_TREASURY_WALLET_SEED = os.environ.get("XRPL_TREASURY_WALLET_SEED", "")
+# Operating wallet (business expenses — hosting, LLM, dev, fiat conversion)
+XRPL_OPERATING_ADDRESS = "<operating_address>"
+XRPL_OPERATING_WALLET_SEED = os.environ.get("XRPL_OPERATING_WALLET_SEED", "")
 ```
 
 ---
@@ -118,14 +117,16 @@ XRPL_TREASURY_WALLET_SEED = os.environ.get("XRPL_TREASURY_WALLET_SEED", "")
 
 ### Asset Allocation
 
-The treasury holds business revenue in two forms:
+The issuer wallet holds business revenue (after the operating split) in two forms:
 
 | Asset | Purpose | Target Allocation |
 |---|---|---|
 | **RLUSD** | Liquid cash for near-term operating expenses | 20% |
 | **Tokenized T-Bills** | Short-term yield on idle cash (e.g. OpenEden TBILL on XRPL) | 80% |
 
-> **Note:** These are business treasury assets — operational funds of the game company. They have no relationship to in-game gold, in-game RESERVE balances, or any player-facing asset.
+> **Fiscal discipline mechanism:** The issuer's treasury position (RLUSD + T-Bills) serves as a constraint against over-issuance of game gold. The issuer can only issue gold when subscription revenue flows in — and that revenue is visibly held and managed on the issuer wallet. If the operator were to issue gold without corresponding revenue, the imbalance would be immediately visible on-chain. This is self-imposed discipline: the issuer's treasury position is the operator's commitment to not debase the in-game currency.
+>
+> **These are business treasury assets** — operational funds of the game company. They have no relationship to the *value* of in-game gold, and do not constitute backing, a peg, or a reserve. The discipline is about *issuance restraint*, not price maintenance.
 
 ### Rebalancing
 
@@ -141,8 +142,8 @@ The treasury holds business revenue in two forms:
 
 ```
 after each subscription payment:
-    rlusd_balance = get_treasury_rlusd_balance()
-    tbill_balance = get_treasury_tbill_balance()
+    rlusd_balance = get_issuer_rlusd_balance()
+    tbill_balance = get_issuer_tbill_balance()
     total = rlusd_balance + tbill_balance  # (T-Bill valued at face)
     rlusd_pct = rlusd_balance / total
 
@@ -252,16 +253,16 @@ Add memo support to all existing transaction paths:
 - Game server: `xrpl_tx.py` functions accept optional memo parameter
 - Xaman payloads: include memos in payment/offer templates
 
-### Phase 2: Treasury Wallet
+### Phase 2: Operating Wallet
 
-- Create third XRPL wallet for treasury
-- Update subscription payment destination
+- Create third XRPL wallet for operating expenses
 - Configure multisig with appropriate cosigner rules
-- Trust lines for RLUSD (and T-Bill issuer when selected)
+- Trust line for RLUSD
+- Issuer trust lines for T-Bill issuer (when selected)
 
 ### Phase 3: Subscription Processing
 
-- Server-side transaction monitor for treasury wallet
+- Server-side transaction monitor for issuer wallet
 - Revenue split logic (10% ops / 90% retained)
 - Gold provisioning trigger (issuer → vault)
 - `GOLD_PER_SUBSCRIPTION` configuration and admin adjustment interface
@@ -287,8 +288,8 @@ Add memo support to all existing transaction paths:
 
 | Metric | Source | Purpose |
 |---|---|---|
-| Treasury RLUSD balance | XRPL query | Cash position |
-| Treasury T-Bill balance | XRPL query | Yield allocation |
+| Issuer RLUSD balance | XRPL query | Cash position |
+| Issuer T-Bill balance | XRPL query | Yield allocation |
 | RLUSD allocation % | Calculated | Rebalancing trigger |
 | Gold issued (period) | Memo audit trail | Issuance monitoring |
 | Gold burned (period) | Memo audit trail | Deflation monitoring |
@@ -305,8 +306,8 @@ The operator may choose to publish selected metrics (e.g. total gold supply, bur
 ## Open Questions
 
 1. **T-Bill issuer:** Which tokenized T-Bill is available and liquid on XRPL mainnet? Needs research at launch time.
-2. **Operating wallet:** Separate XRPL wallet, or track ops allocation internally within treasury?
-3. **Gold provisioning amount:** Initial value for `GOLD_PER_SUBSCRIPTION`? Needs calibration against expected player economy.
-4. **Sink burn timing:** Activate at mainnet launch, or defer until economy stabilizes?
-5. **Cosigner rules per wallet:** What business rules should the cosigning service enforce for treasury transactions vs vault transactions?
-6. **Rebalancing frequency:** After every subscription, or batched (e.g. daily)?
+2. **Gold provisioning amount:** Initial value for `GOLD_PER_SUBSCRIPTION`? Needs calibration against expected player economy.
+3. **Sink burn timing:** Activate at mainnet launch, or defer until economy stabilizes?
+4. **Cosigner rules per wallet:** What business rules should the cosigning service enforce for issuer (fiscal centre) vs vault (game ops) vs operating (expenses)?
+5. **Rebalancing frequency:** After every subscription, or batched (e.g. daily)?
+6. **Operating wallet fiat off-ramp:** Which exchange/process for converting RLUSD to fiat for bill payments?
