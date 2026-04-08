@@ -223,12 +223,15 @@ Each transaction includes one Memo with:
 | MemoType | Trigger | MemoData Example |
 |---|---|---|
 | `fcm/issue` | Currency issuance | `{"currency":"FCMWheat","amount":"1000000"}` |
-| `fcm/trust` | Trust line setup | `{"currency":"FCMWheat"}` |
-| `fcm/mint` | NFT minting | `{"startId":1,"count":50}` |
-| `fcm/nft-transfer` | NFT batch transfer | `{"direction":"issuer-to-vault"}` |
-| `fcm/amm-create` | AMM pool creation | `{"asset1":"FCMWheat","asset2":"FCMGold"}` |
-| `fcm/amm-deposit` | AMM liquidity deposit | `{"asset1":"FCMWheat","amount":"500"}` |
-| `fcm/config` | Account flags/settings | `{"flag":"DefaultRipple","action":"set"}` |
+| `fcm/trust` | Trust line setup | `{"currency":"FCMWheat","limit":"1000000000"}` |
+| `fcm/mint` | NFT minting | `{"id":42,"uri":"https://api.fcmud.world/nft/42"}` |
+| `fcm/nft-transfer` | NFT transfer/offer | `{"direction":"issuer-to-vault","nftId":"000A...B3F4"}` |
+| `fcm/amm-create` | AMM pool creation | `{"asset1":"FCMWheat","asset2":"FCMGold","amount1":"1000","amount2":"500"}` |
+| `fcm/amm-deposit` | AMM liquidity deposit | `{"asset1":"FCMWheat","asset2":"FCMGold","amount1":"100","amount2":"50"}` |
+| `fcm/amm-withdraw` | AMM liquidity withdrawal | `{"asset1":"FCMWheat","asset2":"FCMGold","lpTokens":"100"}` |
+| `fcm/amm-vote` | AMM trading fee vote | `{"asset1":"FCMWheat","asset2":"FCMGold","fee":300}` |
+| `fcm/transfer` | Token/XRP transfer between wallets | `{"asset":"XRP","amount":"10"}` |
+| `fcm/config` | Account flags/settings/admin ops | `{"action":"set","flag":"DefaultRipple"}` |
 
 #### Runtime Operations (Game Server — Ongoing)
 
