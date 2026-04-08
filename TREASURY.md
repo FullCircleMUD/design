@@ -124,9 +124,9 @@ The issuer wallet holds business revenue (after the operating split) in two form
 | **RLUSD** | Liquid cash for near-term operating expenses | 20% |
 | **Tokenized T-Bills** | Short-term yield on idle cash (e.g. OpenEden TBILL on XRPL) | 80% |
 
-> **Fiscal discipline mechanism:** The issuer's treasury position (RLUSD + T-Bills) serves as a constraint against over-issuance of game gold. The issuer can only issue gold when subscription revenue flows in — and that revenue is visibly held and managed on the issuer wallet. If the operator were to issue gold without corresponding revenue, the imbalance would be immediately visible on-chain. This is self-imposed discipline: the issuer's treasury position is the operator's commitment to not debase the in-game currency.
+> **Fiscal discipline mechanism:** The issuer's treasury position (RLUSD + T-Bills) constrains gold issuance — the operator only issues new gold when subscription revenue flows in, preventing arbitrary currency creation. This is purely internal issuance discipline: a self-imposed rule to prevent the operator from debasing the in-game currency through unchecked supply expansion.
 >
-> **These are business treasury assets** — operational funds of the game company. They have no relationship to the *value* of in-game gold, and do not constitute backing, a peg, or a reserve. The discipline is about *issuance restraint*, not price maintenance.
+> **This has no bearing on gold's market price.** If anyone were to create a secondary market in game gold (e.g. a gold/RLUSD pair on the XRPL DEX), gold would trade at a freely floating price determined entirely by market supply and demand — completely unlinked to the issuer's treasury position, the subscription price, or any internal policy parameter. The treasury position does not back, peg, support, or stabilise the price of gold. It exists solely to discipline the operator's issuance behaviour.
 
 ### Rebalancing
 
