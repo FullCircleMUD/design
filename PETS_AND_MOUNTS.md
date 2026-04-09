@@ -386,8 +386,10 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 | Find Familiar spell | **Built** | `world/spells/conjuration/find_familiar.py` |
 | Combat side system | Built | `combat/combat_utils.py` |
 | `DogWearSlot` | Built | Example of non-humanoid wearslots |
-| `cmd_tame` | Stub | Tame wild animal into pet (not yet implemented) |
-| `ANIMAL_HANDLING` skill | Defined | Tame skill |
+| `cmd_tame` | **Built** | Tame wild animal into pet — contested d20 + CHA + mastery vs tame DC |
+| `ANIMAL_HANDLING` skill | Defined | General skill, all classes |
+| `WildMule` | **Built** | Tameable mob POC (Eeyore's Gloomy Place, tame_dc=10, BASIC) |
+| Pet NFTItemTypes | **Built** | Mule, War Dog, Horse seeded in migration |
 
 ---
 
@@ -448,13 +450,21 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 - Creator limit: can't summon new familiar while old one exists (even if transferred)
 - Dismiss gating: only current owner can dismiss, not creator
 
+### Phase 7: Taming ✅
+- `CmdTame` — contested d20 + CHA modifier + mastery bonus vs tame DC
+- `WildMule` tameable mob typeclass (passive, tame_dc=10, BASIC mastery)
+- Taming flow: validate tameable → check mastery → roll → assign_item_type → spawn_pet → auto-follow
+- Pet NFTItemType seed data: Mule, War Dog, Horse in migration
+- POC: WildMule in Eeyore's Gloomy Place (Hundred Acre Wood book zone)
+- Tested end-to-end: tame → follow → book zone recall → library transitions
+
 ### Remaining (Future)
 - `CarryMixin` — mule/horse saddlebags extend carry capacity
 - Flying mounts (wyvern — grants FLY condition)
 - Aquatic mounts (dolphin — grants WATER_BREATHING)
 - Mount wearslots (HorseWearSlot: saddle, bridle, barding)
 - Mounted combat bonuses (lance charge, height advantage)
-- Taming command (ANIMAL_HANDLING skill → wild animal → pet NFT)
+- More tameable animals (wild horse, wolf, hawk — higher mastery tiers)
 - Pet purchase from stable NPCs
 - Pet leveling / XP sharing
 
