@@ -198,7 +198,7 @@ Each multisig wallet (vault, issuer) has 4 associated keys. **Key B and Key C ar
 | **Signer key B** | Shared | Shared | Co-signing service (Render env var) | Second signature. Co-signer validates business rules, signs with B, submits to XRPL. |
 | **Signer key C** | Shared | Shared | Cold storage (offline) | Recovery key. Used with A or B to rotate a compromised key. |
 
-Signer keys A, B, and C must be funded XRPL accounts (1 XRP base reserve) — XRPL requires signer addresses to exist on-chain. Rotating a compromised key: generate a new keypair, fund it, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
+Signer keys A, B, and C do NOT need to be funded XRPL accounts — unfunded keypairs work as signers (only the master private key can sign, since Regular Key and key disable require a funded account). The main account (vault/issuer) needs sufficient XRP to cover its own base reserve plus the owner reserve for the SignerList object. Rotating a compromised key: generate a new keypair, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
 
 The vault/issuer master keys are used once during initial setup (to submit `SignerListSet`), then locked away in cold storage permanently. They remain enabled on-chain as a disaster recovery fallback — if 2+ signer keys are lost, the master key can still authorise transactions. The risk of physical theft from a safe is far lower than the risk of catastrophic key loss.
 
@@ -330,8 +330,7 @@ The multisig architecture with clawback creates a layered defence. Here's the in
 
 **Recovery:**
 2. **Generate a new Key B** keypair.
-3. **Fund the new Key B address** (1 XRP base reserve).
-4. **Update the SignerList on-chain** using Key A + Key C.
+3. **Update the SignerList on-chain** using Key A + Key C.
 5. **Update Render env var** with new Key B seed.
 6. **Restart the co-signing service.**
 
