@@ -189,16 +189,16 @@ For mainnet, no single compromised key should be able to move funds. Both the **
 
 ### Key Architecture
 
-Each multisig wallet (vault, issuer) has 4 associated keys:
+Each multisig wallet (vault, issuer) has 4 associated keys. **Key B and Key C are shared** across both wallets — compromise of either server yields half of both wallets regardless of whether the keys are shared or separate, so sharing reduces key management overhead without weakening security. Key A is unique per wallet since the vault and issuer have different operational contexts (game server vs manager/admin tool).
 
-| Key | Location | Purpose |
-|-----|----------|---------|
-| **Master key** | Deep cold storage (offline, physical safe) | Emergency recovery only. Stays enabled but never touches a server. Last resort if 2+ signer keys are lost. |
-| **Signer key A** | Game server (Railway env var) | First signature. Game server builds transaction and signs with A. |
-| **Signer key B** | Co-signing service (Render env var) | Second signature. Co-signer validates business rules, signs with B, submits to XRPL. |
-| **Signer key C** | Cold storage (offline) | Recovery key. Used with A or B to rotate a compromised key. |
+| Key | Vault | Issuer | Location | Purpose |
+|-----|-------|--------|----------|---------|
+| **Master key** | Vault master | Issuer master | Deep cold storage (offline, physical safe) | Emergency recovery only. Stays enabled but never touches a server. |
+| **Signer key A** | Vault-specific | Issuer-specific | Game server / Manager tool (env var) | First signature. Operational tool builds transaction and signs with A. |
+| **Signer key B** | Shared | Shared | Co-signing service (Render env var) | Second signature. Co-signer validates business rules, signs with B, submits to XRPL. |
+| **Signer key C** | Shared | Shared | Cold storage (offline) | Recovery key. Used with A or B to rotate a compromised key. |
 
-Signer keys A, B, and C are unfunded XRPL addresses — they don't need to exist on-chain or hold any XRP. They're purely signing identities. This means rotating a compromised key costs nothing: generate a new keypair, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
+Signer keys A, B, and C must be funded XRPL accounts (1 XRP base reserve) — XRPL requires signer addresses to exist on-chain. Rotating a compromised key: generate a new keypair, fund it, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
 
 The vault/issuer master keys are used once during initial setup (to submit `SignerListSet`), then locked away in cold storage permanently. They remain enabled on-chain as a disaster recovery fallback — if 2+ signer keys are lost, the master key can still authorise transactions. The risk of physical theft from a safe is far lower than the risk of catastrophic key loss.
 
@@ -300,6 +300,86 @@ The `cosigner` repo includes setup scripts:
 7. **Store master key** in cold storage — it stays enabled on-chain but never online
 
 **The same signing keys work on both testnet and mainnet** — they're just cryptographic keypairs. The `XRPL_NETWORK_URL` environment variable determines which network receives the signed transaction.
+
+### Compromise Recovery Plan
+
+The multisig architecture with clawback creates a layered defence. Here's the incident response plan for each compromise scenario.
+
+#### Scenario 1: Game Server Compromised (Key A Exposed)
+
+**Blast radius:** Attacker has Key A + cosigner API key. They can submit transactions that the cosigner will co-sign — but ONLY transaction types allowed by the cosigner's business rules (Payment, OfferCreate, etc.). They CANNOT change the SignerList, delete the account, or modify account settings.
+
+**Immediate response (minutes):**
+1. **Shut down the co-signing service** on Render (suspend or scale to 0). This instantly kills the attacker's ability to get co-signatures — Key A alone cannot meet quorum.
+2. **Revoke the Railway deployment** — stop the compromised game server.
+
+**Recovery (hours):**
+3. **Rotate the cosigner API key** on Render (new random secret).
+4. **Generate a new Key A** keypair for the affected wallet(s).
+5. **Update the SignerList on-chain** using Key B + Key C (both uncompromised). This replaces the old Key A with the new one.
+6. **Clawback any unauthorized token transfers** using the issuer's master key (from cold storage). Clawback pulls tokens back from any recipient address.
+7. **Deploy clean game server** on Railway with the new Key A seed and new API key.
+8. **Restart the co-signing service** on Render.
+
+#### Scenario 2: Co-Signing Service Compromised (Key B Exposed)
+
+**Blast radius:** Attacker has Key B only. Useless without Key A — they cannot build valid game transactions or meet quorum alone.
+
+**Immediate response:**
+1. **Shut down the co-signing service** on Render.
+
+**Recovery:**
+2. **Generate a new Key B** keypair.
+3. **Fund the new Key B address** (1 XRP base reserve).
+4. **Update the SignerList on-chain** using Key A + Key C.
+5. **Update Render env var** with new Key B seed.
+6. **Restart the co-signing service.**
+
+#### Scenario 3: Both Server and Co-Signer Compromised
+
+**Blast radius:** Attacker has Key A + Key B — they can sign any transaction type the cosigner rules allow. However, they still cannot SignerListSet, AccountDelete, or AccountSet (blocked in cosigner rules).
+
+**Immediate response (seconds matter):**
+1. **Shut down both services immediately** (Render + Railway).
+2. **Retrieve master key from cold storage.**
+3. **Submit a new SignerListSet** using the master key — replace all 3 signer keys with freshly generated ones.
+4. **Clawback any unauthorized transfers** using the issuer's clawback capability.
+5. **Audit on-chain transactions** from the compromise window.
+6. **Deploy fresh services** with new keys and new API secret.
+
+#### Scenario 4: Key Loss (Not Compromise)
+
+| Keys Lost | Recovery Path |
+|-----------|--------------|
+| Key A only | Use B + C to update SignerList with new A |
+| Key B only | Use A + C to update SignerList with new B |
+| Key C only | Use A + B to update SignerList with new C |
+| A + B | Master key from cold storage |
+| A + C | Master key from cold storage |
+| B + C | Master key from cold storage |
+| Master + any 2 | **Unrecoverable** — this is why the master key is stored in a physical safe |
+
+#### Why Clawback Is Essential
+
+The issuer wallet has `asfAllowClawback` enabled (set before any trustlines were created — this is irreversible and cannot be enabled retroactively). This means:
+
+- **Any FCM-issued token** (gold, resources, proxy tokens) can be pulled back from any holder address by the issuer.
+- Even if an attacker manages to transfer tokens to external wallets during a compromise window, the issuer can reclaim them.
+- Clawback is the last line of defence — it makes token theft recoverable even in the worst case.
+- XRP itself cannot be clawed back (native asset), but game tokens are all issuer-controlled.
+
+#### Prevention: What the Cosigner Rules Block
+
+Even with both Key A and Key B, the cosigner's `blocked_tx_types` prevent:
+
+| Blocked Transaction | Why |
+|---|---|
+| `SignerListSet` | Cannot change who can sign — attacker can't lock out the operator |
+| `AccountDelete` | Cannot destroy the wallet |
+| `SetRegularKey` | Cannot add a backdoor signing key |
+| `AccountSet` | Cannot change wallet flags (e.g. disable clawback... though that's already irreversible) |
+
+These rules are enforced server-side in the cosigner before co-signing. An attacker with Key A cannot bypass them without also compromising the cosigner's code on Render.
 
 ---
 
@@ -451,7 +531,7 @@ The bucket is public-read so XRPL marketplaces and wallets can resolve images di
 
 ### Endpoints
 
-- `GET /nft/{uri_id}` — XLS-24d compliant JSON metadata for XRPL marketplace resolution
+- `GET /{uri_id}` — XLS-24d compliant JSON metadata for XRPL marketplace resolution
 - `GET /health` — health check (includes `environment` and `db_configured` fields)
 
 ### XLS-24d Compliance
