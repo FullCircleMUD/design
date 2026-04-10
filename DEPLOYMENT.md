@@ -164,7 +164,7 @@ Railway lets you set environment variables per environment. The game needs:
 | `XRPL_VAULT_WALLET_SEED` | Vault signer key A for server-signed transactions | You | Single-sig: vault master seed. Multisig: signer key A's seed. See [Vault Signing & Multisig](#vault-signing--multisig) |
 | `XRPL_MULTISIG_ENABLED` | Enable multisig co-signing flow | You | `true` or `false`. When false, single-sig flow unchanged |
 | `XRPL_COSIGNER_URL` | Co-signing service URL | You | Only when multisig enabled. e.g. `https://cosigner-xxxx.onrender.com` |
-| `XRPL_COSIGNER_API_KEY` | Co-signer API authentication key | You | Shared secret between game server and co-signer |
+| `XRPL_COSIGNER_API_KEY` | Co-signer API authentication key | You | Production key: co-signs and submits to XRPL. Dev environments use the co-signer's `DEV_API_KEY` which runs the full pipeline but skips XRPL submission |
 | `XRPL_ROOT_ADDRESS` | Dev/superuser wallet address | You | |
 | `XAMAN_API_KEY` | Xaman wallet API key | You | |
 | `XAMAN_API_SECRET` | Xaman wallet API secret | You | |
@@ -240,7 +240,9 @@ Game Server (Railway)                Co-Signing Service (Render)
 The co-signing service (`FullCircleMUD/cosigner` repo) is a standalone FastAPI app deployed on **Render** (separate provider from the game server on Railway). It is **multi-wallet capable** — it can hold signing keys for any number of XRPL accounts with per-wallet business rules. Adding a new wallet = add a JSON config entry + set an env var.
 
 **Endpoints:**
-- `POST /cosign` — co-sign and submit a partially-signed XRPL transaction (requires `X-API-Key` header)
+- `POST /cosign` — co-sign and submit a partially-signed XRPL transaction (requires `X-API-Key` header). Supports two API keys:
+  - **Production key** (`API_KEY`) — full pipeline + XRPL submission
+  - **Dev key** (`DEV_API_KEY`) — full pipeline (deserialise, validate, sign, combine) but skips XRPL submission, returning a mock success. Non-sensitive — if compromised, cannot authorise real transactions
 - `GET /health` — health check (no auth)
 
 **Per-wallet business rules** (configured in `wallets.json`):
@@ -279,7 +281,7 @@ When `XRPL_MULTISIG_ENABLED=false` (default), existing single-sig flow is unchan
 |----------|---------|
 | `XRPL_MULTISIG_ENABLED` | Feature flag (`true`/`false`) |
 | `XRPL_COSIGNER_URL` | Co-signer service URL (e.g. `https://cosigner-xxxx.onrender.com`) |
-| `XRPL_COSIGNER_API_KEY` | Shared secret for co-signer authentication |
+| `XRPL_COSIGNER_API_KEY` | Co-signer API key. Production uses the production key; dev/staging uses the `DEV_API_KEY` (no-op on-chain) |
 
 `XRPL_VAULT_WALLET_SEED` stays as-is — when multisig is enabled it becomes key A's seed.
 
