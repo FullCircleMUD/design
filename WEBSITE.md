@@ -102,6 +102,16 @@ Placeholder page stating FullCircleMUD does not offer gold redemption. URL route
 
 Placeholder page. No jurisdictional eligibility framework exists. URL route retained to avoid broken links.
 
+### Xaman Wallet Setup
+
+| Field | Value |
+|---|---|
+| URL | `/xaman/` |
+| Template | `xaman.html` |
+| Status | Built |
+
+Wallet setup guide: install Xaman, create wallet, link to game account. No financial product language.
+
 ### Documentation
 
 | Field | Value |
@@ -156,6 +166,7 @@ The following pages were planned under the previous compliance model and are no 
 | Privacy | `web/templates/website/privacy.html` |
 | Eligible Jurisdictions | `web/templates/website/eligible_jurisdictions.html` |
 | Redemption | `web/templates/website/redemption.html` |
+| Xaman | `web/templates/website/xaman.html` |
 | Docs (index) | `web/templates/website/docs.html` |
 | Docs (gameplay) | `web/templates/website/docs_gameplay.html` |
 | Docs (blockchain) | `web/templates/website/docs_blockchain.html` |

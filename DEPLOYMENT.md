@@ -160,7 +160,7 @@ Railway lets you set environment variables per environment. The game needs:
 |----------|---------|--------|-------|
 | `DATABASE_URL` | PostgreSQL connection string | Railway (automatic) | Auto-set when you add the PostgreSQL plugin. Controls the SQLite/PostgreSQL toggle — see [DATABASE.md § How the Toggle Works](DATABASE.md#how-the-toggle-works) |
 | `SECRET_KEY` | Django secret key for cryptographic signing | You | Generate a random string per environment |
-| `XRPL_NETWORK_URL` | XRPL websocket endpoint | You | Testnet: `wss://s.altnet.rippletest.net:51233` (default if not set). Mainnet: `wss://s1.ripple.com:51233`. Only production needs this set — staging and local dev use the testnet default |
+| `XRPL_NETWORK_URL` | XRPL websocket endpoint | You | Default: `wss://s1.ripple.com:51233` (mainnet). Override via env var if needed |
 | `XRPL_VAULT_WALLET_SEED` | Vault signer key A for server-signed transactions | You | Single-sig: vault master seed. Multisig: signer key A's seed. See [Vault Signing & Multisig](#vault-signing--multisig) |
 | `XRPL_MULTISIG_ENABLED` | Enable multisig co-signing flow | You | `true` or `false`. When false, single-sig flow unchanged |
 | `XRPL_COSIGNER_URL` | Co-signing service URL | You | Only when multisig enabled. e.g. `https://cosigner-xxxx.onrender.com` |
@@ -173,15 +173,15 @@ Railway lets you set environment variables per environment. The game needs:
 
 Locally, these secrets live in `server/conf/secret_settings.py` (not in Git). On Railway, they're environment variables — same values, different delivery mechanism. The `settings.py` file handles both: it tries to import `secret_settings.py` (local), and environment variables can override via Railway's injection.
 
-**Staging and production should use different API keys and wallet addresses.** Staging points at XRPL testnet. Production points at mainnet (when ready). Complete isolation.
+**Staging and production should use different API keys and wallet addresses.** Complete isolation.
 
 ---
 
 ## Vault Signing & Multisig
 
-### Current State (Testnet / Staging)
+### Current State (Single-Sig)
 
-The game server holds `XRPL_VAULT_WALLET_SEED` — a single key with full signing authority over the vault wallet. This is acceptable for testnet where the tokens have no real value.
+The game server holds `XRPL_VAULT_WALLET_SEED` — a single key with full signing authority over the vault wallet. This is the initial configuration before multisig is set up.
 
 ### Production Requirement (Mainnet)
 
@@ -289,17 +289,14 @@ The `cosigner` repo includes setup scripts:
 - `setup/generate_keys.py` — generate XRPL keypairs for signer keys A, B, C
 - `setup/configure_signerlist.py` — submit `SignerListSet` on any XRPL account (set, verify, or remove)
 
-### Migration Path (Testnet → Mainnet)
+### Migration Path (Single-Sig → Multisig)
 
 1. **Generate keypairs** — 3 keys per wallet (A, B, C) using `generate_keys.py`
-2. **Configure SignerList** on testnet — `configure_signerlist.py` with vault's master key
+2. **Configure SignerList** — `configure_signerlist.py` with vault's master key
 3. **Deploy co-signer** to Render with key B's seed
 4. **Enable multisig** on game server — set `XRPL_MULTISIG_ENABLED=true` + cosigner URL/key
-5. **Test on testnet** — verify shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
-6. **Repeat for mainnet** — same keys work on both networks (only `XRPL_NETWORK_URL` changes)
-7. **Store master key** in cold storage — it stays enabled on-chain but never online
-
-**The same signing keys work on both testnet and mainnet** — they're just cryptographic keypairs. The `XRPL_NETWORK_URL` environment variable determines which network receives the signed transaction.
+5. **Verify** — confirm shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
+6. **Store master key** in cold storage — it stays enabled on-chain but never online
 
 ### Compromise Recovery Plan
 
@@ -423,53 +420,6 @@ Railway provides a shell into the running service. Use it for things like:
 
 ---
 
-## Testnet Reinit (After XRPL Testnet Wipe)
-
-XRPL testnet is periodically wiped by Ripple (~every 90 days). All on-chain state is destroyed: accounts, trust lines, token balances, NFTs, AMM pools. The game DB is unaffected — it's the source of truth. With import/export disabled during alpha, the ledger is purely a settlement layer and player wallets are just identity credentials (Xaman signing).
-
-The `testnet_reinit` management command rebuilds the entire XRPL testnet state from the game DB.
-
-### Usage
-
-```bash
-cd EvenniaFCM/FullCircleMUD
-source ../venv/bin/activate
-evennia testnet_reinit --settings settings --issuer-seed sEdXXX
-```
-
-Flags: `--dry-run`, `--skip-amm`, `--skip-nfts`, `--force` (skip confirmation).
-
-### What It Does (8 Phases)
-
-1. **Pre-flight** — verify IS_TESTNET, validate seeds match settings addresses, check wipe state
-2. **Fund wallets** — issuer, vault, FakeRLUSD issuer via testnet faucet HTTP API
-3. **Configure issuer** — DefaultRipple, AllowTrustLineClawback, set vault as NFT minter
-4. **Trust lines** — vault→issuer for all CurrencyType rows; issuer→FakeRLUSD issuer for subscription currency
-5. **Issue fungible supply** — for each currency, SUM(FungibleGameState.balance) → Payment from issuer to vault
-6. **Create AMM pools** — resource pools (FCMResource/FCMGold) using last ResourceSnapshot prices, proxy token pools (PGold/proxy), all at **0% LP fee**
-7. **Mint & reassign NFTs** — re-mint all NFTGameState rows with same uri_id, **5% royalty**, transfer to vault, update nftoken_id in game DB
-8. **Cleanup** — mark orphaned XRPLTransactionLog entries
-
-### What Players Experience
-
-- **During reinit:** Game offline (stop server before running, start after)
-- **After reinit:** Everything works as before. All progress intact.
-- **Subscribed players:** On next `subscribe`, prompted to re-sign FakeRLUSD trust line (existing flow handles this — the script cannot sign on behalf of players)
-
-### Design Decisions
-
-- **Issuer seed as argument** — not in Django settings (only the address is). Passed via `--issuer-seed` to keep out of persistent config.
-- **0% AMM LP fee** — standardised on reinit regardless of pre-wipe fee
-- **5% NFT royalty** — standardised on reinit regardless of pre-wipe transfer fee
-- **AMM price recovery** — resource pools use last `ResourceSnapshot.amm_buy_price` to preserve market prices across wipes
-- **Idempotent phases** — trust lines and token issuance are safe to re-run; AMM creation catches "already exists" errors; NFT minting tracks progress via nftoken_id updates
-
-### File
-
-`src/game/blockchain/xrpl/management/commands/testnet_reinit.py`
-
----
-
 ## NFT Metadata API (Separate Service)
 
 ### Why a Separate Service?
@@ -486,7 +436,7 @@ A single API instance serves both staging and production by routing on the reque
 ┌──────────────────┐                    ┌──────────────────┐
 │  Staging         │                    │  Production      │
 │  PostgreSQL      │                    │  PostgreSQL      │
-│  (XRPL Testnet)  │                    │  (XRPL Mainnet)  │
+│  (XRPL Mainnet)  │                    │  (XRPL Mainnet)  │
 └────┬─────────────┘                    └─────────────┬────┘
      │                                                │
      ▼                                                ▼

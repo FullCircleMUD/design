@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Players need an active subscription to play FullCircleMUD. Payment is entirely in-game via XRPL Xaman wallet — no Stripe, no web portal. The system works identically on testnet (FakeRLUSD) and mainnet (RLUSD) — only the currency code and issuer address change via settings.
+Players need an active subscription to play FullCircleMUD. Payment is entirely in-game via XRPL Xaman wallet — no Stripe, no web portal. The subscription system is controlled by the `SUBSCRIPTION_ENABLED` setting — when disabled (default during pre-alpha), all players have free access.
 
 ---
 
@@ -21,7 +21,6 @@ Players need an active subscription to play FullCircleMUD. Payment is entirely i
 - [OOC Menu Display](#ooc-menu-display)
 - [Trial Period](#trial-period)
 - [Configuration](#configuration)
-- [Testnet vs Mainnet](#testnet-vs-mainnet)
 - [Files](#files)
 - [Tests](#tests)
 
@@ -29,10 +28,12 @@ Players need an active subscription to play FullCircleMUD. Payment is entirely i
 
 ## Overview
 
-- Monthly subscription at $20 USD (price stored in DB, adjustable without code changes)
-- Payment via XRPL issued currency (RLUSD mainnet, FakeRLUSD testnet)
+- Monthly subscription paid in RLUSD via XRPL (price stored in DB, adjustable without code changes)
+- Staged pricing by development phase:
+  - **Pre-Alpha:** Free — `SUBSCRIPTION_ENABLED=false`, no payment required
+  - **Alpha:** 2 RLUSD/month — covers hosting and LLM costs
+  - **Beta / Full Release:** 20 RLUSD/month — full subscription
 - Payment destination: the issuer wallet (`XRPL_ISSUER_ADDRESS`)
-- On testnet: FakeRLUSD issued by a 3rd wallet (not issuer, not vault) to simulate receiving payment in an externally-issued token
 - Subscription expiry stored on the Account typeclass as an `AttributeProperty`
 - Payment records stored in separate `subscriptions` database (4th database)
 - Replay protection via unique `tx_hash` constraint on payment records
@@ -88,7 +89,7 @@ Every payment transaction, for audit and replay protection.
 | `wallet_address` | CharField(50) | Paying wallet |
 | `plan_key` | CharField(30) | "monthly" |
 | `amount` | DecimalField(10,2) | Actual amount paid |
-| `currency_code` | CharField(40) | "RLUSD" or "FakeRLUSD" |
+| `currency_code` | CharField(40) | "RLUSD" |
 | `tx_hash` | CharField(64), unique | XRPL tx hash (replay protection) |
 | `old_expiry` | DateTimeField, nullable | Expiry before this payment |
 | `new_expiry` | DateTimeField | Expiry after this payment |
@@ -188,26 +189,14 @@ All subscription settings in `server/conf/settings.py`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `SUBSCRIPTION_CURRENCY_CODE` | `"FakeRLUSD"` | Currency for subscription payments |
+| `SUBSCRIPTION_ENABLED` | `False` (env var) | Master toggle — when off, all players have free access |
+| `SUBSCRIPTION_CURRENCY_CODE` | `"RLUSD"` | Currency for subscription payments |
 | `SUBSCRIPTION_CURRENCY_ISSUER` | `""` (env var) | XRPL issuer address for the currency |
 | `SUBSCRIPTION_PAYMENT_DESTINATION` | `XRPL_ISSUER_ADDRESS` | Wallet receiving payments |
 | `SUBSCRIPTION_TRIAL_HOURS` | `48` | Free trial period for new accounts |
 | `SUBSCRIPTION_BYPASS_SUPERUSER` | `True` | Superusers skip subscription checks |
 
-Currency code and issuer are environment-variable driven so testnet/mainnet switch requires no code changes.
-
----
-
-## Testnet vs Mainnet
-
-| | Testnet | Mainnet |
-|---|---------|---------|
-| Currency | FakeRLUSD | RLUSD |
-| Issuer | 3rd test wallet | Real RLUSD issuer |
-| Destination | Issuer wallet | Issuer wallet |
-| Trust lines | Issuer wallet trusts 3rd wallet's FakeRLUSD | Standard RLUSD trust |
-
-The 3rd test wallet issues FakeRLUSD to simulate an externally-issued token. The issuer wallet (payment destination) must have trust lines set up to receive it. This mirrors mainnet where RLUSD is issued by a real external party.
+Currency code and issuer are environment-variable driven.
 
 ---
 
@@ -247,6 +236,6 @@ evennia test --settings settings tests.command_tests.test_subscription_gating
 evennia test --settings settings tests.command_tests.test_cmd_subscribe
 ```
 
-- **test_subscription_utils** (17 tests) — is_subscribed, get_subscription_status, extend_subscription, grant_trial
-- **test_subscription_gating** (10 tests) — ic, charcreate, chardelete, import blocked when expired, allowed when subscribed/superuser
-- **test_cmd_subscribe** (4 tests) — early-return paths (no wallet, exempt, status display)
+- **test_subscription_utils** (22 tests) — is_subscribed, get_subscription_status, extend_subscription, grant_trial, feature flag disabled behaviour
+- **test_subscription_gating** (13 tests) — ic, charcreate, chardelete, import blocked when expired, allowed when subscribed/superuser, bypass when disabled
+- **test_cmd_subscribe** (5 tests) — early-return paths (no wallet, exempt, status display, disabled message)

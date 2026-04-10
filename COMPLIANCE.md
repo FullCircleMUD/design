@@ -14,7 +14,7 @@ The compliance strategy rests on two pillars:
 
 2. **Blockchain as Database.** The XRPL is FullCircleMUD's database layer. Issuing tokens on XRPL is the implementation mechanism for the game's item and currency systems. The entity's participation in AMM pools is game economy infrastructure — the equivalent of stocking NPC vendor inventories and setting shop prices — not financial market-making.
 
-Compliance obligations are triggered by the enabling of token export on XRPL mainnet. Pre-alpha and alpha deployments — whether on XRPL testnet or on XRPL mainnet with token export disabled (closed-loop model) — are not subject to the obligations described herein.
+Compliance obligations are triggered by the enabling of token export on XRPL mainnet. Pre-alpha and alpha deployments on XRPL mainnet with token export disabled (closed-loop model) are not subject to the obligations described herein.
 
 > **Authoritative document:** The full compliance strategy with legal analysis, risk mitigation, internal economy management policy, and language policy is maintained in `ops/COMPLIANCE_LEGAL.md`. This design document is a summary for developers working on the game.
 
@@ -89,7 +89,7 @@ The Terms of Service cover the following areas. Specific wording to be finalised
 - **Trading on External Protocols** — XRPL DEX/AMM is protocol-native, not operated by FullCircleMUD; player trades at own risk
 - **Game Economy Management** — entity manages economy at its discretion; game operations, not financial services
 - **Issuer Clawback Authority** — entity retains clawback for game integrity (exploits, fraud, ToS violations); does not negate ownership; consistent with standard XRPL issuer practice
-- **Alpha and Testnet Phases** — closed system during alpha; no export; no entitlement to monetary value
+- **Alpha and Pre-Export Phases** — closed system during alpha; no export; no entitlement to monetary value
 
 See `design/WEBSITE.md` § Terms of Service for page status.
 
@@ -117,17 +117,16 @@ See `ops/COMPLIANCE_LEGAL.md` §12 for report framing and the repository disclai
 
 ---
 
-## Testnet/Alpha Strategy
+## Development Phase Strategy
 
 | Phase | Infrastructure | Token Export | Compliance Obligations |
 |---|---|---|---|
-| Pre-Alpha | XRPL testnet | N/A | None |
-| Alpha (testnet) | XRPL testnet | N/A | None |
-| Alpha (mainnet) | XRPL mainnet, export locked | Disabled — closed loop | Minimal |
+| Pre-Alpha | XRPL mainnet, export locked | Disabled — closed loop | None |
+| Alpha | XRPL mainnet, export locked | Disabled — closed loop | Minimal — see `ops/COMPLIANCE_LEGAL.md` §10.3 |
 | Pre-Mainnet | Transition period | Disabled | Review compliance framework with counsel; prepare website copy; establish entity structure |
 | Mainnet Launch | XRPL mainnet, full economy | Enabled | All obligations active |
 
-Alpha may deploy on XRPL mainnet with token export disabled due to testnet instability. Under this closed-loop model, all tokens are held in the game's vault wallet — no player holds tokens outside the game, no one can interact with AMM pools externally, and the game economy is functionally identical to a traditional MMO's internal economy. The issuer wallet has `lsfAllowClawback` enabled, so any tokens that appear outside the vault are provably illegitimate and can be clawed back. This maintains the same legal defensibility as testnet operation.
+All development phases deploy on XRPL mainnet with token export disabled (closed-loop model). All tokens are held in the game's vault wallet — no player holds tokens outside the game, no one can interact with AMM pools externally, and the game economy is functionally identical to a traditional MMO's internal economy. The issuer wallet has `lsfAllowClawback` enabled, so any tokens that appear outside the vault are provably illegitimate and can be clawed back.
 
 See `ops/COMPLIANCE_LEGAL.md` §10.3 for the full closed-loop analysis.
 
