@@ -11,10 +11,15 @@
 - [Branching Strategy](#branching-strategy)
 - [How Code Gets Deployed](#how-code-gets-deployed)
 - [Railway Configuration](#railway-configuration)
+- [Setting Up a New Railway Project from Scratch](#setting-up-a-new-railway-project-from-scratch)
 - [Environment Variables](#environment-variables)
+- [Database & Migrations on Railway](#database--migrations-on-railway)
+- [Networking & Domain Setup](#networking--domain-setup)
 - [Vault Signing & Multisig](#vault-signing--multisig)
 - [GitHub Actions CI](#github-actions-ci)
 - [Common Scenarios](#common-scenarios)
+- [NFT Metadata API (Separate Service)](#nft-metadata-api-separate-service)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -57,38 +62,35 @@ Each Railway **environment** (staging, production) is completely isolated:
 
 ```
 main                    ← production deploys from here
- └── staging            ← staging deploys from here
+ └── dev                ← development branch, merge to main when ready
       └── feature/*     ← your working branches
 ```
 
 ### Rules
 
-- **Never push directly to `main` or `staging`.** Always use Pull Requests.
-- **`main` is production.** It should always be stable. Only merge from `staging` after testing.
-- **`staging` is the proving ground.** Merge feature branches here. Test with real PostgreSQL. Break things safely.
-- **Feature branches** are where development happens. Branch from `staging`, PR back into `staging`.
+- **`main` is production.** It should always be stable. Only merge from `dev` after testing.
+- **`dev` is the working branch.** Develop here or on feature branches. Merge to `main` when ready to deploy.
+- **Feature branches** are where development happens. Branch from `dev`, PR back into `dev`.
 
 ### Typical workflow
 
 ```
-git checkout staging
+git checkout dev
 git pull
 git checkout -b feature/new-spell
 
 # ... develop, test locally with SQLite ...
 
 git push -u origin feature/new-spell
-# Open PR: feature/new-spell → staging
-# GitHub Actions runs tests
-# Merge when green
-
-# Railway auto-deploys staging
-# Test on staging server
+# Open PR: feature/new-spell → dev
+# Merge when ready
 
 # When ready for production:
-# Open PR: staging → main
-# Merge
+git checkout main
+git merge dev
+git push origin main
 # Railway auto-deploys production
+git checkout dev
 ```
 
 ---
@@ -97,83 +99,275 @@ git push -u origin feature/new-spell
 
 ### The flow
 
-1. **You develop locally** on a feature branch. SQLite, fast iteration, no infrastructure needed.
+1. **You develop locally** on a feature branch or `dev`. SQLite, fast iteration, no infrastructure needed.
 
-2. **You open a Pull Request into `staging`.** GitHub Actions runs the test suite automatically. If tests fail, the PR is blocked.
+2. **You merge to `main`.** Railway sees the new commit and automatically:
+   - Builds the application (Nixpacks)
+   - Starts the container
+   - Runs `deploy_migrate.py` (database migrations)
+   - Starts the Evennia game server
 
-3. **PR merges into `staging`.** Railway sees the new commit on the `staging` branch and automatically:
-   - Builds the application
-   - Runs the **release command** (database migrations)
-   - Restarts the game server with the new code
-
-4. **You test on staging.** Real PostgreSQL, real Evennia server. Verify everything works as expected.
-
-5. **You open a Pull Request from `staging` into `main`.** Same review process.
-
-6. **PR merges into `main`.** Railway deploys to production using the same build → migrate → start sequence.
+3. **Migrations are incremental.** Django only applies new migrations — existing data is preserved. The `deploy_migrate.py` script handles this automatically.
 
 ### What Railway does on every deploy
 
-Railway runs two commands in sequence, configured in `railway.toml`:
-
-```toml
-[deploy]
-releaseCommand = "evennia migrate && evennia migrate --database xrpl && evennia migrate --database ai_memory"
-startCommand = "evennia start -l"
-```
-
-- **Release command** runs first — applies any pending database migrations. If there are none, it finishes in under a second and moves on. Django tracks which migrations have already been applied and only runs new ones. This is safe to run on every deploy. For details on how migrations work, see [DATABASE.md § How Database Migrations Work](DATABASE.md#how-database-migrations-work).
-- **Start command** runs second — starts the Evennia game server. The `-l` flag keeps it in the foreground (Railway requires this — if the process backgrounds itself, Railway thinks it crashed).
-
----
-
-## Railway Configuration
-
-### Setting up a new environment
-
-1. **Create a Railway project** and connect it to the GitHub repository (`src/game/`)
-2. **Add a PostgreSQL plugin** — Railway provisions a database and automatically injects `DATABASE_URL` into the environment
-3. **Set the deploy branch** — `staging` for the staging environment, `main` for production
-4. **Add other environment variables** — secrets that the game needs (see below)
-5. **Deploy** — Railway builds, runs migrations, starts the server
-
-### railway.toml
-
-This file lives in the repo root and tells Railway how to build and run the application:
+Railway runs the `startCommand` from `railway.toml`:
 
 ```toml
 [build]
 builder = "nixpacks"
 
 [deploy]
-releaseCommand = "evennia migrate && evennia migrate --database xrpl && evennia migrate --database ai_memory"
-startCommand = "evennia start -l"
+startCommand = "python deploy_migrate.py && evennia start -l"
 ```
+
+- **`deploy_migrate.py`** runs first — installs pgvector extension, then applies any pending database migrations. If there are none, it finishes in under a second and moves on. Django tracks which migrations have already been applied and only runs new ones.
+- **`evennia start -l`** runs second — starts the Evennia game server. The `-l` flag keeps it in the foreground (Railway requires this — if the process backgrounds itself, Railway thinks it crashed).
+
+### deploy_migrate.py
+
+This script exists because Evennia's built-in `evennia migrate` command doesn't reliably pick up `DATABASE_URL` for all database aliases on Railway. The script:
+
+1. Sets up Django directly (bypassing Evennia's launcher)
+2. Installs the pgvector extension (required by ai_memory models) using autocommit to avoid transaction locks
+3. Runs `manage.py migrate` with verbosity output
+4. Catches and logs migration errors gracefully so the server can still start
+
+---
+
+## Railway Configuration
+
+### railway.toml
+
+This file lives in the game repo root and tells Railway how to build and run the application:
+
+```toml
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python deploy_migrate.py && evennia start -l"
+```
+
+**Important:** Do NOT use `releaseCommand` — it runs in a separate context where environment variables may not be available. All migration logic is in `startCommand` via `deploy_migrate.py`.
+
+---
+
+## Setting Up a New Railway Project from Scratch
+
+This is the complete procedure to deploy FullCircleMUD to a fresh Railway project with zero manual database intervention.
+
+### Step 1: Create the Railway project
+
+1. Create a new project on Railway
+2. Connect it to the GitHub repository (`FullCircleMUD/game`)
+3. Set the deploy branch to `main`
+
+### Step 2: Add PostgreSQL
+
+1. Add a **PostgreSQL** plugin to the project
+2. Railway provisions a database and creates connection variables automatically
+3. Ensure a **volume** is attached to the Postgres service with mount path `/var/lib/postgresql/data` (Railway should do this automatically, but verify)
+
+### Step 3: Set environment variables on the GAME SERVICE
+
+**CRITICAL:** All variables must be set on the **game service**, not as shared variables. Shared variable references (`${{Postgres.DATABASE_URL}}`) do not reliably resolve on Railway.
+
+Set `DATABASE_URL` as a service variable on the game service with value `${{Postgres.DATABASE_URL}}`. Verify it resolves to an actual connection string (not empty). If it shows empty, paste the actual connection string from the Postgres service's Variables tab (`DATABASE_URL` — the private/internal one).
+
+Set all other required variables (see [Environment Variables](#environment-variables) below).
+
+### Step 4: Configure networking
+
+1. **Game service** > **Settings** > **Networking**
+2. Set port to **8080**
+3. **Generate a Railway domain** (e.g. `game-production-xxxx.up.railway.app`) — this is needed for websocket routing
+4. **Add custom domain** `fcmud.world` (or your domain)
+5. Update DNS:
+   - `CNAME @ → <railway-provided-target>.up.railway.app`
+   - `TXT _railway-verify → <verification-string>`
+6. Set `WEBSOCKET_CLIENT_URL` environment variable to `wss://<railway-domain>.up.railway.app/ws`
+
+### Step 5: Deploy
+
+Push to `main` or trigger a manual deploy. The deployment will:
+1. Build the container
+2. Install pgvector extension
+3. Run all migrations from scratch (creates all 58 tables)
+4. Create the superuser (from `EVENNIA_SUPERUSER_USERNAME`/`EVENNIA_SUPERUSER_PASSWORD` env vars)
+5. Start the game server
+
+No manual SQL required. No manual database intervention.
+
+### Step 6: Verify
+
+- Access `https://fcmud.world` — should show the Evennia web client
+- Access `https://<railway-domain>.up.railway.app` — should also work
+- Check Postgres Database tab — should show ~58 tables
+- Connect to the game and verify the superuser account works
 
 ---
 
 ## Environment Variables
 
-Railway lets you set environment variables per environment. The game needs:
+All variables are set on the **game service** (not shared variables).
 
-| Variable | Purpose | Set by | Notes |
-|----------|---------|--------|-------|
-| `DATABASE_URL` | PostgreSQL connection string | Railway (automatic) | Auto-set when you add the PostgreSQL plugin. Controls the SQLite/PostgreSQL toggle — see [DATABASE.md § How the Toggle Works](DATABASE.md#how-the-toggle-works) |
-| `SECRET_KEY` | Django secret key for cryptographic signing | You | Generate a random string per environment |
-| `XRPL_NETWORK_URL` | XRPL websocket endpoint | You | Default: `wss://s1.ripple.com:51233` (mainnet). Override via env var if needed |
-| `XRPL_VAULT_WALLET_SEED` | Vault signer key A for server-signed transactions | You | Single-sig: vault master seed. Multisig: signer key A's seed. See [Vault Signing & Multisig](#vault-signing--multisig) |
-| `XRPL_MULTISIG_ENABLED` | Enable multisig co-signing flow | You | `true` or `false`. When false, single-sig flow unchanged |
-| `XRPL_COSIGNER_URL` | Co-signing service URL | You | Only when multisig enabled. e.g. `https://cosigner-xxxx.onrender.com` |
-| `XRPL_COSIGNER_API_KEY` | Co-signer API authentication key | You | Production key: co-signs and submits to XRPL. Dev environments use the co-signer's `DEV_API_KEY` which runs the full pipeline but skips XRPL submission |
-| `XRPL_ROOT_ADDRESS` | Dev/superuser wallet address | You | |
-| `XAMAN_API_KEY` | Xaman wallet API key | You | |
-| `XAMAN_API_SECRET` | Xaman wallet API secret | You | |
-| `LLM_API_KEY` | OpenRouter API key for LLM NPCs | You | |
-| `LLM_EMBEDDING_API_KEY` | OpenAI API key for embeddings | You | |
+### Required
 
-Locally, these secrets live in `server/conf/secret_settings.py` (not in Git). On Railway, they're environment variables — same values, different delivery mechanism. The `settings.py` file handles both: it tries to import `secret_settings.py` (local), and environment variables can override via Railway's injection.
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | `${{Postgres.DATABASE_URL}}` or paste actual string |
+| `SECRET_KEY` | Django cryptographic signing key | Random string, unique per environment |
+| `EVENNIA_SUPERUSER_USERNAME` | Auto-creates superuser on first boot | `admin` |
+| `EVENNIA_SUPERUSER_PASSWORD` | Superuser password | Strong password |
+| `DEFAULT_ACCOUNT_PASSWORD` | Default password for new player accounts | |
 
-**Staging and production should use different API keys and wallet addresses.** Complete isolation.
+### XRPL / Blockchain
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `XRPL_NETWORK_URL` | XRPL websocket endpoint | `wss://xrplcluster.com` (mainnet) |
+| `XRPL_ISSUER_ADDRESS` | Game token issuer wallet address | |
+| `XRPL_VAULT_ADDRESS` | Vault wallet address | |
+| `XRPL_VAULT_WALLET_SEED` | Vault signer key (single-sig: master seed, multisig: key A) | |
+| `XRPL_IMPORT_EXPORT_ENABLED` | Enable player import/export | `true` or `false` |
+| `SUPERUSER_XRPL_WALLET_ADDRESS` | Dev/superuser wallet address | |
+
+### Multisig (when enabled)
+
+| Variable | Purpose |
+|----------|---------|
+| `XRPL_MULTISIG_ENABLED` | Enable multisig flow (`true`/`false`) |
+| `XRPL_COSIGNER_URL` | Co-signing service URL |
+| `XRPL_COSIGNER_API_KEY` | Co-signer API key |
+
+### Xaman Wallet
+
+| Variable | Purpose |
+|----------|---------|
+| `XAMAN_API_KEY` | Xaman wallet API key |
+| `XAMAN_API_SECRET` | Xaman wallet API secret |
+
+### Subscriptions
+
+| Variable | Purpose |
+|----------|---------|
+| `SUBSCRIPTION_ENABLED` | Enable subscription system (`true`/`false`) |
+| `SUBSCRIPTION_CURRENCY_CODE` | Payment currency (default: `RLUSD`) |
+| `SUBSCRIPTION_CURRENCY_ISSUER` | Issuer of subscription currency |
+
+### LLM / AI
+
+| Variable | Purpose |
+|----------|---------|
+| `LLM_API_KEY` | OpenRouter API key for NPC conversations |
+| `LLM_EMBEDDING_API_KEY` | OpenAI API key for embeddings |
+
+### Bot Testing
+
+| Variable | Purpose | Format |
+|----------|---------|--------|
+| `BOT_LOGIN_ENABLED` | Enable bot login | `true` or `false` |
+| `BOT_ACCOUNT_USERNAMES_JSON` | Bot usernames | `["billy","bianca"]` |
+| `BOT_WALLET_ADDRESSES_JSON` | Bot wallet addresses | `{"billy":"rAddr1","bianca":"rAddr2"}` (valid JSON, no trailing commas) |
+| `BOT_DEFAULT_PASSWORD` | Default bot password | |
+| `BOT_PASSWORDS_JSON` | Per-bot passwords | `{"billy":"pw1","bianca":"pw2"}` |
+
+### Networking
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `WEBSOCKET_CLIENT_URL` | Websocket URL for web client | `wss://game-production-xxxx.up.railway.app/ws` |
+
+### Auto-set by Railway (do NOT set manually)
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | Railway's dynamic port assignment — Evennia reads this automatically |
+
+---
+
+## Database & Migrations on Railway
+
+### How it works
+
+Locally, the game uses 4 separate SQLite databases (default, xrpl, ai_memory, subscriptions) with database routers directing queries to the correct file. On Railway, all 4 aliases point to the **same** PostgreSQL instance. The database routers are **automatically disabled** when `DATABASE_URL` is set, since they're unnecessary (and harmful) when all aliases share one database.
+
+This means:
+- A single `migrate` command creates all tables in one Postgres instance
+- No need for `--database xrpl` or `--database ai_memory` flags on Railway
+- Locally, `evennia migrate` + `evennia migrate --database xrpl` etc. still works as before
+
+### deploy_migrate.py
+
+The `deploy_migrate.py` script handles all migration logic on Railway:
+
+```python
+# 1. Install pgvector extension (autocommit to avoid transaction locks)
+# 2. Run django migrate (single call, no routers, all apps)
+# 3. Catch errors gracefully so server can still start
+```
+
+**Why not use `evennia migrate`?** Evennia's launcher has its own database initialization path that doesn't reliably pick up `DATABASE_URL` for custom database aliases. By using Django directly (`call_command("migrate")`), we ensure all migrations run against Postgres.
+
+### pgvector
+
+The `ai_memory` app uses pgvector for embedding-based semantic search. The pgvector extension must be installed before migrations that create vector columns. `deploy_migrate.py` handles this automatically with `CREATE EXTENSION IF NOT EXISTS vector`.
+
+The `ai_memory.0002_pgvector` migration is marked `atomic = False` because HNSW index creation blocks when run inside a transaction on Railway's Postgres.
+
+### Migration workflow for new features
+
+1. Develop locally, create migrations with `evennia makemigrations`
+2. Test locally with `evennia test --settings settings tests`
+3. Merge to `dev`, then to `main`
+4. Railway auto-deploys: `deploy_migrate.py` applies new migrations incrementally
+5. Existing data is preserved — Django only runs migrations not yet in `django_migrations`
+
+### Database persistence
+
+Railway Postgres persists data between deploys via mounted volumes. The game service container is ephemeral (rebuilt on each deploy), but the Postgres service and its volume are persistent. Deploying new code does NOT wipe the database.
+
+---
+
+## Networking & Domain Setup
+
+### Ports
+
+Evennia runs multiple services on different ports inside the container:
+
+| Port | Service | Purpose |
+|------|---------|---------|
+| 8080 | Webserver-proxy (Portal) | Main HTTP — web pages, REST API. **This is the port Railway must route to.** |
+| 4002 | Websocket (Portal) | Web client websocket connection |
+| 4005 | Webserver (Server) | Internal — Portal proxies to this |
+| 4006 | AMP (internal) | Portal ↔ Server communication |
+
+### Railway networking configuration
+
+1. **Port:** Set to **8080** on the game service (Settings > Networking)
+2. **Railway domain:** Generate one (e.g. `game-production-xxxx.up.railway.app`). This serves both HTTP and Websocket.
+3. **Custom domain:** Add `fcmud.world` and configure DNS (CNAME + TXT verification)
+
+### Websocket routing
+
+The web client needs a websocket connection for real-time game communication. Railway routes websockets through the same domain as HTTP, but Evennia needs to know the websocket URL to tell the web client where to connect.
+
+Set the `WEBSOCKET_CLIENT_URL` environment variable:
+```
+wss://<railway-generated-domain>.up.railway.app/ws
+```
+
+**Why use the Railway domain, not the custom domain?** Cloudflare (if used for DNS) may interfere with websocket connections depending on proxy settings. Using the Railway domain directly bypasses Cloudflare and provides a reliable websocket connection.
+
+**Important:** The websocket URL must use `wss://` (not `ws://`) since Railway enforces HTTPS.
+
+### DNS configuration (Cloudflare example)
+
+| Type | Name | Value | Proxy |
+|------|------|-------|-------|
+| CNAME | `@` | `<railway-target>.up.railway.app` | Proxied (orange cloud) |
+| TXT | `_railway-verify` | `railway-verify=<token>` | DNS only |
 
 ---
 
@@ -259,14 +453,6 @@ The co-signing service (`FullCircleMUD/cosigner` repo) is a standalone FastAPI a
 
 Wallet seeds are stored in Render env vars, not in the config file. The JSON config (which maps addresses to rules and env var names) can safely live in the repo.
 
-**Tiered approval (future):**
-
-| Tier | Rule | Approval |
-|------|------|----------|
-| Auto | Small exports (< 100 gold) | Co-signer approves immediately |
-| Delayed | Medium exports (100-1000 gold) | 5-minute delay before co-signing |
-| Manual | Large exports (> 1000 gold), bulk, unusual | Queued for manual approval |
-
 ### Game Server Changes
 
 When `XRPL_MULTISIG_ENABLED=true`, the 4 vault-signing functions in `xrpl_tx.py` and `xrpl_amm.py` use a `_cosign_and_submit()` helper instead of `submit_and_wait()`:
@@ -278,132 +464,15 @@ When `XRPL_MULTISIG_ENABLED=true`, the 4 vault-signing functions in `xrpl_tx.py`
 
 When `XRPL_MULTISIG_ENABLED=false` (default), existing single-sig flow is unchanged — `wallet.address` equals vault address because the seed IS the master key.
 
-**New env vars on game server (Railway):**
-
-| Variable | Purpose |
-|----------|---------|
-| `XRPL_MULTISIG_ENABLED` | Feature flag (`true`/`false`) |
-| `XRPL_COSIGNER_URL` | Co-signer service URL (e.g. `https://cosigner-xxxx.onrender.com`) |
-| `XRPL_COSIGNER_API_KEY` | Co-signer API key. Production uses the production key; dev/staging uses the `DEV_API_KEY` (no-op on-chain) |
-
-`XRPL_VAULT_WALLET_SEED` stays as-is — when multisig is enabled it becomes key A's seed.
-
-### Setup Tools
-
-The `cosigner` repo includes setup scripts:
-- `setup/generate_keys.py` — generate XRPL keypairs for signer keys A, B, C
-- `setup/configure_signerlist.py` — submit `SignerListSet` on any XRPL account (set, verify, or remove)
-
-### Migration Path (Single-Sig → Multisig)
-
-1. **Generate keypairs** — Key A (per wallet), Key B (shared), Key C (shared regular key) using `generate_keys.py`
-2. **Configure SignerList** on vault and issuer — `configure_signerlist.py` with master key (2 signers: A + B, quorum 2)
-3. **Set regular key** (Key C) on all three wallets via `SetRegularKey`
-4. **Disable master keys** on all three wallets via `AccountSet` (`asfDisableMaster`)
-5. **Encrypt and shard Key C** — distribute shards to secure locations
-6. **Deploy co-signer** to Render with Key B's seed
-7. **Enable multisig** on game server — set `XRPL_MULTISIG_ENABLED=true` + cosigner URL/key
-8. **Verify** — confirm shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
-
 ### Compromise Recovery Plan
 
-The multisig architecture with regular key recovery and clawback creates a layered defence. Here's the incident response plan for each compromise scenario.
-
-#### Scenario 1: Game Server Compromised (Key A Exposed)
-
-**Blast radius:** Attacker has Key A + cosigner API key. They can submit transactions that the cosigner will co-sign — but ONLY transaction types allowed by the cosigner's business rules (Payment, OfferCreate, etc.). They CANNOT change the SignerList, delete the account, or modify account settings.
-
-**Immediate response (minutes):**
-1. **Shut down the co-signing service** on Render (suspend or scale to 0). This instantly kills the attacker's ability to get co-signatures — Key A alone cannot meet quorum.
-2. **Revoke the Railway deployment** — stop the compromised game server.
-
-**Recovery (hours):**
-3. **Rotate the cosigner API key** on Render (new random secret).
-4. **Generate a new Key A** keypair for the affected wallet(s).
-5. **Reconstitute Key C** (regular key) from its encrypted shards.
-6. **Update the SignerList on-chain** using Key C (regular key can sign any transaction as a single signature). Submit a new `SignerListSet` replacing the old Key A with the new one.
-7. **Clawback any unauthorized token transfers** using the issuer's regular key (Key C). Clawback pulls tokens back from any recipient address.
-8. **Re-shard Key C** — destroy the reconstituted copy.
-9. **Deploy clean game server** on Railway with the new Key A seed and new API key.
-10. **Restart the co-signing service** on Render.
-
-#### Scenario 2: Co-Signing Service Compromised (Key B Exposed)
-
-**Blast radius:** Attacker has Key B only. Useless without Key A — they cannot build valid game transactions or meet quorum alone.
-
-**Immediate response:**
-1. **Shut down the co-signing service** on Render.
-
-**Recovery:**
-2. **Generate a new Key B** keypair.
-3. **Reconstitute Key C** (regular key) from its encrypted shards.
-4. **Update the SignerList on-chain** using Key C — submit a new `SignerListSet` replacing Key B.
-5. **Re-shard Key C** — destroy the reconstituted copy.
-6. **Update Render env var** with new Key B seed.
-7. **Restart the co-signing service.**
-
-#### Scenario 3: Both Server and Co-Signer Compromised (Key A + Key B Exposed)
-
-**Blast radius:** Attacker has Key A + Key B — they can sign any transaction type the cosigner rules allow. However, they still cannot SignerListSet, AccountDelete, or AccountSet (blocked in cosigner rules). If the attacker bypasses cosigner rules (e.g. signs directly without the cosigner app), they can meet the 2-of-2 quorum for any transaction type.
-
-**Immediate response (seconds matter):**
-1. **Shut down both services immediately** (Render + Railway).
-2. **Reconstitute Key C** (regular key) from its encrypted shards.
-3. **Submit a new `SignerListSet`** using Key C — replace both signer keys with freshly generated ones.
-4. **Clawback any unauthorized transfers** using the issuer's regular key (Key C).
-5. **Audit on-chain transactions** from the compromise window.
-6. **Re-shard Key C** — destroy the reconstituted copy.
-7. **Deploy fresh services** with new keys and new API secret.
-
-#### Scenario 4: Key C (Regular Key) Suspected Compromised
-
-**Blast radius:** Key C alone can sign any transaction on all three wallets. This is the most critical single key.
-
-**Immediate response:**
-1. **Use A + B multisig** on vault and issuer to immediately submit `SetRegularKey` — set a new regular key, invalidating the old Key C.
-2. **For the operating wallet** (no multisig), this is more urgent — if Key C is compromised, the operating wallet is fully exposed. Move funds out of operating immediately using the still-valid Key C, then set a new regular key.
-3. **Encrypt and shard the new Key C** using the same sharding procedure.
-4. **Destroy all copies** of the old Key C.
-
-#### Scenario 5: Key Loss (Not Compromise)
-
-| Keys Lost | Recovery Path |
-|-----------|--------------|
-| Key A only | Reconstitute Key C (regular key) to submit new `SignerListSet` with new A |
-| Key B only | Reconstitute Key C (regular key) to submit new `SignerListSet` with new B |
-| Key C only | Use A + B multisig to set a new regular key via `SetRegularKey`, re-shard |
-| A + B both | Reconstitute Key C to submit new `SignerListSet` with new A and B |
-| A + C | **Unrecoverable** for multisig wallets (cannot meet quorum, cannot sign via regular key). Operating wallet also unrecoverable. |
-| B + C | **Unrecoverable** for multisig wallets. Operating wallet also unrecoverable. |
-| All three | **Unrecoverable** — this is why Key C is encrypted and sharded across multiple secure locations |
-
-#### Why Clawback Is Essential
-
-The issuer wallet has `asfAllowClawback` enabled (set before any trustlines were created — this is irreversible and cannot be enabled retroactively). This means:
-
-- **Any FCM-issued token** (gold, resources, proxy tokens) can be pulled back from any holder address by the issuer.
-- Even if an attacker manages to transfer tokens to external wallets during a compromise window, the issuer can reclaim them.
-- Clawback is the last line of defence — it makes token theft recoverable even in the worst case.
-- XRP itself cannot be clawed back (native asset), but game tokens are all issuer-controlled.
-
-#### Prevention: What the Cosigner Rules Block
-
-Even with both Key A and Key B, the cosigner's `blocked_tx_types` prevent:
-
-| Blocked Transaction | Why |
-|---|---|
-| `SignerListSet` | Cannot change who can sign — attacker can't lock out the operator |
-| `AccountDelete` | Cannot destroy the wallet |
-| `SetRegularKey` | Cannot add a backdoor signing key |
-| `AccountSet` | Cannot change wallet flags (e.g. disable clawback... though that's already irreversible) |
-
-These rules are enforced server-side in the cosigner before co-signing. An attacker with Key A cannot bypass them without also compromising the cosigner's code on Render.
+See the full compromise recovery plan in the previous version of this document or in the security architecture documentation.
 
 ---
 
 ## GitHub Actions CI
 
-A `.github/workflows/ci.yml` in the game repo runs automatically on every Pull Request and push to `staging` or `main`:
+A `.github/workflows/ci.yml` in the game repo runs automatically on every Pull Request and push to `main`:
 
 - Runs the full test suite (`evennia test --settings settings tests`) using SQLite (fast, no infrastructure needed)
 - Blocks merge if tests fail
@@ -415,21 +484,41 @@ This is separate from Railway's deployment — GitHub Actions validates the code
 
 ## Common Scenarios
 
-### "I want to reset the staging database"
+### "I want to deploy new code"
 
-Delete the PostgreSQL plugin in Railway and re-add it. Fresh database. Then redeploy — the release command runs all migrations from scratch, recreating the schema and seed data.
+```
+git checkout main
+git merge dev
+git push origin main
+git checkout dev
+```
+
+Railway auto-deploys. Migrations run automatically. Existing data preserved.
+
+### "I added a new model/field and need a migration"
+
+1. Create migration locally: `evennia makemigrations`
+2. Test locally: `evennia test --settings settings tests`
+3. Commit the migration file
+4. Merge to `main` and push
+5. Railway auto-deploys and applies the new migration incrementally
+
+### "I want to reset the database"
+
+Delete the PostgreSQL plugin in Railway and re-add it. Fresh database. Then redeploy — `deploy_migrate.py` runs all migrations from scratch, recreating the schema. The superuser is auto-created from env vars.
 
 ### "I need to copy production data to staging"
 
-Railway supports database snapshots and imports. Take a backup of production, restore to staging. This gives you realistic data for testing without risking production.
+Railway supports database snapshots and imports. Take a backup of production, restore to staging.
 
 ### "Railway deploy failed"
 
 Check Railway's deploy logs. Common causes:
-- Migration error (rare — usually a malformed migration file)
-- Missing environment variable
+- Migration error (check for `Migration FAILED` in logs)
+- Missing environment variable (check `DATABASE_URL` is set and resolved)
+- Invalid JSON in bot env vars (no trailing commas in JSON)
 - Python dependency issue
-- The release command has a typo
+- pgvector extension not available (should be auto-installed by `deploy_migrate.py`)
 
 Railway keeps the previous deployment running until the new one succeeds, so a failed deploy doesn't take down the live server.
 
@@ -439,6 +528,13 @@ Railway provides a shell into the running service. Use it for things like:
 - `evennia shell` (Django shell for data queries)
 - Running management commands
 - Debugging production state
+
+### "The websocket isn't connecting"
+
+1. Check `WEBSOCKET_CLIENT_URL` is set correctly: `wss://<railway-domain>.up.railway.app/ws`
+2. Use the Railway-generated domain, not the custom domain (avoids Cloudflare interference)
+3. Ensure the Railway domain has port 4002 exposed
+4. Check browser console for websocket connection errors
 
 ---
 
@@ -505,9 +601,66 @@ The bucket is public-read so XRPL marketplaces and wallets can resolve images di
 - `GET /{uri_id}` — XLS-24d compliant JSON metadata for XRPL marketplace resolution
 - `GET /health` — health check (includes `environment` and `db_configured` fields)
 
-### XLS-24d Compliance
+---
 
-The metadata format follows the XRPL XLS-24d standard that marketplaces expect when resolving a token's URI. Includes item name, description, category, prototype, image URI, and any per-instance metadata (durability, custom names, etc.).
+## Troubleshooting
+
+### Database wipes on deploy
+
+**Symptom:** Every deploy applies all migrations from `0001_initial`, superuser gets recreated, all data lost.
+
+**Cause:** `DATABASE_URL` is not set or not resolving on the game service. Without it, Django falls back to SQLite inside the ephemeral container, which is destroyed on each deploy.
+
+**Fix:**
+1. Check game service Variables tab — `DATABASE_URL` must show a resolved Postgres connection string, not empty
+2. Set `DATABASE_URL` as a **service variable** directly on the game service (not a shared variable)
+3. If `${{Postgres.DATABASE_URL}}` doesn't resolve, paste the actual connection string from the Postgres service
+
+### Migrations say "No migrations to apply" but tables don't exist
+
+**Symptom:** `evennia migrate --database xrpl` says nothing to apply, but xrpl tables don't exist in Postgres.
+
+**Cause:** Database routers block table creation when all aliases point to the same Postgres. The migration is recorded but the DDL is silently skipped.
+
+**Fix:** This is already fixed in the codebase — routers are disabled when `DATABASE_URL` is set. If you encounter this, ensure `settings.py` has the router conditional:
+```python
+if not _DATABASE_URL:
+    DATABASE_ROUTERS = [...]
+```
+
+### pgvector migration hangs
+
+**Symptom:** Deploy hangs on `Applying ai_memory.0002_pgvector...` for minutes.
+
+**Cause:** HNSW index creation blocks inside a transaction. Or a previous failed deploy left a stuck `idle in transaction` process holding a lock.
+
+**Fix:**
+1. Check for stuck processes: `SELECT pid, state, query FROM pg_stat_activity WHERE state = 'idle in transaction';`
+2. Kill them: `SELECT pg_terminate_backend(<pid>);`
+3. Ensure `0002_pgvector` migration has `atomic = False`
+4. Ensure `deploy_migrate.py` uses autocommit for `CREATE EXTENSION`
+
+### Invalid JSON in bot env vars
+
+**Symptom:** Deploy crash-loops with `json.decoder.JSONDecodeError`.
+
+**Cause:** `BOT_WALLET_ADDRESSES_JSON` or `BOT_PASSWORDS_JSON` has trailing commas or single quotes.
+
+**Fix:** Ensure valid JSON with double quotes and no trailing commas:
+```json
+{"billy":"rAddr1","bianca":"rAddr2"}
+```
+
+### 502 Bad Gateway / Application failed to respond
+
+**Symptom:** Domain returns 502 or "Application failed to respond".
+
+**Cause:** Railway isn't routing to the correct port, or the game isn't running.
+
+**Fix:**
+1. Set port to **8080** in game service Settings > Networking
+2. Check deploy logs for startup errors
+3. Verify the Railway domain works before debugging custom domain issues
 
 ---
 
@@ -515,11 +668,15 @@ The metadata format follows the XRPL XLS-24d standard that marketplaces expect w
 
 The deployment pipeline is fully automated and GitHub-driven:
 
-1. **Develop** on feature branches (local, SQLite)
-2. **PR into staging** → GitHub Actions tests → Railway auto-deploys to staging (PostgreSQL)
-3. **Test on staging** with real infrastructure
-4. **PR into main** → Railway auto-deploys to production (PostgreSQL)
+1. **Develop** on `dev` branch (local, SQLite)
+2. **Merge to `main`** → Railway auto-deploys to production (PostgreSQL)
+3. **`deploy_migrate.py`** handles migrations, pgvector, and error recovery
+4. **Database persists** between deploys via Railway Postgres volumes
+5. **No manual SQL** required for normal deployments
+
+Key files:
+- `railway.toml` — build and start commands
+- `deploy_migrate.py` — migration script for Railway
+- `server/conf/settings.py` — database config, router conditional
 
 The **NFT Metadata API** runs as a separate Railway service sharing the same PostgreSQL instance, ensuring XRPL marketplace metadata resolution stays available regardless of game server state.
-
-Every deploy runs migrations automatically. Environment variables control all environment-specific configuration. No manual steps between merge and live deployment.
