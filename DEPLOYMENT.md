@@ -185,37 +185,40 @@ The game server holds `XRPL_VAULT_WALLET_SEED` — a single key with full signin
 
 ### Production Requirement (Mainnet)
 
-For mainnet, no single compromised key should be able to move funds. Both the **vault** and **issuer** wallets use **XRPL native multisig** with a 2-of-3 signer configuration.
+For mainnet, no single compromised key should be able to move funds. The **vault** and **issuer** wallets use **XRPL native multisig** with a 2-of-2 signer configuration. The **operating** wallet does not use multisig — its keys are never exposed in a hot environment.
 
 ### Key Architecture
 
-Each multisig wallet (vault, issuer) has 4 associated keys. **Key B and Key C are shared** across both wallets — compromise of either server yields half of both wallets regardless of whether the keys are shared or separate, so sharing reduces key management overhead without weakening security. Key A is unique per wallet since the vault and issuer have different operational contexts (game server vs manager/admin tool).
+The vault and issuer wallets each have a 2-of-2 signer list (Key A + Key B). **Key B is shared** across both wallets — compromise of either server yields half of both wallets regardless of whether the keys are shared or separate, so sharing reduces key management overhead without weakening security. Key A is unique per wallet since the vault and issuer have different operational contexts (game server vs manager/admin tool). All three wallets (vault, issuer, operating) share a common **regular key (Key C)** for emergency recovery, with their master keys disabled.
 
-| Key | Vault | Issuer | Location | Purpose |
-|-----|-------|--------|----------|---------|
-| **Master key** | Vault master | Issuer master | Deep cold storage (offline, physical safe) | Emergency recovery only. Stays enabled but never touches a server. |
-| **Signer key A** | Vault-specific | Issuer-specific | Game server / Manager tool (env var) | First signature. Operational tool builds transaction and signs with A. |
-| **Signer key B** | Shared | Shared | Co-signing service (Render env var) | Second signature. Co-signer validates business rules, signs with B, submits to XRPL. |
-| **Signer key C** | Shared | Shared | Cold storage (offline) | Recovery key. Used with A or B to rotate a compromised key. |
+| Key | Vault | Issuer | Operating | Location | Purpose |
+|-----|-------|--------|-----------|----------|---------|
+| **Master key** | Vault master | Issuer master | Operating master | Seed retained offline | Disabled on-chain. Seed retained as absolute last resort but cannot sign transactions unless re-enabled via the regular key. |
+| **Signer key A** | Vault-specific | Issuer-specific | — | Game server / Manager tool (env var) | First multisig signature. Operational tool builds transaction and signs with A. |
+| **Signer key B** | Shared | Shared | — | Co-signing service (Render env var) | Second multisig signature. Co-signer validates business rules, signs with B, submits to XRPL. |
+| **Regular key (Key C)** | Shared | Shared | Shared | Encrypted and sharded (reconstituted when needed) | Emergency recovery. Can sign any transaction as a single signature — used to rotate the signer list, change account settings, or set a new regular key if Key C itself is suspected compromised. |
 
-Signer keys A, B, and C do NOT need to be funded XRPL accounts — unfunded keypairs work as signers (only the master private key can sign, since Regular Key and key disable require a funded account). The main account (vault/issuer) needs sufficient XRP to cover its own base reserve plus the owner reserve for the SignerList object. Rotating a compromised key: generate a new keypair, update the `SignerListSet` using 2 of the remaining good keys, update the env var.
+Signer keys A and B do NOT need to be funded XRPL accounts — unfunded keypairs work as signers. The main account (vault/issuer) needs sufficient XRP to cover its own base reserve plus the owner reserve for the SignerList object. The operating wallet has no signer list and is secured solely by Key C (regular key) with its master key disabled.
 
-The vault/issuer master keys are used once during initial setup (to submit `SignerListSet`), then locked away in cold storage permanently. They remain enabled on-chain as a disaster recovery fallback — if 2+ signer keys are lost, the master key can still authorise transactions. The risk of physical theft from a safe is far lower than the risk of catastrophic key loss.
+Master keys on all three wallets are **disabled** (`asfDisableMaster`). They were used once during initial setup (to submit `SignerListSet` and `SetRegularKey`), then disabled. The master seeds are retained offline as an absolute last resort, but they cannot sign transactions in their current disabled state. Re-enabling a master key would require a transaction signed by the regular key (Key C). The primary recovery mechanism is Key C — reconstituted from its encrypted shards when needed.
 
 ### On-Chain Configuration
 
-Both wallets use `SignerListSet` with quorum 2:
+Vault and issuer use `SignerListSet` with quorum 2. Operating has no signer list.
 
 ```
-Vault:  key A (weight 1) + key B (weight 1) + key C (weight 1), quorum 2
-Issuer: key A (weight 1) + key B (weight 1) + key C (weight 1), quorum 2
+Vault:     key A (weight 1) + key B (weight 1), quorum 2
+Issuer:    key A (weight 1) + key B (weight 1), quorum 2
+Operating: no signer list — single-sig via regular key (Key C)
 ```
 
-Normal operations use **A + B** (automatic, game server + co-signer). Any 2-of-3 can sign, so recovery scenarios are:
-- Key A compromised → rotate using B + C
-- Key B compromised → rotate using A + C
-- Key A lost → use B + C until new A is provisioned
-- Catastrophic (2+ keys lost) → master key from cold storage
+All three wallets have their **master key disabled** and a shared **regular key (Key C)** set via `SetRegularKey`.
+
+Normal operations on vault/issuer use **A + B** (automatic, game server + co-signer). Recovery scenarios:
+- Key A compromised → reconstitute Key C (regular key), use it to submit a new `SignerListSet` replacing Key A
+- Key B compromised → reconstitute Key C (regular key), use it to submit a new `SignerListSet` replacing Key B
+- Key C suspected compromised → use A + B multisig to immediately set a new regular key via `SetRegularKey`, re-shard the new key
+- A + B both compromised → reconstitute Key C to replace the entire signer list
 
 ### Infrastructure Separation
 
@@ -293,16 +296,18 @@ The `cosigner` repo includes setup scripts:
 
 ### Migration Path (Single-Sig → Multisig)
 
-1. **Generate keypairs** — 3 keys per wallet (A, B, C) using `generate_keys.py`
-2. **Configure SignerList** — `configure_signerlist.py` with vault's master key
-3. **Deploy co-signer** to Render with key B's seed
-4. **Enable multisig** on game server — set `XRPL_MULTISIG_ENABLED=true` + cosigner URL/key
-5. **Verify** — confirm shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
-6. **Store master key** in cold storage — it stays enabled on-chain but never online
+1. **Generate keypairs** — Key A (per wallet), Key B (shared), Key C (shared regular key) using `generate_keys.py`
+2. **Configure SignerList** on vault and issuer — `configure_signerlist.py` with master key (2 signers: A + B, quorum 2)
+3. **Set regular key** (Key C) on all three wallets via `SetRegularKey`
+4. **Disable master keys** on all three wallets via `AccountSet` (`asfDisableMaster`)
+5. **Encrypt and shard Key C** — distribute shards to secure locations
+6. **Deploy co-signer** to Render with Key B's seed
+7. **Enable multisig** on game server — set `XRPL_MULTISIG_ENABLED=true` + cosigner URL/key
+8. **Verify** — confirm shopkeeper trades, exports (if enabled) land on-chain with 2 signatures
 
 ### Compromise Recovery Plan
 
-The multisig architecture with clawback creates a layered defence. Here's the incident response plan for each compromise scenario.
+The multisig architecture with regular key recovery and clawback creates a layered defence. Here's the incident response plan for each compromise scenario.
 
 #### Scenario 1: Game Server Compromised (Key A Exposed)
 
@@ -315,10 +320,12 @@ The multisig architecture with clawback creates a layered defence. Here's the in
 **Recovery (hours):**
 3. **Rotate the cosigner API key** on Render (new random secret).
 4. **Generate a new Key A** keypair for the affected wallet(s).
-5. **Update the SignerList on-chain** using Key B + Key C (both uncompromised). This replaces the old Key A with the new one.
-6. **Clawback any unauthorized token transfers** using the issuer's master key (from cold storage). Clawback pulls tokens back from any recipient address.
-7. **Deploy clean game server** on Railway with the new Key A seed and new API key.
-8. **Restart the co-signing service** on Render.
+5. **Reconstitute Key C** (regular key) from its encrypted shards.
+6. **Update the SignerList on-chain** using Key C (regular key can sign any transaction as a single signature). Submit a new `SignerListSet` replacing the old Key A with the new one.
+7. **Clawback any unauthorized token transfers** using the issuer's regular key (Key C). Clawback pulls tokens back from any recipient address.
+8. **Re-shard Key C** — destroy the reconstituted copy.
+9. **Deploy clean game server** on Railway with the new Key A seed and new API key.
+10. **Restart the co-signing service** on Render.
 
 #### Scenario 2: Co-Signing Service Compromised (Key B Exposed)
 
@@ -329,33 +336,46 @@ The multisig architecture with clawback creates a layered defence. Here's the in
 
 **Recovery:**
 2. **Generate a new Key B** keypair.
-3. **Update the SignerList on-chain** using Key A + Key C.
-5. **Update Render env var** with new Key B seed.
-6. **Restart the co-signing service.**
+3. **Reconstitute Key C** (regular key) from its encrypted shards.
+4. **Update the SignerList on-chain** using Key C — submit a new `SignerListSet` replacing Key B.
+5. **Re-shard Key C** — destroy the reconstituted copy.
+6. **Update Render env var** with new Key B seed.
+7. **Restart the co-signing service.**
 
-#### Scenario 3: Both Server and Co-Signer Compromised
+#### Scenario 3: Both Server and Co-Signer Compromised (Key A + Key B Exposed)
 
-**Blast radius:** Attacker has Key A + Key B — they can sign any transaction type the cosigner rules allow. However, they still cannot SignerListSet, AccountDelete, or AccountSet (blocked in cosigner rules).
+**Blast radius:** Attacker has Key A + Key B — they can sign any transaction type the cosigner rules allow. However, they still cannot SignerListSet, AccountDelete, or AccountSet (blocked in cosigner rules). If the attacker bypasses cosigner rules (e.g. signs directly without the cosigner app), they can meet the 2-of-2 quorum for any transaction type.
 
 **Immediate response (seconds matter):**
 1. **Shut down both services immediately** (Render + Railway).
-2. **Retrieve master key from cold storage.**
-3. **Submit a new SignerListSet** using the master key — replace all 3 signer keys with freshly generated ones.
-4. **Clawback any unauthorized transfers** using the issuer's clawback capability.
+2. **Reconstitute Key C** (regular key) from its encrypted shards.
+3. **Submit a new `SignerListSet`** using Key C — replace both signer keys with freshly generated ones.
+4. **Clawback any unauthorized transfers** using the issuer's regular key (Key C).
 5. **Audit on-chain transactions** from the compromise window.
-6. **Deploy fresh services** with new keys and new API secret.
+6. **Re-shard Key C** — destroy the reconstituted copy.
+7. **Deploy fresh services** with new keys and new API secret.
 
-#### Scenario 4: Key Loss (Not Compromise)
+#### Scenario 4: Key C (Regular Key) Suspected Compromised
+
+**Blast radius:** Key C alone can sign any transaction on all three wallets. This is the most critical single key.
+
+**Immediate response:**
+1. **Use A + B multisig** on vault and issuer to immediately submit `SetRegularKey` — set a new regular key, invalidating the old Key C.
+2. **For the operating wallet** (no multisig), this is more urgent — if Key C is compromised, the operating wallet is fully exposed. Move funds out of operating immediately using the still-valid Key C, then set a new regular key.
+3. **Encrypt and shard the new Key C** using the same sharding procedure.
+4. **Destroy all copies** of the old Key C.
+
+#### Scenario 5: Key Loss (Not Compromise)
 
 | Keys Lost | Recovery Path |
 |-----------|--------------|
-| Key A only | Use B + C to update SignerList with new A |
-| Key B only | Use A + C to update SignerList with new B |
-| Key C only | Use A + B to update SignerList with new C |
-| A + B | Master key from cold storage |
-| A + C | Master key from cold storage |
-| B + C | Master key from cold storage |
-| Master + any 2 | **Unrecoverable** — this is why the master key is stored in a physical safe |
+| Key A only | Reconstitute Key C (regular key) to submit new `SignerListSet` with new A |
+| Key B only | Reconstitute Key C (regular key) to submit new `SignerListSet` with new B |
+| Key C only | Use A + B multisig to set a new regular key via `SetRegularKey`, re-shard |
+| A + B both | Reconstitute Key C to submit new `SignerListSet` with new A and B |
+| A + C | **Unrecoverable** for multisig wallets (cannot meet quorum, cannot sign via regular key). Operating wallet also unrecoverable. |
+| B + C | **Unrecoverable** for multisig wallets. Operating wallet also unrecoverable. |
+| All three | **Unrecoverable** — this is why Key C is encrypted and sharded across multiple secure locations |
 
 #### Why Clawback Is Essential
 

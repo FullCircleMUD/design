@@ -46,7 +46,7 @@ The issuer is the game's central financial authority — it receives revenue, ho
 - **Issuer** remains the fiscal centre — revenue in, gold out, treasury management. Tightly controlled.
 - **Operating** receives its allocation (10% of subscription revenue) and is used freely for business expenses without touching the issuer's treasury position.
 - **Vault** remains the game operations wallet — player-facing transactions only.
-- Each wallet has distinct multisig cosigner rules appropriate to its role.
+- Vault and issuer each have distinct multisig cosigner rules appropriate to their roles. Operating does not use multisig — it is secured by the shared regular key (Key C) with its master key disabled.
 
 > **No migration needed** — subscription payments already go to the issuer. The issuer sends the operating split to the new operating wallet.
 
