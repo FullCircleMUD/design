@@ -51,8 +51,11 @@ Managed by `FungibleInventoryMixin` (`typeclasses/mixins/fungible_inventory.py`)
 | In-game transfers | `transfer_gold_to(target, amount)`, `transfer_resource_to(target, resource_id, amount)` |
 | From reserve | `receive_gold_from_reserve(amount)`, `receive_resource_from_reserve(resource_id, amount)` |
 | To reserve | `return_gold_to_reserve(amount)`, `return_resource_to_reserve(resource_id, amount)` |
+| To sink | `return_gold_to_sink(amount)`, `return_resource_to_sink(resource_id, amount)` |
 | Chain boundary | `deposit_gold_from_chain(amount, tx_hash)`, `withdraw_gold_to_chain(amount, tx_hash)` |
 | Chain boundary | `deposit_resource_from_chain(resource_id, amount, tx_hash)`, `withdraw_resource_to_chain(resource_id, amount, tx_hash)` |
+
+**Reserve vs sink:** Returning to the *reserve* puts gold/resources back into the spawnable pool — the next loot drop or treasury draw can re-emit them. Returning to the *sink* permanently removes them from circulation, used by economy drains (travel/sail food costs, training fees, repair costs). Use the sink for any cost that should not feed back into the spawn budget.
 
 Classification helpers (used internally):
 - `_classify_fungible(obj)` → `"CHARACTER"` / `"ACCOUNT"` / `"WORLD"`
@@ -69,10 +72,18 @@ Classification helpers (used internally):
 
 | Mixin | Slots | Used By |
 |-------|-------|---------|
-| `HumanoidWearslotsMixin` | 19 slots (HEAD, FACE, LEFT_EAR, RIGHT_EAR, NECK, CLOAK, BODY, LEFT_ARM, RIGHT_ARM, HANDS, LEFT_WRIST, RIGHT_WRIST, LEFT_RING_FINGER, RIGHT_RING_FINGER, WAIST, LEGS, FEET, WIELD, HOLD) | FCMCharacter |
-| `DogWearslotsMixin` | 2 slots (DOG_NECK, DOG_BODY) | Proof of concept |
+| `HumanoidWearslotsMixin` | HEAD, FACE, LEFT_EAR, RIGHT_EAR, NECK, CLOAK, BODY, LEFT_ARM, RIGHT_ARM, HANDS, LEFT_WRIST, RIGHT_WRIST, LEFT_RING_FINGER, RIGHT_RING_FINGER, WAIST, LEGS, FEET, WIELD, HOLD | FCMCharacter |
+| `DogWearslotsMixin` | DOG_NECK, DOG_BODY | Proof of concept |
 
-Items declare which slot(s) they fit via `wearslot` AttributeProperty (single enum value or list). Creature-type restriction is implicit — a human has no DOG_NECK slot, so dog collars can't be equipped. `HumanoidWearSlot` and `DogWearSlot` enums (`enums/wearslot.py`) are the single source of truth for slot names.
+Items declare which slot(s) they fit via `wearslot` AttributeProperty (single enum value or list). Creature-type restriction is implicit — a human has no DOG_NECK slot, so dog collars can't be equipped. The wearslot enums in `enums/wearslot.py` are the single source of truth for slot names.
+
+**Defined enums (in `enums/wearslot.py`):**
+- `HumanoidWearSlot` — used by `HumanoidWearslotsMixin`
+- `DogWearSlot` — used by `DogWearslotsMixin`
+- `MuleWearSlot` (PANNIER, BRIDLE, HORSE_SHOES) — *enum defined, mixin not yet implemented*
+- `HorseWearSlot` (SADDLE_BAG, SADDLE, BRIDLE, HORSE_SHOES) — *enum defined, mixin not yet implemented*
+
+The Mule and Horse enums are placeholder slot definitions ahead of the corresponding wearslots mixins, intended for the mounts feature.
 
 ### BaseWearslotsMixin API
 
@@ -150,8 +161,8 @@ Data-driven item usage restrictions mixed into `BaseNFTItem`. Default is unrestr
 | `min_class_levels` | ALL | Each `{class: level}` must be met |
 | `required_races` | OR | Character's race in list → pass |
 | `excluded_races` | AND-NOT | Character's race in list → fail |
-| `required_alignments` | OR | Character's alignment in list → pass |
-| `excluded_alignments` | AND-NOT | Character's alignment in list → fail |
+| `min_alignment_score` | ≥ | `character.alignment_score >= value` (e.g. 300 = Good+ only) |
+| `max_alignment_score` | ≤ | `character.alignment_score <= value` (e.g. -300 = Evil+ only) |
 | `min_total_level` | ≥ | `character.total_level >= value` |
 | `min_remorts` | ≥ | `character.num_remorts >= value` |
 | `min_attributes` | ALL | Each `{ability: score}` must be met |
@@ -414,7 +425,7 @@ BaseNFTItem (typeclasses/items/base_nft_item.py)
 │   │   │   Composes: WeaponMechanicsMixin
 │   │   ├── LongswordNFTItem(LongswordMixin, WeaponNFTItem)
 │   │   ├── DaggerNFTItem(DaggerMixin, WeaponNFTItem)
-│   │   ├── ... (24 weapon types total, each with XxxMixin + WeaponNFTItem)
+│   │   ├── ... (one WeaponNFTItem subclass per weapon category, each composed with its identity mixin)
 │   │   └── UnarmedWeapon    — pure Python singleton (NOT a DB object)
 │   └── HoldableNFTItem      — shields/torches/orbs (at_hold)
 ├── ConsumableNFTItem        — single-use items (consume → delete → RESERVE)
