@@ -47,6 +47,135 @@ SKILLED and MASTER tiers to round out the school's toolkit.
 
 ---
 
+## Skill Training System
+
+### Overview
+
+Skill mastery advances through **trainer NPCs** scattered across the game
+world. Players spend gold and skill points at a trainer to advance a skill,
+class skill, or weapon mastery one tier at a time. Training is the only way
+to gain new mastery levels — skill points alone are not enough; the player
+must find a qualified trainer.
+
+### Trainer NPCs
+
+A `TrainerNPC` is configured per instance with:
+
+- **`trainable_skills`** — list of general/class skill keys this trainer teaches
+- **`trainable_weapons`** — list of weapon type keys this trainer teaches
+- **`trainer_class`** — which character class this trainer serves (e.g.
+  `"warrior"`). Determines which class skill point pool is used for class
+  skills.
+- **`trainer_masteries`** — dict mapping skill/weapon key to the trainer's
+  own mastery level (1-5). Caps how high a player can train with this
+  trainer (a trainer at SKILLED can teach up to BASIC).
+- **`recipes_for_sale`** — dict of `{recipe_key: gold_cost}` for crafting
+  recipes the trainer also sells.
+
+### Three Resource Pools
+
+Players have three separate skill point pools that can be spent on training:
+
+| Pool | Source | Spent on |
+|---|---|---|
+| **General skill points** | Earned with character level | General skills (cartography, perception, stealth, etc.) |
+| **Class skill points** | Earned per class with class level | Class-specific skills (bash, sneak attack, lay on hands) |
+| **Weapon skill points** | Earned with character level | Weapon mastery (long sword, dagger, bow, etc.) |
+
+The cost in points scales with the **target** mastery level — advancing to
+higher mastery costs more points than advancing to lower mastery.
+
+### Gold Cost
+
+Training also consumes gold. The base cost scales with target mastery:
+
+| Target Mastery | Base Gold Cost |
+|---|---|
+| BASIC | 10 |
+| SKILLED | 25 |
+| EXPERT | 50 |
+| MASTER | 100 |
+| GRANDMASTER | 200 |
+
+**Charisma modifier:** the player's CHA score adjusts the gold cost. A high
+Charisma character gets a discount (5% per modifier point); a low Charisma
+character pays a surcharge. Minimum cost is always 1 gold.
+
+Spent gold flows to the SINK location for reward recirculation.
+
+### Training Flow
+
+1. Player walks into a guild room containing a `TrainerNPC`.
+2. Player types `train` to see the trainer's offerings — trainable skills,
+   trainable weapons, costs, and current eligibility status.
+3. Player types `train <skill>` or `train weapon <name>` to begin training
+   a specific skill or weapon.
+4. The system validates: trainer can teach (mastery gap > 0), player has
+   enough gold, player has enough skill points, player is not already at
+   GRANDMASTER, player is not already busy.
+5. If validation passes, the player is shown a Y/N confirmation prompt with
+   the full cost and outcome.
+6. On Y: gold is deducted, a progress bar runs for the training duration
+   (10-30 seconds depending on tier), and on completion the mastery is
+   advanced and skill points are deducted.
+7. On N: nothing happens. No gold spent, no points deducted.
+
+### Compliance: Deterministic, No Random Failure
+
+**Training always succeeds.** There is no roll, no chance of failure, no
+"you wasted your gold" outcome. Once a player commits to training, they
+receive exactly what the system promised them in the Y/N prompt.
+
+This is a deliberate compliance design choice. An earlier version of the
+training system rolled `d100` against a success chance derived from the
+trainer-trainee mastery gap. On failure, gold was deducted, no
+advancement occurred, and a one-hour cooldown was set on that trainer.
+This pattern matched the textbook gambling triad:
+
+1. **Consideration** — gold paid (and not refunded)
+2. **Chance** — `randint(1, 100)` against success chance
+3. **Prize** — mastery advancement (with downstream tradeable value via
+   crafting and equipment)
+
+Disclosing the success percentage in the prompt did **not** save the
+mechanic. Showing the *odds* before payment is exactly what slot machines
+do. Compliance requires disclosing the **outcome**, not just the
+probability of an outcome.
+
+The redesigned system removes the chance element entirely:
+
+- The Y/N prompt shows: skill points cost, gold cost, training time,
+  and the mastery advancement to be granted
+- On confirmation, the player receives exactly that — no roll, no
+  failure branch, no cooldown
+- The trainer mastery gap is now a binary gate (can teach or can't teach),
+  not a probability modifier
+- Skill points and gold remain the rate-limiters of progression — they're
+  scarce, and that's what creates the gameplay pacing
+
+This aligns with FCM's overall compliance position:
+
+> **No player will ever pay consideration for an outcome that is not
+> fully disclosed to them before payment.**
+
+See `design/COMPLIANCE.md` and `ops/COMPLIANCE_LEGAL.md` §9.5 for the
+full gambling law analysis. Other game systems that have been (or will
+be) redesigned around the same principle:
+
+- **Loot spawning** — fully deterministic budget-driven push, no per-kill
+  rolls (see `design/ECONOMY.md`)
+- **Gem enchanting** — pre-disclosed slot consumption model, redesign in
+  progress (see `design/ECONOMY.md` § Weapons — Gem Insets)
+
+### Recipe Sales
+
+Trainer NPCs can also sell crafting recipes via the `buy recipe` command.
+This is a simple gold-for-knowledge transaction — no rolls, no chance,
+no failure. The player pays the listed gold cost and learns the recipe
+immediately.
+
+---
+
 ## Crafting Skills
 
 ### Carpentry (Woodshop) — 14 recipes
