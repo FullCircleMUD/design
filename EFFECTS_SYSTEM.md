@@ -63,16 +63,21 @@ Registry dicts (`_EFFECT_CONDITIONS`, `_EFFECT_DURATION_TYPES`) in `enums/named_
 | | `apply_slowed()` | `duration_rounds, source=None` |
 | | `apply_paralysed()` | `duration_rounds, source=None, save_dc=None, save_stat="wisdom", save_messages=None, messages=None` |
 | | `apply_entangled()` | `duration_rounds, source=None, save_dc=None, save_stat="strength", save_messages=None, messages=None` |
+| | `apply_blinded()` | `duration_rounds, source=None, save_dc=None, save_stat="constitution", save_messages=None, messages=None` |
+| | `apply_frightened()` | `duration_rounds, source=None, save_dc=None, save_stat="wisdom", save_messages=None, messages=None` |
 | | `apply_blurred()` | `duration_rounds` |
 | **Combat stat effects** | `apply_shield_buff()` | `ac_bonus, duration_rounds, mana_cost=0` |
 | | `apply_staggered()` | `hit_penalty, duration_rounds, source=None` |
 | | `apply_sundered()` | `ac_penalty, duration_rounds, source=None` |
 | **Seconds-based buffs** | `apply_invisible()` | `duration_seconds` |
 | | `apply_sanctuary()` | `duration_seconds` |
-| | `apply_mage_armor()` | `ac_bonus, duration_seconds` |
+| | `apply_armor_buff()` | `ac_bonus, duration_seconds` (alias: `apply_mage_armor`, shared by Mage Armor + Divine Armor) |
 | | `apply_shadowcloaked()` | `stealth_bonus, duration_seconds, source=None` |
+| | `apply_blessed()` | `hit_bonus, save_bonus, duration_seconds` |
 | | `apply_true_sight()` | `duration_seconds, detect_invis=False` |
 | | `apply_holy_sight()` | `duration_seconds, detect_invis=False` |
+| | `apply_darkvision_buff()` | `duration_seconds` (shared by Darkvision + Divine Sight) |
+| | `apply_water_breathing_buff()` | `duration_seconds` |
 | | `apply_resist_element()` | `element, resistance_pct, duration_seconds, source=None` |
 | **Script-managed** | `apply_poisoned()` | `ticks` |
 | | `apply_acid_arrow_dot()` | `dot_rounds` |
@@ -181,6 +186,8 @@ Callbacks receive `(target, source, duration)` and are called automatically by `
 | PRONE | `_grant_advantage_to_enemies` | All enemies of target get advantage for duration rounds |
 | ENTANGLED | `_grant_advantage_to_enemies` | All enemies of target get advantage for duration rounds |
 | PARALYSED | `_grant_advantage_to_enemies` | All enemies of target get advantage for duration rounds |
+| BLINDED | `_grant_advantage_to_enemies` | All enemies of target get advantage for duration rounds |
+| SLOWED | `_apply_slowed` | Reduces target initiative / action economy for duration rounds |
 | STUNNED | None | Action denial only — no advantage (key differentiator from prone) |
 | All others | None | No mechanical side effects beyond core effect system |
 
