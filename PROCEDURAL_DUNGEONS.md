@@ -41,7 +41,7 @@ The critical design goal: **procedural rooms must be indistinguishable from stat
 | **DungeonRoom** | Procedural room — extends RoomBase, tracks coordinates and instance |
 | **DungeonExit** | Lazy exit inside instances — creates rooms on first traversal |
 | **DungeonPassageExit** | Exit from dungeon back to world — cleans up instance tags |
-| **ProceduralDungeonMixin** | (Planned) Reusable mixin providing dungeon entry capability |
+| **ProceduralDungeonMixin** | Reusable mixin providing dungeon entry capability — composed into entry exit types |
 | **Entry exits** | World-side exits that create/join instances on traversal |
 
 ## Dungeon Types
@@ -202,9 +202,10 @@ ProceduralDungeonExit:
 
 | Trigger | Condition |
 |---|---|
-| **Lifetime expired** | `elapsed >= instance_lifetime_seconds` |
-| **Boss defeated + linger** | `boss_defeated` and `elapsed >= post_boss_linger_seconds` |
-| **All players left** | No tagged characters (shared: after `empty_collapse_delay`) |
+| **Lifetime expired** | `elapsed >= instance_lifetime_seconds` (skipped if `persistent_until_empty=True`) |
+| **All characters left** | No tagged characters in the instance — collapses immediately, or after `empty_collapse_delay` seconds if set |
+
+**Note on boss kills:** Killing the boss does not directly trigger collapse. `on_boss_defeated()` sets a `boss_defeated` flag used by quest progression and the room's `not_clear` clearing logic, but the instance only ends via the two triggers above. Templates that want the player to walk out at their own pace after the boss kill set `persistent_until_empty=True` (e.g. `rat_cellar`); this disables the lifetime expiry and lets the dungeon stay alive until the last player leaves the instance, at which point the "all characters left" trigger fires.
 
 ### Cleanup
 
@@ -242,8 +243,8 @@ Stale dungeon instances are collapsed on every server boot via `at_server_starts
 | `allow_pvp` | bool | False | PvP enabled in rooms |
 | `allow_death` | bool | False | True death or defeat mode |
 | `defeat_destination_key` | str | None | Room key for defeat respawn |
-| `post_boss_linger_seconds` | int | 300 | Time after boss kill before collapse |
-| `empty_collapse_delay` | int | 0 | Shared mode: delay after all leave |
+| `persistent_until_empty` | bool | False | If True, disable lifetime expiry — instance only collapses when all players leave (used by templates where the player should set their own pace, e.g. `rat_cellar` after boss kill) |
+| `empty_collapse_delay` | int | 0 | Seconds to wait after the last player leaves before collapsing (0 = immediate). Useful for shared mode where another party may arrive shortly. |
 | `terrain_type` | str | "dungeon" | Terrain tag for generated rooms |
 | `always_lit` | bool | False | Permanent lighting override |
 
@@ -269,8 +270,9 @@ For the Rat Cellar, the boss generator is separate from the room generator becau
 
 | Template | Type | Mode | Depth | Layout | Location |
 |---|---|---|---|---|---|
-| `rat_cellar` | instance | solo | 1 | 2 rooms (rats + boss) | Harvest Moon cellar |
+| `rat_cellar` | instance | solo | 1 | 2 rooms (rats + boss), `persistent_until_empty` | Harvest Moon cellar |
 | `deep_woods_passage` | passage | group | 5 | Winding forest trail | Deep woods (4 routes) |
+| `lake_passage` | passage | shared | 5 | Plains terrain, low branching, 1h lifetime | Lake crossing |
 | `cave_of_trials` | instance | group | 5 | Branching cave | Test world only |
 
 Templates are registered at server startup via `at_server_startstop.py` which imports the template modules, triggering their module-level `register_dungeon()` calls.
