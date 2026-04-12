@@ -300,39 +300,44 @@ Every droppable NFT item has a **saturation score** — how "saturated" is the g
 
 **Physical items** (rare weapons, rare ingredients) saturate transiently — they leave circulation via junk, destruction, or consumption — withdrawal to a private wallet does not remove them from circulation. The target is a ratio against active player count: as the player base grows, more rare items enter the game.
 
-#### Saturation Snapshot (daily)
+#### Saturation Snapshot (hourly)
 
-A daily script calculates saturation for all tracked items:
+The `NFTSaturationService` runs hourly and writes a row per tracked item to `SaturationSnapshot`:
 
 ```
-# Knowledge items (scrolls, recipes)
+# Knowledge items (scrolls, recipes) — implemented
 known_by = count of active players who have learned spell/recipe X
 unlearned_copies = count of scroll/recipe X in player hands (CHARACTER + ACCOUNT in NFTGameState)
 eligible_players = active players (7d) who have the requisite skill/school mastery to learn it
 saturation = (known_by + unlearned_copies) / eligible_players
 
-# Physical items (rare drops, ingredients)
-saturation = current_in_circulation / (active_players_7d / rarity_divisor)
-# saturation > 1.0 = oversaturated (too many in game), < 1.0 = undersaturated
+# Rare NFT items — framework in place, spawn algo still pending rarity_divisor config
+in_circulation = current count of item type in CHARACTER/ACCOUNT/SPAWNED locations
+saturation = 0.0  (placeholder until rarity_divisor is wired up)
 ```
 
 Knowledge saturation counts both **learned knowledge** (permanent, from `db.spellbook`/`db.recipe_book`) and **unlearned copies in player hands** (scrolls/recipes sitting in inventory or bank). This prevents flooding the game with scrolls that are already piling up unused — a scroll in someone's bank is supply in the pipeline.
 
-Updated daily — saturation moves slowly for both categories. One snapshot table covers everything.
+Updated hourly so a scroll spawned in hour N is counted as `unlearned_copies` in the hour N+1 snapshot, closing the gap naturally. This self-corrects even for tiny gaps (e.g. 1 new GM evocation player).
 
-#### Dynamic Loot Selection
+#### Deterministic Push Spawn (no random loot rolls)
 
-Mobs don't drop specific items. Instead, loot tables define:
-- **Does this mob drop a scroll/recipe/rare?** — flat % chance per kill, mob-specific
-- **What tier?** — mob tier gates item tier (e.g., NOVICE-SKILLED scrolls from common mobs, EXPERT-MASTER from bosses)
+**Compliance requirement:** FCM's loot spawning is **fully deterministic**. There are no `rand()`, no flat % drop chances, no dice rolls to decide whether a mob drops something. This is a deliberate design constraint driven by gambling law compliance in several jurisdictions — any chance-based loot system would classify parts of the game as gambling. Every scroll, recipe, and rare item that enters the world comes from a calculated budget based on current state, not from a probabilistic roll.
 
-When a drop triggers, the system:
-1. Queries the latest saturation snapshot
-2. Filters to items within the mob's tier range and drop category
-3. **Hard eligibility check:** removes any item at or above its saturation threshold — only undersaturated items remain
-4. **If no eligible items remain → drop is vetoed entirely.** Nothing drops. The mob's roll succeeded but the world doesn't need any of the items it could have dropped.
-5. **Weights selection among eligible items** — lower saturation = higher weight
-6. Picks one → that's the drop
+**Hourly push cycle, not per-kill pulls.** The `UnifiedSpawnScript` ticks every hour and runs calculators and distributors for every entry in `SPAWN_CONFIG`:
+
+1. **Calculator** computes an integer budget for each item type.
+   - **Knowledge (scrolls/recipes):** `budget = max(0, eligible_players - known_by - unlearned_copies)`. The budget is exactly the number of players who still need this scroll or recipe. If every eligible player already knows it or holds an unlearned copy, budget is 0 — nothing spawns.
+   - **Resources and gold:** budget driven by AMM price targets and consumption rates (see resource/gold calculators).
+   - **Rare NFTs:** framework in place using `RareNFTCalculator`, driven by a rarity target once the `rarity_divisor` config is finalised.
+
+2. **Distributor** places the calculated amount onto targets tagged to receive that category (`spawn_scrolls`, `spawn_recipes`, `spawn_rare_nft`, etc.). Each target has a per-tier maximum (`spawn_scrolls_max`, etc.) to cap headroom. Items are placed on mobs, containers, or rooms up to the headroom limit. Any surplus budget that can't be placed (no targets with headroom) is dropped for the cycle.
+
+3. **Quest debt** allows the quest system to pre-reserve part of a cycle's budget for quest rewards via `allocate_quest_reward()`. This lets quests guarantee specific rewards without breaking the deterministic budget model.
+
+When a player kills a mob and finds a scroll, the scroll is there because the spawn system **already placed it** on the mob during a previous hourly cycle. The kill itself doesn't roll dice — it just reveals loot that was deterministically positioned.
+
+**Why this works economically:** The gap-based formula means the system naturally distributes scrolls to meet demand. If 10 players unlock a new spell school, the next cycle spawns up to 10 scrolls for that spell across tagged mobs. Once absorbed into unlearned or learned inventory, the gap closes and spawning slows. No over-spawning, no under-spawning, no RNG tuning required.
 
 #### Why This Works
 
