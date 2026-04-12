@@ -21,6 +21,7 @@ DefaultRoom (Evennia)
 │   ├── RoomCemetery          — respawn binding point
 │   ├── RoomPostOffice        — mail system
 │   ├── RoomGateway           — zone connector (travel/explore)
+│   ├── RoomStable            — pet stabling (bank/unbank pattern, large-animal exception)
 │   ├── DungeonRoom           — procedural dungeon instance room
 │   ├── PressurePlateRoom     — trap room (+ TrapMixin)
 │   └── RoomPurgatory         — SYSTEM: death staging, timed release
@@ -246,6 +247,12 @@ Mail system hub. Shows unread mail count on arrival. Injects `CmdSetPostOffice` 
 
 Zone connector for sea/overland travel. Stores a `destinations` list of dicts defining routes with conditions (food cost, gold cost, level requirement, boat level). Hidden destinations can be discovered via the `explore` command (uses bread as fuel for exploration rolls). Injects `CmdSetGateway` for travel and explore commands.
 
+### RoomStable
+
+**File:** `typeclasses/terrain/rooms/room_stable.py`
+
+Pet stabling location. Tagged `stable` (category `system`) so the size system makes a large-animal exception — players can bring horses, mules, and other large pets indoors here. Injects `CmdSetStable` for `stable <pet>`, `retrieve <pet>`, and `stabled` (list) commands. Stabling moves the pet object into the owner's `AccountBank` via the same `at_post_move` → `NFTService.bank()` dispatch used for item banking; retrieval is the inverse. Stable fees combine a base rent plus per-pet feed and heal costs. See [PETS_AND_MOUNTS.md](PETS_AND_MOUNTS.md) § Stabling for the full lifecycle.
+
 ### DungeonRoom
 
 **File:** `typeclasses/terrain/rooms/dungeon/dungeon_room.py`
@@ -327,4 +334,4 @@ Room display, lighting, details, and exit formatting are tested across:
 - `tests/typeclass_tests/test_room_display.py` — room rendering, brief mode, darkness
 - `tests/command_tests/test_cmd_look_details.py` — room details system
 - `tests/command_tests/test_cmd_exits.py` — verbose exit display
-- `tests/dungeon_tests/` — dungeon room integration (48 tests)
+- `tests/dungeon_tests/` — dungeon room integration
