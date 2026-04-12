@@ -81,7 +81,24 @@ A single environment variable called `DATABASE_URL` controls everything.
 
 The toggle lives in `server/conf/settings.py`. It uses `dj-database-url`, a standard Django library that parses a PostgreSQL connection string into the format Django expects.
 
-**In PostgreSQL mode, all four database aliases (default, xrpl, ai_memory, subscriptions) point to the same physical PostgreSQL database.** The routers ensure each app's tables only get created in the right place, so there's no collision. This is simpler and cheaper than running four separate PostgreSQL instances.
+**In PostgreSQL mode, all four database aliases (default, xrpl, ai_memory, subscriptions) point to the same physical PostgreSQL database.** Table prefixes (`xrpl_*`, `ai_memory_*`, `subscriptions_*`) keep them separate within the single database. This is simpler and cheaper than running four separate PostgreSQL instances.
+
+### Routers are mode-dependent
+
+The database routers in `blockchain/xrpl/db_router.py`, `ai_memory/db_router.py`, and `subscriptions/db_router.py` are **only active in SQLite (local dev) mode**. In `settings.py`:
+
+```python
+if not _DATABASE_URL:
+    DATABASE_ROUTERS = [
+        "blockchain.xrpl.db_router.XRPLRouter",
+        "ai_memory.db_router.AiMemoryRouter",
+        "subscriptions.db_router.SubscriptionsRouter",
+    ]
+```
+
+**Why?** Locally, each alias is a **separate SQLite file** (`evennia.db3`, `xrpl.db3`, `ai_memory.db3`, `subscriptions.db3`). The routers direct each app's models to the right file. Without them, all tables would land in `evennia.db3`.
+
+**On Railway**, all aliases point to the **same** Postgres instance. Enabling routers here is actively harmful — their `allow_migrate()` method would block table creation for non-default apps during a single `migrate` call, leaving the `xrpl`, `ai_memory`, and `subscriptions` tables uncreated while still recording the migrations as applied.
 
 For how Railway injects `DATABASE_URL` and manages environments, see [DEPLOYMENT.md § Environment Variables](DEPLOYMENT.md#environment-variables).
 
@@ -141,6 +158,8 @@ A migration is a Python file that describes a change to the database schema — 
 
 ### The developer workflow
 
+Local development and Railway deployment migrate differently because of the SQLite vs Postgres mode difference.
+
 ```
 1. Developer changes a model (e.g. adds a field to NpcMemory)
      ↓
@@ -149,17 +168,24 @@ A migration is a Python file that describes a change to the database schema — 
      → Generates a new migration file (e.g. 0003_add_mood_field.py)
      ↓
 3. Developer runs: evennia migrate --database ai_memory
-     → Django applies the migration to local SQLite
+     → Routers are active (SQLite mode)
+     → Migration applies to the local ai_memory.db3 file
+     → Must use --database flag because routers block cross-alias migrations
      ↓
 4. Developer commits the migration file to Git
      ↓
 5. Code gets merged and deployed to Railway
      ↓
-6. Railway's release command runs: evennia migrate --database ai_memory
-     → Django sees the new migration file
-     → Applies it to PostgreSQL
+6. Railway runs deploy_migrate.py:
+     → Routers are DISABLED (DATABASE_URL is set)
+     → Single `migrate` call (no --database flag) applies ALL pending
+       migrations from every app to the shared Postgres instance
      → Database schema now matches the code
 ```
+
+**Key distinction:**
+- **Local (SQLite, routers active):** Use `evennia migrate --database <alias>` for each custom database. The routers require this.
+- **Railway (Postgres, routers disabled):** A single `migrate` call handles everything. This is what `deploy_migrate.py` does automatically.
 
 For how Railway runs migrations automatically on deploy, see [DEPLOYMENT.md § How Code Gets Deployed](DEPLOYMENT.md#how-code-gets-deployed).
 
