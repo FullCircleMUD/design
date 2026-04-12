@@ -356,80 +356,78 @@ sea routes.
 
 ### Evocation — Direct Damage
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Magic Missile | Workhorse | Auto-hit force. 1–5 missiles (1d4+1 each), scales with tier. | Done |
-| BASIC | Frostbolt | Workhorse | 1d6 cold + contested SLOWED (1–5 rounds). | Done |
-| BASIC | Fire Bolt | Hit-roll DPS | d20 + INT + mastery vs AC. (tier)d8 fire. Can miss, can crit (2x dice on nat 20). | Done |
-| SKILLED | Flame Burst | Safe AoE | 3d6 fire, diminishing accuracy per target. | Done |
-| SKILLED | Lightning Bolt | Single-target | High single-target lightning damage. | Planned |
-| EXPERT | Fireball | **Fireball eq.** | 8d6 fire, unsafe AoE, DEX save half. Hits caster + allies. | Done |
-| EXPERT | Chain Lightning | Multi-target | Bouncing lightning between targets. | Planned |
-| MASTER | Cone of Cold | Safe AoE + CC | 10d6 cold, safe AoE, auto-applies SLOWED (2 rounds). | Done |
-| GM | Power Word: Death | **Wow factor** | Instant death (HP ≤ 20) or contested save. | Done |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Magic Missile | Workhorse | Auto-hit force. tier × (1d4+1) missiles. Spammable, no save, no resistance interaction. |
+| BASIC | Fire Bolt | Hit-roll DPS | d20+INT+mastery vs AC. tier × d8 fire. Can miss, crit on nat 20 doubles dice. Subject to fire resistance. |
+| BASIC | Frostbolt | Debuff workhorse | Flat 1d6 cold + contested INT+mastery vs CON to apply SLOWED (1–5 rounds per tier). The SLOWED is the value, damage is incidental. |
+| SKILLED | Flame Burst | Safe AoE | 3–6d6 fire (per tier). Diminishing accuracy per target (100/80/60/40/20%). |
+| EXPERT | Fireball | **Fireball eq.** | 8–14d6 fire (per tier), unsafe AoE, DEX save (DC = caster d20+INT+mastery) for half. Hits caster + allies. |
+| MASTER | Cone of Cold | Safe AoE + CC | 10–13d6 cold (per tier). Safe AoE diminishing accuracy. Auto-applies SLOWED (1 round at MASTER, 2 at GM — see Known Discrepancies). |
+| GM | Power Word: Death | **Wow factor** | HP ≤20 auto-kills (unless nat 1). HP >20 contested INT+8 vs CON+HD bonus; nat 20 always kills, nat 1 always fails. 100 mana, 3 round cooldown. |
 
 ### Abjuration — Protection & Dispel
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Mage Armor | Workhorse | +3/+3/+4/+4/+5 AC, 1–3 hours. Shares ARMORED effect with Divine Armor. | Done |
-| BASIC | Shield | Reactive | Auto-triggers when hit. +4/+4/+5/+5/+6 AC for 1/2/2/3/3 rounds, 3/5/7/9/12 mana per trigger (scales with tier). Toggle. | Done |
-| BASIC | Feather Fall | Utility | Negates fall damage. 10 min–4 hours. Checked in _check_fall(). | Done |
-| SKILLED | Resist Elements | Utility buff | 20% resistance to one element (fire/cold/lightning/acid/poison), 30s. | Done |
-| SKILLED | Shadowcloak | Group stealth | +4 stealth to caster + group, 4 minutes. | Done |
-| EXPERT | Antimagic Field | **Fireball eq.** | Unsafe AoE — dispels all spell/potion effects, suppresses casting 1 round. | Scaffolded |
-| MASTER | Group Resist | Party buff | Resist Elements on all party members. | Scaffolded |
-| GM | Invulnerability | **Wow factor** | All damage reduced to 0 for 1 combat round. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Mage Armor | Workhorse | +3/+3/+4/+4/+5 AC, 1–3 hours per tier. Shares ARMORED effect with Divine Armor. Anti-stack with mana refund on recast. |
+| BASIC | Shield | Reactive | **Reactive only — cannot be cast manually.** Auto-triggers when hit via weapon hook. +4/+4/+5/+5/+6 AC for 1/2/2/3/3 rounds. Mana cost 3/5/7/9/12 per trigger. Toggle via `toggle shield`. |
+| BASIC | Feather Fall | Utility | Negates fall damage. 10 min–4 hours per tier. Checked in `_check_fall()`. Mana refund on recast while active. |
+| SKILLED | Resist Elements | Utility buff | 20–60% resistance to one element (fire/cold/lightning/acid/poison) for 30s. Uses `has_spell_arg` for element choice (`cast resist fire`). Stacks with racial/gear up to 75% cap. |
+| SKILLED | Shadowcloak | Group stealth | +4 to +10 stealth on caster and same-room group members for 4–10 minutes per tier. Mana refund if all targets already affected. |
+| EXPERT | Antimagic Field | **Fireball eq.** *(stub)* | Unsafe AoE — dispels all spell/potion effects in room, suppresses casting 1–3 rounds. Permanent item enchantments unaffected. |
+| MASTER | Group Resist | Party buff *(stub)* | Resist Elements applied to all party members. Uses spell argument for element. |
+| GM | Invulnerability | **Wow factor** *(stub)* | All damage reduced to 0 for 1 combat round. Antimagic Field can dispel. 100 mana. |
 
 ### Necromancy — Life Manipulation
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Drain Life | Workhorse | 2d6 cold, heals caster 100% of damage dealt. | Done |
-| BASIC | Raise Skeleton | Summon | Raise weak skeleton minion from corpse. 1–3 skeletons, 2–10 min. | Scaffolded |
-| BASIC | Fear | CC | Contested INT vs WIS. FRIGHTENED = forced flee each round. Save-each-round WIS. HUGE+ immune. 1–5 rounds. | Done |
-| SKILLED | Vampiric Touch | Melee drain | Touch attack 1d6 necrotic, heals past max HP. Escalating mana cost. | Done |
-| SKILLED | Raise Dead | Summon | Raise 1 corpse as undead minion for 2 minutes. | Scaffolded |
-| EXPERT | Soul Harvest | **Fireball eq.** | 8d6 cold unsafe AoE (everyone except caster). Caster heals total dealt. | Done |
-| MASTER | Raise Lich | Elite summon | Raise 1 lich (intelligent, casts Drain Life), 10 minutes. One at a time. | Scaffolded |
-| GM | Death Mark | **Wow factor** | Mark target 1 round — all damage to marked target heals the attacker. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Drain Life | Workhorse | 2–6d6 cold (per tier). Caster heals 100% of actual damage dealt (after resistance), capped at max HP. Undead are immune (no life force). |
+| BASIC | Fear | CC | Contested INT+mastery vs WIS. FRIGHTENED for 1–5 rounds — target flees a random exit each round (or cowers if no exits). Save-each-round WIS to break early. HUGE+ immune. |
+| BASIC | Raise Skeleton | Summon *(stub)* | Raise 1–3 weak skeleton minions from a corpse. 2–10 minute duration per tier. Consumes the corpse. |
+| SKILLED | Vampiric Touch | Melee drain | Touch attack (d20+INT+mastery vs AC). 1–4d6 necrotic per tier. Caster heals **above** max HP. Mana cost scales dynamically (3%–95% of max) with the bonus HP bracket. 10-minute duration. |
+| SKILLED | Raise Dead | Summon *(stub)* | Raise 1–4 corpses as undead minions. Minion count and duration scale with tier. Player corpses with equipment are protected. |
+| EXPERT | Soul Harvest | **Fireball eq.** | 8–14d6 cold (per tier) unsafe AoE — drains all living entities except the caster (excludes undead). Caster heals for the **total** damage dealt across all targets. |
+| MASTER | Raise Lich | Elite summon *(stub)* | Transforms a single corpse into an intelligent lich (NPC spellcaster). 10–30 minute duration per tier. One active at a time. Player corpses protected. |
+| GM | Death Mark | **Wow factor** *(stub)* | Marks target for 1 combat round. All damage dealt to the marked target heals the attacker for the same amount (capped at attacker's max HP). |
 
 ### Conjuration — Summoning & Dimensional Control
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Acid Arrow | Workhorse | 1d4+1 acid DoT per round, 1–5 rounds (scales with tier). | Done |
-| BASIC | Light | Utility | Conjures magical light that illuminates room for everyone. Follows caster. 30 min–4 hours. Shares effect with Divine Light. | Done |
-| BASIC | Find Familiar | Summon | Summons a familiar with remote control (see through eyes, move room-to-room). Tier determines type: rat (BASIC), cat/stealth (SKILLED), owl/flies (EXPERT), hawk/flies+fights (MASTER), imp/flies+fights+light (GM). One per caster. Permanent until dismissed/killed. | Done |
-| SKILLED | Teleport | Utility | Self-teleport within range (district → zone → world by tier). | Scaffolded |
-| EXPERT | Dimensional Lock | **Fireball eq.** | Unsafe AoE — applies DIMENSION_LOCKED (blocks flee/teleport/summon). | Scaffolded |
-| MASTER | Conjure Elemental | Combat summon | Summon elemental (fire/ice/earth/air) for 10 min. One at a time. | Scaffolded |
-| GM | Gate | **Wow factor** | Party-wide portal to any waygate the caster has personally discovered. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Acid Arrow | Workhorse | DoT: 1d4+1 acid per round for 1–5 rounds (scales with tier). New cast replaces existing DoT. Spammable. |
+| BASIC | Light | Utility | Conjures a magical light orb that illuminates the room for everyone. Follows caster. 30 min–4 hours per tier. Shares LIGHT_SPELL effect with Divine Light. Mana refund on recast. |
+| BASIC | Find Familiar | Summon | Summons a familiar with remote control (see through eyes, move room-to-room, return on command). Tier determines creature type: rat (BASIC) → cat/stealth (SKILLED) → owl/flies (EXPERT) → hawk/flies+fights (MASTER) → imp/flies+fights+light (GM). One per caster. Persistent until dismissed or killed. |
+| SKILLED | Teleport | Utility *(stub)* | Self-teleport within range (district → zone → world by tier). Blocked by `no_teleport_out`/`no_teleport_to` room flags and DIMENSION_LOCKED. 60s cooldown. |
+| EXPERT | Dimensional Lock | **Fireball eq.** *(stub)* | Unsafe AoE — applies DIMENSION_LOCKED to all in room (blocks flee/teleport/summon) for 1–3 rounds. Contested WIS save (Expert normal, Master disadvantage, GM no save). |
+| MASTER | Conjure Elemental | Combat summon *(stub)* | Summons a lesser/greater elemental (fire/ice/earth/air) for 10–30 minutes. One active at a time. Recasting replaces existing. Blocked by DIMENSION_LOCKED. |
+| GM | Gate | **Wow factor** *(stub)* | Opens a portal to any waygate the caster has **personally discovered** (gating doesn't count as discovery). Party can walk through. 30 second portal duration, 5 minute cooldown. |
 
 ### Divination — Knowledge & Perception
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Identify | Workhorse | Reveals item/creature properties. Actor detail scales by tier. | Done |
-| BASIC | Darkvision | Utility | Grants DARKVISION condition. 30 min–4 hours. Shares effect with Divine Sight. | Done |
-| BASIC | Locate Object | Utility | Find named object by range (room→district→zone→world by tier). | Scaffolded |
-| BASIC | Detect Traps | Utility | Reveals traps in current room. Passive detection on move at SKILLED+. | Scaffolded |
-| SKILLED | True Sight | Self-buff | SKILLED: see HIDDEN. EXPERT: detect traps. MASTER: see INVISIBLE. 5–60 min. | Done |
-| SKILLED | Scry | Remote intel | Query creature status from anywhere. Info scales by tier. | Scaffolded |
-| EXPERT | Mass Revelation | **Fireball eq.** | Unsafe AoE — strips HIDDEN/INVISIBLE from all. Reveals traps at GM. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Identify | Workhorse | Reveals item or creature properties via dynamic templates. Actor detail level-gated: 1–5 BASIC, 6–15 SKILLED, 16–25 EXPERT, 26–35 MASTER, 36+ GM. PvP room check applies to actor identify. |
+| BASIC | Darkvision (Infravision) | Utility | Grants DARKVISION condition for 30 min–4 hours per tier. Shared effect with Divine Sight. Mana refund on recast. (File is `infravision.py`, registered as key `darkvision`.) |
+| BASIC | Locate Object | Utility *(stub)* | Find named object within range (room → district → zone → any zone by tier with increasing detail). Uses spell argument for object name. |
+| BASIC | Detect Traps | Utility *(stub)* | Reveals traps in current room. Passive detection on move (SKILLED+), disarm bonus (EXPERT+), hidden door reveal (MASTER+). 5 min–1 hour duration. |
+| SKILLED | True Sight | Self-buff | SKILLED: see HIDDEN. EXPERT: auto-detect traps. MASTER: see INVISIBLE. 5–60 min duration per tier. Personal buff only — doesn't reveal targets to others. Anti-stack (refresh-only). |
+| SKILLED | Scry | Remote intel *(stub)* | Remote target intel: tier 2 status+zone, tier 3 +room+HP, tier 4 +AC/level/resistances, tier 5 +equipment. 30s cooldown. |
+| EXPERT | Mass Revelation | **Fireball eq.** *(stub)* | Unsafe AoE — strips HIDDEN/INVISIBLE from all in room. MASTER+ also strips Greater Invisibility. GM tier reveals traps and secret exits. |
 
 ### Illusion — Deception & Concealment
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Blur | Workhorse | Self-buff, combat only. Enemies have disadvantage on 1 attack/round. 3–7 rounds. | Done |
-| BASIC | Mirror Image | Evasion | Creates 1–5 illusory duplicates that absorb attacks. | Scaffolded |
-| BASIC | Disguise Self | Utility | Change visible name/desc/race. Breaks on combat. spell_arg for name. | Scaffolded |
-| BASIC | Distract | Utility | Grants caster advantage for 1–3 rounds (combat) or non-combat advantage. Auto-flee. | Scaffolded |
-| SKILLED | Invisibility | Stealth | INVISIBLE condition, 5–60 min. Breaks on attack/cast. | Done |
-| EXPERT | Mass Confusion | **Fireball eq.** | Unsafe AoE — applies CONFUSED (random target selection each round). | Scaffolded |
-| MASTER | Greater Invisibility | Persistent stealth | INVISIBLE that doesn't break on attack/cast. 5–10 min. | Scaffolded |
-| GM | Phantasmal Killer | **Wow factor** | Contested WIS save. Fail: 20d6 psychic (or death). Save: 10d6. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Blur | Workhorse | Self-buff, combat only. Enemies have disadvantage on 1 attack per round for 3–7 rounds per tier. Per-round BlurScript. Anti-stack (replace existing). |
+| BASIC | Distract | Utility | Dual-mode. In combat: grants all allies advantage vs target for `tier` rounds. Out of combat: grants caster non-combat advantage. |
+| BASIC | Mirror Image | Evasion *(stub)* | Creates 1–5 illusory duplicates. Incoming attacks may hit an image instead; images are destroyed on hit. |
+| BASIC | Disguise Self | Utility *(stub)* | Change visible name (SKILLED+ also adds description and race). Breaks on combat. True Sight reveals at lower tiers. Uses spell argument for disguise name. |
+| SKILLED | Invisibility | Stealth | INVISIBLE condition, 5–60 minutes per tier. Breaks on attack or cast. Grants 1 round of advantage on the first attack out of invisibility. Refresh-only (no downgrade). |
+| EXPERT | Mass Confusion | **Fireball eq.** *(stub)* | Unsafe AoE — applies CONFUSED for 1–3 rounds, causing random target selection each round. Foresight charges (when implemented) auto-save. |
+| MASTER | Greater Invisibility | Persistent stealth *(stub)* | INVISIBLE that does **not** break on attack or cast. 5–10 minutes per tier. Mass Revelation strips at MASTER+. |
+| GM | Phantasmal Killer | **Wow factor** *(stub)* | Contested WIS save. Fail: 20d6 psychic damage (can kill from fright with special death message). Success: 10d6 half. |
 
 ---
 
@@ -437,55 +435,57 @@ sea routes.
 
 ### Divine Healing — Restoration (Cleric/Paladin)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Cure Wounds | Workhorse | Heals (tier)d6 + WIS mod. Single target. | Done |
-| BASIC | Vigorise | Workhorse | Restores (tier+4)d6 + WIS mod movement. Single target. | Done |
-| BASIC | Cure Blindness | Condition removal | Removes BLINDED. EXPERT+: also removes DEAF. | Done |
-| BASIC | Cure Poison | Condition removal | Removes POISONED + PoisonDoTScript. EXPERT+: grants poison resistance. | Done |
-| SKILLED | Purify | Condition removal | Removes one harmful condition (poison, disease, etc.). | Scaffolded |
-| EXPERT | Mass Heal | **Fireball eq.** | Heals all allies in room. Scales with WIS mod. | Scaffolded |
-| GM | Death Ward | **Wow factor** | Pre-emptive buff — intercepts death, target survives at 1 HP. Consumed on trigger. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Cure Wounds | Workhorse | Heals tier × d6 + WIS mod, capped at target's max HP. Single target, melee range. Mana refund if target at full HP. |
+| BASIC | Vigorise | Workhorse | Restores (tier+4) × d6 + WIS mod movement points, capped at target's max move. Single target, melee range. Mana refund if target at full movement. |
+| BASIC | Cure Blindness | Condition removal | Removes BLINDED. EXPERT+: also removes DEAF. Mana refund if no effect. |
+| BASIC | Cure Poison | Condition removal | Removes POISONED and PoisonDoTScript. EXPERT+: also grants 25–75% poison resistance for 5–10 minutes per tier. Mana refund if no poison and no resistance applies. |
+| SKILLED | Purify | Condition removal *(stub)* | Removes a single harmful condition (poison, disease, etc.). |
+| EXPERT | Mass Heal | **Fireball eq.** *(stub)* | Heals all allies in room. Scales with tier and WIS modifier. |
+| GM | Death Ward | **Wow factor** *(stub)* | Pre-emptive buff — when target would die, they survive at 1 HP instead. Ward is consumed on trigger. 100 mana, 3 round cooldown. |
 
 ### Divine Protection — Warding (Cleric/Paladin)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Sanctuary | Workhorse | Self-buff — enemies can't target caster. Breaks on offensive action. 1–5 min. | Done |
-| BASIC | Divine Armor | Workhorse | +2/+2/+3/+3/+4 AC, 1–3 hours. Shares ARMORED effect with Mage Armor. | Done |
-| BASIC | Bless | Support | +1/+1/+2/+2/+3 hit + save bonus on friendly target. 1–3 min. | Done |
-| EXPERT | Holy Aura | **Fireball eq.** | AC + resistance bonus to all allies in room. | Scaffolded |
-| GM | Divine Aegis | **Wow factor** | Total damage immunity on target (self or ally) for short duration. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Sanctuary | Workhorse | Self-buff — enemies cannot target caster. Breaks on offensive action. 1–5 minutes per tier. Refresh-only (won't downgrade); mana refund on no-op. |
+| BASIC | Divine Armor | Workhorse | +2/+2/+3/+3/+4 AC, 1–3 hours per tier. Shares ARMORED effect with Mage Armor (weaker variant). Stacks with Shield. |
+| BASIC | Bless | Support | +1/+1/+2/+2/+3 to hit rolls and save-each-round rolls on friendly target. 1–3 minutes per tier. Anti-stack with mana refund on recast. |
+| EXPERT | Holy Aura | **Fireball eq.** *(stub)* | Group buff — AC and resistance bonus to all allies in room. Scales with tier. |
+| GM | Divine Aegis | **Wow factor** *(stub)* | Total damage immunity on target (self or ally) for short duration. Parallel to Invulnerability but for allies. |
 
 ### Divine Judgement — Holy Wrath (Paladin only)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Smite | Reactive | Auto-triggers on weapon hit. Bonus radiant 1d6–5d6 per hit. Toggle. 3–12 mana/hit. | Done |
-| BASIC | Bravery | Self-buff | +1/+1/+2/+2/+3 AC + 5–25 bonus HP. 5–15 min. HP clamped on expiry. | Done |
-| BASIC | Bolt of Judgement | Workhorse | Auto-hit radiant (tier x 1d4+1). Evil multiplier: max(1, ceil(-alignment/250)). 1x–4x damage. | Done |
-| EXPERT | Holy Fire | **Fireball eq.** | Radiant damage 8d6, diminishing accuracy, enemies only. | Scaffolded |
-| GM | Wrath of God | **Wow factor** | Massive unsafe AoE radiant + BLINDED/STUNNED to all. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Bolt of Judgement | Workhorse | Auto-hit radiant: tier × (1d4+1). **Alignment-based scaling**: damage multiplied by `max(1, ceil(-target_alignment/250))` — good/neutral 1×, evil 2×, very evil 3×, pure evil 4×. Deterministic, based on a public game-state variable. |
+| BASIC | Smite | Reactive | **Reactive only — cannot be cast manually.** Auto-triggers on weapon hits in combat. Adds tier × 1d6 bonus radiant damage per triggering hit. Mana cost 3/5/7/9/12 per trigger. Toggle via `smite` command. |
+| BASIC | Bravery | Self-buff | +1/+1/+2/+2/+3 AC and +5/+10/+15/+20/+25 max HP for 5–15 minutes per tier. Heals by the bonus HP amount on cast. HP clamped on expiry. Anti-stack. |
+| EXPERT | Holy Fire | **Fireball eq.** *(stub)* | Safe AoE radiant (8–14d6 per tier) with diminishing hit accuracy (100/80/60/40/20%). Enemies only. |
+| GM | Wrath of God | **Wow factor** *(stub)* | Massive unsafe AoE radiant damage + BLINDED/STUNNED condition to all in room. Hits caster and allies. 100 mana, 3 round cooldown. |
 
 ### Divine Revelation — Divine Knowledge (Cleric/Paladin)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Holy Insight | Workhorse | Identify + divine sight (alignment, undead, evil aura detection). | Done |
-| BASIC | Divine Light | Utility | Holy radiance illuminates room for everyone. Follows caster. 30 min–4 hours. Shares effect with Light. | Done |
-| BASIC | Divine Sight | Utility | Grants DARKVISION condition. 30 min–4 hours. Shares effect with Darkvision. | Done |
-| BASIC | Detect Alignment | Utility | See coloured alignment tags on creatures: (Evil) red, (Good) gold, (Neutral) white. 30 min–4 hours. | Done |
-| SKILLED | Holy Sight | Divine perception | SKILLED: detect traps. EXPERT: see INVISIBLE. MASTER: see HIDDEN. 5–60 min. | Done |
+All spells in this school are fully implemented.
+
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Holy Insight | Workhorse | Divine version of Identify. Includes alignment detection and undead detection on actors. Level-gated identification same as Identify. |
+| BASIC | Divine Light | Utility | Conjures a sphere of holy radiance that illuminates the room for everyone. 30 min–4 hours per tier. Shares LIGHT_SPELL effect with Conjuration's Light. Mana refund on recast. |
+| BASIC | Divine Sight | Utility | Grants DARKVISION through divine blessing. 30 min–4 hours per tier. Shares effect with Divination's Darkvision. |
+| BASIC | Detect Alignment | Utility | Grants alignment aura perception on creatures in room: (Evil) red, (Good) gold, (Neutral) white. 30 min–4 hours per tier. |
+| SKILLED | Holy Sight | Divine perception | SKILLED: auto-detect traps. EXPERT: see INVISIBLE. MASTER: see HIDDEN. 5–60 minutes per tier. Note: unlock order differs from True Sight. Personal buff only. Anti-stack. |
 
 ### Divine Dominion — Control & Compulsion (Cleric/Paladin)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Command | Workhorse | Contested WIS. Four words: halt (STUNNED), grovel (PRONE), drop (disarm), flee. HUGE+ immune. | Done |
-| BASIC | Calm | CC | Stops all combat in room. CALM effect prevents re-engagement. Contested WIS vs WIS. HUGE+ immune. 10–30s. | Scaffolded |
-| BASIC | Blindness | CC | Inflicts BLINDED. Contested WIS vs CON. Save-each-round CON. Grants advantage to enemies. HUGE+ immune. 3–8 rounds. | Done |
-| EXPERT | Hold | Single-target CC | PARALYSED with per-round WIS save to break. Size-gated: EXPERT=medium, MASTER=large, GM=huge. | Done |
-| GM | Word of God | **Wow factor** | Mass STUNNED all enemies. No save first round, contested WIS saves after. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Command | Workhorse | Combat-only. Contested WIS (caster d20+WIS+mastery vs target d20+WIS). Issues one of four words via spell argument: **halt** (STUNNED), **grovel** (PRONE), **drop** (force disarm), **flee** (force flee). HUGE+ immune. |
+| BASIC | Blindness | CC | Inflicts BLINDED for 3–8 rounds per tier. Contested WIS (caster) vs CON (target). Save-each-round to break early. Grants advantage to enemies. HUGE+ immune. |
+| BASIC | Calm | CC *(stub)* | Ends all combat in room. Applies CALM effect preventing re-engagement for 10–30 seconds per tier. Contested WIS vs WIS for each target. HUGE+ immune. Caster must be in combat to cast. |
+| EXPERT | Hold | Single-target CC | Binds target in divine chains (PARALYSED) for 3–5 rounds. Contested WIS+mastery sets DC; target rolls d20+WIS each round to escape. Size-gated: EXPERT can hold up to MEDIUM, MASTER up to LARGE, GM up to HUGE. GARGANTUAN always immune. |
+| GM | Word of God | **Wow factor** *(stub)* | Mass STUNNED on all enemies in room. No save first round; contested WIS each subsequent round to break. 100 mana, 3 round cooldown. |
 
 ---
 
@@ -493,14 +493,14 @@ sea routes.
 
 ### Nature Magic — Primal Forces (Druid/Ranger)
 
-| Mastery | Spell | Role | Description | Status |
-|---------|-------|------|-------------|--------|
-| BASIC | Entangle | Workhorse | Single-target vines. Contested WIS vs STR. ENTANGLED = can't act, attackers gain advantage. 1–5 rounds. | Done |
-| BASIC | Speak with Animals | Utility | Communicate with animal mobs. Calm aggression at SKILLED+. 5 min–1 hour. | Scaffolded |
-| BASIC | Thorn Whip | Damage + CC | (tier)d6 piercing. If target flying: contested WIS vs STR pulls to ground. HUGE+ immune to pull. | Scaffolded |
-| BASIC | Water Breathing | Utility | Grants WATER_BREATHING condition. Cancels breath timer. 10 min–4 hours. Can target allies. | Done |
-| EXPERT | Call Lightning | **Fireball eq.** | 6d6–12d6 lightning unsafe AoE. DEX save for half. Lower damage than Fireball (nature design choice). | Done |
-| GM | Earthquake | **Wow factor** | Massive unsafe AoE bludgeoning + STUNNED/knockdown to all. | Scaffolded |
+| Mastery | Spell | Role | Description |
+|---------|-------|------|-------------|
+| BASIC | Entangle | Workhorse | Single-target vines. Contested WIS+mastery vs STR. ENTANGLED for 1–5 rounds — denies action and grants enemies advantage. Spammable druid workhorse. |
+| BASIC | Thorn Whip | Damage + CC | Deals tier × d6 piercing (always, regardless of save). Contested WIS+mastery vs STR to pull target to caster's height (uses height system). Held for `tier` rounds. HUGE+ immune to pull only. Pulled-and-released targets fall or drown depending on terrain. |
+| BASIC | Water Breathing | Utility | Grants WATER_BREATHING condition for 10 min–4 hours per tier. Cancels active breath timer. Can target self or ally. Mana refund on recast. |
+| BASIC | Speak with Animals | Utility *(stub)* | Communicate with animal mobs. Calm aggression at SKILLED+, animals share info at EXPERT+, brief allies at MASTER+. |
+| EXPERT | Call Lightning | **Fireball eq.** | 6–12d6 lightning (per tier) unsafe AoE. DEX save (DC = caster d20+WIS+mastery) for half. Uses WIS modifier (not INT). Lower mana than Fireball — nature design choice. |
+| GM | Earthquake | **Wow factor** *(stub)* | Massive unsafe AoE bludgeoning damage + STUNNED/knockdown to all in room. Hits caster and allies. 100 mana, 3 round cooldown. |
 
 ---
 
@@ -628,97 +628,105 @@ Mixed into `FCMCharacter`. Provides `learn_spell()`, `knows_spell()`, `memorise_
 - `get_room_enemies_at_height(caster)` — enemies at the caster's `room_vertical_position` only.
 - `get_room_all_at_height(caster)` — all living entities at the caster's height only.
 
-### Implementation Status by School
+### Spell Arguments (`has_spell_arg`)
 
-> Spell balance numbers (damage dice, mana costs, cooldowns, scaling) are in the school tables above. Below lists implementation status and key technical notes only.
+Some spells take a free-text argument that selects a sub-mode or chooses among several effects. Set `has_spell_arg = True` on the Spell subclass and parse the argument inside `_execute()`.
 
-**Evocation (6/8):** MagicMissile (BASIC, auto-hit force), Frostbolt (BASIC, cold + contested SLOWED), FlameBurst (SKILLED, safe AoE, fire), Fireball (EXPERT, unsafe AoE, DEX save half), ConeOfCold (MASTER, safe AoE, diminishing accuracy + SLOWED), PowerWordDeath (GM, contested save). Planned: Lightning Bolt (SKILLED), Chain Lightning (EXPERT).
+Examples:
+- **Resist Elements** — `cast resist fire` selects which element to resist
+- **Command** — `cast command halt` / `grovel` / `drop` / `flee` selects which compulsion word
+- **Locate Object** — `cast locate <object name>` selects what to find
+- **Disguise Self** — `cast disguise self <name>` selects the disguise identity
 
-**Abjuration (4/7):** Shield (BASIC, reactive — auto-triggers via `check_reactive_shield()` in `combat/reactive_spells.py`, toggle via `toggle shield`, anti-stacking via `has_effect("shield")`), MageArmor (BASIC, seconds-based, stacks with Shield), Resist (SKILLED, `has_spell_arg` — `cast resist fire [target]`, per-element named effects coexist, uses DamageResistanceMixin via Layer 2 dispatch), Shadowcloak (SKILLED, group targeting via `get_group_leader()` + `get_followers(same_room=True)`).
+The base `Spell.cast()` flow strips the argument before doing target resolution and passes it through to `_execute()` for the spell to interpret.
 
-**Necromancy (3/6):** DrainLife (BASIC, heals caster 100% capped at max HP), VampiricTouch (SKILLED, touch attack, heals PAST max HP, escalating mana cost), SoulHarvest (EXPERT, unsafe AoE, drains all living except caster).
+### Mana Refund on No-Op
 
-**Conjuration (1/5):** AcidArrow (BASIC, DoT via AcidDoTScript with combat-round ticks, anti-stacking: new cast replaces old).
+A common pattern across self-buffs and condition-removal spells: if the cast would have no effect (target already at full HP, target already has the buff at equal or higher tier, target has no condition to cure), the spell **refunds the mana** and returns `(False, ...)` instead of consuming it. This prevents the player from accidentally burning mana on a cast that does nothing.
 
-**Divination (2/4):** Identify (BASIC, target_type="any", actor + item branches, actors level-gated), TrueSight (SKILLED, DETECT_INVIS at MASTER+, `db.true_sight_tier` for trap detection).
+Spells using this pattern:
+- **Cure Wounds** — refund if target is at full HP
+- **Vigorise** — refund if target is at full movement
+- **Cure Blindness** — refund if no BLINDED/DEAF to remove
+- **Cure Poison** — refund if no poison and no resistance applies
+- **Mage Armor** — refund if already armored at equal or higher tier
+- **Divine Armor** — refund if already armored at equal or higher tier
+- **Bless** — refund if already blessed
+- **Sanctuary** — refund if existing sanctuary is stronger or has more time remaining
+- **Shadowcloak** — refund if **all** group members in room are already affected
+- **Light** / **Divine Light** / **Darkvision** / **Divine Sight** / **Detect Alignment** / **Water Breathing** / **Feather Fall** — refund on recast while existing effect has more remaining time
+- **True Sight** / **Holy Sight** / **Invisibility** — refresh-only (won't downgrade), refund if existing is stronger
 
-**Illusion (2/5):** Blur (BASIC, BlurScript sets 1 disadvantage on all enemies per round), Invisibility (SKILLED, `break_invisibility()` zeros all refs + stops timer, recast refresh pattern).
+Pair this with the **recast refresh pattern** documented above: `get_effect_remaining_seconds()` is the canonical way to compare existing vs new duration before deciding to refresh, refund, or replace.
 
-**Divine Healing (1/4):** CureWounds (BASIC, WIS modifier scaling).
+### Alignment-Based Scaling
 
-**Divine Protection (1/3):** Sanctuary (BASIC, `break_sanctuary()` zeros all refs + stops timer, recast refresh pattern, combat hooks).
+A pattern for divine spells that punish evil targets: damage is multiplied by a function of the target's `alignment_score`, which is a public deterministic game-state variable (the same one used by the alignment system documented in [ALIGNMENT_SYSTEM.md](ALIGNMENT_SYSTEM.md)).
 
-**Divine Judgement (1/3):** Smite (BASIC, reactive — auto-triggers on weapon hit, toggle, respects radiant resistance). Paladin only.
+**Bolt of Judgement** is the reference implementation:
 
-**Divine Revelation (2/2):** HolyInsight (BASIC, extends Identify, evil/undead detection at tier 2+), HolySight (SKILLED, `_can_see_hidden()` helper in room_base.py, 23 tests).
+```python
+multiplier = max(1, math.ceil(-target.alignment_score / 250))
+```
 
-**Divine Dominion (2/3):** Command (BASIC, `has_spell_arg`, 4 words, HUGE+ immune, 33 tests), Hold (EXPERT, PARALYSED with per-round WIS save, size gate scales, 24 tests).
+This gives:
 
-**Nature Magic (2/3):** Entangle (BASIC, save_dc/save_stat, on-apply callback grants advantage), CallLightning (EXPERT, unsafe AoE, WIS-based save DC, 14 tests).
+| Target alignment | Score range | Multiplier |
+|---|---|---|
+| Good or Neutral | ≥ 0 | 1× |
+| Evil | -1 to -500 | 2× |
+| Very Evil | -501 to -750 | 3× |
+| Pure Evil | -751 to -1000 | 4× |
 
-**Total: 29 of 50 spells implemented. 318+ spell tests.**
+**Compliance note:** this mechanic uses **no random number generation**. The damage multiplier is a deterministic function of a publicly visible game-state variable (the target's alignment, which players can read via Detect Alignment and Holy Insight). It does not violate the gambling-law constraint that variable outcomes must be disclosed before payment, because the player can compute the exact damage multiplier before casting. See [COMPLIANCE.md § Gambling Law](COMPLIANCE.md#gambling-law--deterministic-distribution--pre-disclosure) for the broader principle.
 
----
+This pattern is reusable for any divine spell that's meant to punish evil targets without introducing chance.
 
-## Spell Backlog
+### Reactive Spells
 
-All scaffolded spells grouped by blocking dependency. Implement the dependency
-first, then the spells unlock.
+Two spells trigger automatically during combat without consuming the player's action:
 
-### Ready to implement — no blockers
+**Shield (Abjuration)** and **Smite (Divine Judgement — Paladin only)** are flagged as reactive — they cannot be cast manually with `cast`. Instead, the player toggles them on (`toggle shield`, `smite`) and the combat handler calls into `combat/reactive_spells.py` from inside the 14-hook attack pipeline:
 
-| School | Spell | Tier | Notes |
-|--------|-------|------|-------|
-| Evocation | Lightning Bolt | SKILLED | High single-target. Design needed. |
-| Evocation | Chain Lightning | EXPERT | Bouncing multi-target. Design needed. |
-| Divine Healing | Purify | SKILLED | Condition removal — pick purgeable list |
-| Divine Judgement | Holy Fire | EXPERT | Safe AoE pattern (copy Flame Burst) |
-| Abjuration | Group Resist | MASTER | Copy Shadowcloak group-targeting pattern + Resist logic |
-| Divine Healing | Mass Heal | EXPERT | Copy Shadowcloak group-targeting pattern + Cure Wounds logic |
-| Divine Protection | Holy Aura | EXPERT | Copy Shadowcloak group-targeting pattern + AC/resist buff |
-| Divine Dominion | Word of God | GM | Mass STUNNED — named effect system handles this already |
-| Nature Magic | Earthquake | GM | Mass damage + STUNNED — same infrastructure as Word of God |
-| Divine Judgement | Wrath of God | GM | Mass radiant + BLINDED/STUNNED — same pattern |
-| Divination | Mass Revelation | EXPERT | Trap system + hidden object system both fully implemented |
-| Illusion | Phantasmal Killer | GM | WIS save system exists (Hold uses it), DamageType.PSYCHIC exists |
-| Illusion | Greater Invisibility | MASTER | Small change — add flag check in break_invisibility() |
-| Divination | Scry | SKILLED | ObjectDB.objects.filter() available for global mob search |
+- **Shield** triggers via `at_wielder_about_to_be_hit` (defender hook). Gates: toggle on, memorised, mana available, not already shielded. Effect: AC bonus for a few rounds. Mana cost is per trigger, not per round.
+- **Smite** triggers via `at_post_attack` on a successful hit (attacker hook). Gates: toggle on, memorised, mana. Effect: bonus radiant damage on the triggering hit. Mana cost is per trigger.
 
-### Blocked on: damage immunity / death interception hooks
+The trigger happens inside the combat tick, so the player's normal action is unaffected. They get the benefit on top of whatever they were doing.
 
-Need new hooks in `take_damage()` and/or `die()` for damage immunity and
-death prevention. The combat round system and damage pipeline exist, but these
-specific interception points don't yet.
+**Why this design:** lets reactive defensive spells coexist with active casting in a single round. A mage can swing a staff, get hit, have Shield trigger, and cast a Magic Missile all in the same combat tick. See [COMBAT_SYSTEM.md § Reactive Spells](COMBAT_SYSTEM.md#reactive-spells) for the combat-side of the integration and the full hook ordering.
 
-| School | Spell | Tier | Notes |
-|--------|-------|------|-------|
-| Abjuration | Antimagic Field | EXPERT | Dispel iteration ready (break_effect exists), but room-level casting suppression needed |
-| Abjuration | Invulnerability | GM | Needs damage immunity flag check in take_damage() |
-| Divine Protection | Divine Aegis | GM | Same as Invulnerability — damage immunity on target |
-| Necromancy | Death Mark | GM | Needs heal-attacker hook in damage pipeline |
-| Divine Healing | Death Ward | GM | Needs death interception hook in die() |
+### Familiar System (Find Familiar)
 
-### Blocked on: pet/retainer system
+`Find Familiar` (Conjuration BASIC) is a major system in its own right rather than just a buff or summon. Brief overview:
 
-No owner tracking on NPCs, no minion AI, no minion duration timers.
+- **Tier-based creature types:** rat (BASIC) → cat (SKILLED, stealth) → owl (EXPERT, flies) → hawk (MASTER, flies + fights) → imp (GM, flies + fights + light source)
+- **One per caster** — dismiss or let die before recasting
+- **Persistent** — survives logout and reload, not duration-limited
+- **Remote control commands** — the caster can `look` through the familiar's eyes, send it to adjacent rooms, and recall it. Higher-tier familiars (hawk, imp) can also engage in combat on the caster's behalf.
 
-| School | Spell | Tier | Notes |
-|--------|-------|------|-------|
-| Necromancy | Raise Dead | SKILLED | Raise 1 corpse for 2 min |
-| Necromancy | Raise Lich | MASTER | Intelligent undead, casts Drain Life |
-| Conjuration | Conjure Elemental | MASTER | Elemental pet for 10 min |
+The familiar system overlaps with the broader pet system. Full mechanics live in [PETS_AND_MOUNTS.md](PETS_AND_MOUNTS.md). The Conjuration spell file is just the entry point that creates the persistent familiar object and links it to the caster.
 
-### Blocked on: room/world systems
+### Implementation Status
 
-| School | Spell | Tier | Notes |
-|--------|-------|------|-------|
-| Conjuration | Teleport | SKILLED | Room teleport flags not yet on RoomBase |
-| Conjuration | Dimensional Lock | EXPERT | DIMENSION_LOCKED enum defined but checks not in flee/teleport |
-| Conjuration | Gate | GM | Waygate typeclass + portal objects don't exist yet |
+The school tables above are the source of truth for what's implemented vs scaffolded. Spells marked `*(stub)*` in those tables exist as files but their `_execute()` either raises `NotImplementedError` or returns `(False, ...)` without producing an effect.
 
-### Blocked on: CONFUSED condition
+**Current totals:** 76 spell files across 12 schools. **35 are real implementations**, **41 are stubs** awaiting either a blocking dependency or a design decision. The stubs are not ordered or prioritised here — that's tracked in `ops/PLANNING/0_BACKLOG`.
 
-| School | Spell | Tier | Notes |
-|--------|-------|------|-------|
-| Illusion | Mass Confusion | EXPERT | CONFUSED not in conditions enum, combat tick random-target override needed |
+Common blocking dependencies for the stubs:
+
+- **Damage immunity / death interception hooks** — needed for Invulnerability, Divine Aegis, Death Ward, Death Mark
+- **Pet / retainer / minion system** — needed for Raise Dead, Raise Lich, Conjure Elemental, Greater Familiar control extensions
+- **Room flag and portal system** — needed for Teleport, Dimensional Lock, Gate
+- **CONFUSED condition** — needed for Mass Confusion (combat tick must override target selection randomly while still being deterministic from a player-action standpoint)
+- **Trap and hidden-object exposure** — needed for Mass Revelation, Detect Traps full feature set
+- **NPC spellcasting AI** — needed for Raise Lich (the lich casts Drain Life)
+- **Group/party detection** — needed for Mass Heal, Holy Aura, Group Resist (the Shadowcloak pattern works but needs to be lifted out)
+
+### Known Discrepancies
+
+These are doc-vs-code mismatches that need a **design decision** rather than just a doc update — pick one and either fix the code or fix the doc.
+
+| Item | Doc says | Code says | Notes |
+|---|---|---|---|
+| Cone of Cold SLOWED duration | 2 rounds at MASTER, 3 at GM | 1 round at MASTER, 2 at GM | The doc historically claimed 2/3; the code implements 1/2 via `_SLOW_ROUNDS = {4: 1, 5: 2}`. Pick one — update the table above and the code. Either is defensible from a balance standpoint. |
 
