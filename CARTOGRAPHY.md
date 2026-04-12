@@ -52,13 +52,15 @@ When a character with CARTOGRAPHY BASIC+ enters any room with a `map_cell` tag a
 ### The `survey` Command
 
 - **Active, timed** (~3 seconds per room)
+- Surveys the **current room plus adjacent rooms** (district scale) or **current room only** (region scale) — see "Survey Behaviour by Map Scale" below
 - If the room has multiple map tags and the character holds multiple matching maps, all are updated simultaneously
 - Cancelled by movement before timer fires
 - Blocked in combat
 - Completion % recalculates after each survey
+- **Smart skip:** if the current room AND all adjacent cells are already surveyed, the command reports "You've already mapped everything notable here" rather than running the timer
 - Creates tactical tension in dangerous areas — standing still while mobs wander. The party may need to protect the cartographer.
 
-*Flavour: "You kneel down, unfurling your map. The scratch of charcoal on parchment echoes in the passage..."*
+*Flavour: "You kneel down, unfurling your map. The scratch of charcoal on parchment echoes quietly..."*
 
 #### Survey Behaviour by Map Scale
 
