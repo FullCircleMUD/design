@@ -25,34 +25,43 @@ Two travel modes:
 
 Every route starts hidden. Players cannot travel a route until it has been discovered.
 
-### How Discovery Works
+### How Discovery Works (current implementation)
 
-Food is used in two distinct phases:
+The cartographer triggers `explore` at a gateway. The command:
 
-**Phase 1 — The journey (hard minimum).** The destination's `food_cost` is the minimum bread required to even reach the area. A party attempting to explore a 3-bread route must have at least 3 bread per character before `explore` can begin. If they don't, the command is blocked. This bread is deducted upfront — it is the cost of getting there.
+1. Filters destinations to those that are still hidden, not already known to the party (via map or chart item), pass non-food/non-gold conditions, and meet the cartography mastery gate.
+2. Picks one explorable destination at random as the target.
+3. Deducts the destination's `gold_cost` upfront (if any).
+4. Loops over the cartographer's bread, deducting one per iteration and rolling against `explore_chance` (default 20%). The first successful roll discovers the destination, spawns the route map NFT, and triggers a delayed travel sequence to the destination gateway.
+5. If all bread is consumed without success, the cartographer "limps back with empty stores" — they remain at the departure gateway (no teleport home).
 
-**Phase 2 — On station (exploration rolls).** Any bread beyond the journey minimum becomes exploration days. Each extra bread = one day on station = one roll against `explore_chance` (default 20%). Rolls continue until success or bread runs out.
+### Planned: Two-Phase Food Model
 
-**On success:** The party arrives at the destination gateway. A **route map NFT** (departure ↔ destination) auto-creates in the cartographer's inventory. The map is the knowledge — keep it to travel the route again, trade it, or give it away. New maps are only produced by exploration — traveling a known route never produces a copy.
+> **Status: Planned — not yet implemented.** The current code uses a single bread-per-roll loop with no journey minimum.
 
-**On failure (all extra bread consumed):** No discovery. The party returns to the gateway they left from, arriving with a high hunger state. The return journey costs no additional food — the game handles it narratively.
+The intended future model splits food into two phases:
 
-**Example (solo character):** A 3-bread route. The character has 5 bread.
+**Phase 1 — The journey (hard minimum).** The destination's `food_cost` is the minimum bread required to reach the area. Deducted upfront before any rolls happen.
+
+**Phase 2 — On station (exploration rolls).** Bread beyond the journey minimum becomes exploration days. Each extra bread = one roll against `explore_chance`. Rolls continue until success or bread runs out.
+
+**On failure (all extra bread consumed):** No discovery. The party returns to the gateway they left from, arriving in a high hunger state. The return journey costs no additional food — the game handles it narratively.
+
+**Example (solo character, planned model):** A 3-bread route. The character has 5 bread.
 - 3 bread deducted immediately (the journey).
-- Roll 1 — fail — 4th bread deducted (1 bread per roll for a solo character).
+- Roll 1 — fail — 4th bread deducted.
 - Roll 2 — success — character arrives at destination.
-- (If roll 2 had failed: 5th bread deducted, roll 3. Fail = return home hungry, all 5 bread spent.)
 
-> **Note:** This example shows a solo character (party size 1). Each exploration roll costs 1 bread per character — see Party Rules below for how this scales with party size.
+### Planned: Food Pooling Across the Party
 
-### Food Pooling Across the Party
+> **Status: Planned — not yet implemented.** Currently only the cartographer's own bread is read and deducted; party inventories are not pooled or debited.
 
-Food for `explore` is **totalled and shared across the whole party**, then deducted from each member proportionally as days pass.
+Food for `explore` will be **totalled and shared across the whole party**, then deducted from each member proportionally as days pass.
 
 - **Journey cost:** `food_cost × party_size` bread must be present in the party collectively.
-- **On-station cost:** each additional exploration day costs `1 bread × party_size`.
+- **On-station cost:** each additional exploration day will cost `1 bread × party_size`.
 
-**Example:** Party of 4, 3-bread route, wanting 2 days on station. Total bread required: (3 + 2) × 4 = **20 bread** across the party. Each player needs 5 bread. As days pass, 1 bread is deducted from each party member per day (i.e., each exploration roll costs 1 bread per character — the same mechanic as the solo example above, scaled by party size).
+**Example (planned):** Party of 4, 3-bread route, wanting 2 days on station. Total bread required: (3 + 2) × 4 = **20 bread** across the party. Each player needs 5 bread. As days pass, 1 bread is deducted from each party member per day.
 
 ### Cartography Mastery Gate
 
@@ -92,7 +101,7 @@ Travel is gated by:
 - **Food cost** — bread consumed per character (see route table in WORLD.md)
 - **Level required** — minimum total_level (route-specific, rarely used)
 
-Travel is currently **instant** — see Future Work for the planned travel delay mechanic.
+Travel uses a **delayed narrative sequence**. `_delayed_travel()` (in `cmd_travel.py`) fires staggered messages on a 2-second tick via `evennia.delay()` before teleporting the party. The caller is locked out of other actions while in transit (`ndb.is_processing` flag, same pattern as crafting). Message lists are currently hardcoded constants per command type (`_TRAVEL_MESSAGES`, `_SEA_MESSAGES`, `_EXPLORE_MESSAGES`) — see Future Work for the planned per-destination configurable narrative.
 
 ---
 
@@ -199,29 +208,30 @@ Training locations follow the geography — you must reach a zone before you can
 
 ```python
 {
-    "key": str,                  # unique route ID
-    "label": str,                # display name
-    "destination": RoomGateway,  # target room object
-    "travel_description": str,   # narrative on arrival
+    "key": str,                          # unique route ID
+    "label": str,                        # display name
+    "destination": RoomGateway,          # target room object
+    "travel_description": str,           # narrative on arrival
     "conditions": {
-        "food_cost": int,        # bread consumed per character
-        "gold_cost": int,        # gold consumed
-        "level_required": int,   # minimum total_level
-        "boat_level": int,       # ShipType tier (1–5)
+        "food_cost": int,                # bread consumed (caller only — see #2)
+        "gold_cost": int,                # gold consumed
+        "level_required": int,           # minimum total_level
+        "boat_level": int,               # ShipType tier (1–5)
         # stubs: mounted, fly, water_breathing
     },
-    "hidden": bool,              # invisible until discovered
-    "discover_item_tag": str,    # item tag that also reveals this dest
-    "explore_chance": int,       # % chance per bread roll (default 20)
+    "hidden": bool,                      # invisible until discovered
+    "discover_item_tag": str,            # item tag that also reveals this dest
+    "explore_chance": int,               # % chance per bread roll (default 20)
+    "required_cartography_tier": int,    # min cartography mastery for explore (1–5)
 }
 ```
 
-**Condition checking** lives in `cmd_travel.py` as `CONDITION_CHECKS` — a flat dict of validators imported by `cmd_explore.py`. Currently missing: `required_cartography_tier`, `required_seamanship_tier`.
+**Condition checking** lives in `cmd_travel.py` as `CONDITION_CHECKS` — a flat list of validators imported by `cmd_explore.py` and `cmd_sail.py`. The `required_cartography_tier` field is gated directly inside `cmd_explore.py` via `_best_party_skill(caller, CARTOGRAPHY)`, not via a `CONDITION_CHECKS` validator. `required_seamanship_tier` is intentionally absent — seamanship is never a hard gate (see Seamanship Risk).
 
 **Commands:**
-- `cmd_travel.py` — overland/dock travel, validates conditions, consumes costs, teleports
-- `cmd_sail.py` — sea travel, two-pass ship selection, SEAMANSHIP-gated
-- `cmd_explore.py` — discovery rolls, bread-per-roll mechanic, spawns route map NFT on success
+- `commands/room_specific_cmds/gateway/cmd_travel.py` — overland/dock travel, validates conditions, consumes costs, teleports via `_delayed_travel`
+- `commands/class_skill_cmdsets/class_skill_cmds/cmd_sail.py` — sea travel (subclass of `CmdSkillBase`, SEAMANSHIP-skill-gated to require at least BASIC mastery), two-pass ship selection, reuses `validate_conditions` / `consume_costs` / `_delayed_travel` from `cmd_travel.py`
+- `commands/room_specific_cmds/gateway/cmd_explore.py` — discovery rolls, bread-per-roll mechanic, cartography-tier gate, spawns route map NFT on success
 
 **Test routes:** Town Dock ↔ Beach Dock in `world/test_world/test_area_gateway.py` (`boat_level: 1, food_cost: 1`).
 
@@ -256,13 +266,15 @@ Commands become thin: `cmd_explore` calls `gate.get_discoverable_destinations(ca
 2. Caller does not already hold a route map for this destination
 3. `required_cartography_tier` ≤ caller's current cartography mastery
 
-This introduces `required_cartography_tier` to the destination schema. `required_seamanship_tier` is NOT added — seamanship is never a hard gate.
+`required_cartography_tier` is already in the destination schema today (gated inside `cmd_explore.py`); the refactor formalises it as a `BaseGate` validator. `required_seamanship_tier` is NOT added — seamanship is never a hard gate.
 
 **Files to touch:** `room_gateway.py` (split into base + two subclasses), `cmd_travel.py` (remove condition dict, thin out), `cmd_sail.py`, `cmd_explore.py`.
 
 ---
 
 ## Seamanship Risk
+
+> **Status: Planned — not yet implemented.** `cmd_sail.py` does not currently read seamanship mastery for risk calculation, does not roll for shipwreck, and does not warn the player. Any character with at least BASIC seamanship and a qualifying ship sails safely today. The model below describes the intended end state.
 
 Seamanship is **not** a hard gate. Any character may attempt any voyage, regardless of their seamanship level — the risk is theirs to accept.
 
@@ -295,14 +307,13 @@ Seamanship is **not** a hard gate. Any character may attempt any voyage, regardl
 
 ## Future Work
 
-### Travel Delay and Narrative
+### Per-Destination Travel Narrative
 
-Travel is currently instant. Planned: a configurable delay with staggered narrative messages.
+Travel delay itself is implemented (`_delayed_travel` with 2-second ticks and `ndb.is_processing` lockout). What's still planned: making the narrative configurable per route instead of using the three hardcoded message lists (`_TRAVEL_MESSAGES`, `_SEA_MESSAGES`, `_EXPLORE_MESSAGES`).
 
 - Add `travel_time` (seconds) and `travel_messages` (list of str) to destination config
-- Use Evennia `delay()` to fire messages during transit
-- Player unable to act during transit (temporary cmdset lockout or limbo room)
-- Longer journeys (more bread) = more narrative beats
+- Per-destination message lists drive the existing `_delayed_travel` loop
+- Longer journeys (more bread) = more narrative beats tuned to the specific route
 
 Example for a 3-bread journey:
 ```
