@@ -26,13 +26,21 @@ Rowan is the first character a new player meets. He tends bar at The Harvest Moo
 
 His role changes as the player advances:
 
-| Player state | Rowan's behaviour |
+Rowan's `BartenderNPC._build_quest_context()` selects one of several context blocks based on player state, which is then injected into his LLM prompt:
+
+| Context | When |
 |---|---|
-| Tutorial not started | Begins tutorial, explains the world |
-| Tutorial in progress | Guides current chunk |
-| Tutorial complete, no quests done | Directs to the noticeboard; offers the rat cellar quest |
-| Rat cellar complete | Points toward the noticeboard for further quests |
-| All starter quests done | Background character — bartender, sells beer and ale |
+| `NEW_PLAYER_CONTEXT` | Tutorial not yet completed, no active rat cellar quest — points the player at the tutorial |
+| `QUEST_PITCH_CONTEXT` | Tutorial done, no active rat cellar quest — pitches the rat cellar |
+| `QUEST_ACTIVE_CONTEXT` | Player has the rat cellar quest, not yet completed |
+| `TUTORIAL_SUGGEST_CONTEXT` | Player completed the rat cellar but skipped the tutorial — suggests the tutorial |
+| `GENERIC_CONTEXT` | Fallthrough — over the starter level cap, fully onboarded, or no `quest_key` configured |
+
+There's also a **warrior guild referral bypass**: if a player above the starter level cap is on the warrior_initiation guild quest, Rowan re-enters the rat cellar pitch/active flow even though the level gate would otherwise have flipped him to generic. This is the only way a high-level player can pick up the rat cellar quest.
+
+**Starter level cap:** `BartenderNPC.STARTER_LEVEL_CAP = 3`. Above this level, Rowan defaults to `GENERIC_CONTEXT` and behaves as a background bartender — the assumption being that any player past level 3 has already onboarded.
+
+**Tutorial delivery:** Rowan suggests the tutorial but does not run it himself. The tutorial chunks are spawned by `ExitTutorialStart` exits in the Tutorial Hub via `TutorialInstanceScript` — the player physically leaves Rowan to do the tutorial. Rowan has no "tutorial in progress" state.
 
 The transition from Rowan to the **noticeboard** is the graduation point. Rowan is the hand-hold; the noticeboard is where autonomous play begins. Once a player is reading the noticeboard to find NPCs with quests, they've crossed from onboarding into the game proper.
 
@@ -161,12 +169,11 @@ A player who legitimately remorts multiple times will never hit the cap through 
 - **No error message visible to the player**: the NPC simply doesn't raise the topic (avoids gaming the cap by making it invisible)
 - Quest rewards are only paid out on completion, so partial progress before hitting the cap is harmless
 
-### Implementation Notes
+### Implementation Status
 
-- Account-level counter stored at `account.db.quest_completion_counts[quest_key]`
-- Incremented on successful quest completion
-- Checked by the quest-giving NPC before offering the quest
-- See `ops/PLANNING/0_BACKLOG` → "Remort Quest Wipe + Account-Level Quest Caps" for implementation tasks
+**Account-level cap: implemented.** Each starter quest sets `account_cap = 10` on its `BaseQuest` subclass. `BaseQuest.can_offer()` checks `account.db.quest_completion_counts[quest_key]` before offering the quest, and `BaseQuest._on_complete()` increments the counter on successful completion. The counter persists across character deletion and recreation because it lives on the account, not the character.
+
+**Remort quest wipe: not yet implemented.** `cmd_remort.py` currently does not touch quest state. This means a remorted character retains its completed-quests list from the previous remort and cannot replay the starter quests. The "Why 10?" math above assumes remort wipe is in place — until it lands, a single legitimate player only consumes *one* slot per quest unless they create multiple characters. The cap is therefore safe (it can never block a legitimate player today), but the headroom calculation is theoretical until remort wipe ships. See `ops/PLANNING/0_BACKLOG` → "Remort Quest Wipe" for the remaining work.
 
 ---
 
