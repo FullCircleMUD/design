@@ -432,21 +432,114 @@ Enchanting wearables (rings, amulets, etc.) is **deterministic** — same inputs
 
 ### Weapons — Gem Insets (Enchanter + Jeweller)
 
+> **Status: partially implemented — needs redesign work.** The original implementation used runtime `d100` rolls for gem enchanting, which is non-compliant with FCM's gambling law constraints (no random chance-based mechanics can decide the value a player receives for consideration paid). The enchanting mechanic is being redesigned around the pre-disclosure + slot consumption model described below. Gem tables, enchant recipes, and the inset command (`cmd_inset`) exist in code but the slot-based outcome queue and commit flow need to be built.
+
 Two distinct crafting roles combine to produce enchanted weapons:
 
-- **Enchanter** — enchants raw gems into enchanted gems. The outcome is probabilistic — the enchanter rolls on an effect table and the resulting gem has a known, inspectable effect. The risk (and speculation) is entirely at this step.
-- **Jeweller** — insets an enchanted gem into a weapon. This is a deliberate choice: the player can inspect the gem's effects before committing. The inset consumes the gem and the fee.
+- **Enchanter** — consumes a raw gem to enchant it. The outcome is **pre-rolled and disclosed before the player commits** (see flow below). The player always knows what they are getting before paying. The resulting enchanted gem has a known, inspectable effect.
+- **Jeweller** — insets an enchanted gem into a weapon. The inset is a deliberate choice — the player can inspect the gem's effects before committing. The inset consumes the gem and the fee.
 
 Because there are potentially hundreds of weapon types and scores of possible gem enchants, every weapon+gem combination produces a functionally unique item with a bespoke name. These cannot be standardised into proxy token AMM pools — each one is one-of-a-kind and must be sold player-to-player.
+
+### Compliance-Driven Design: Pre-Disclosure with Slot Consumption
+
+**Why not just roll dice?** FCM does not use runtime randomness to determine the value a player receives for consideration paid. Runtime `rand()` or `d100` rolls at the point of purchase create an "uncertain future event" — which is one of the legal elements of gambling in several jurisdictions. To stay clearly on the non-gambling side of the line, every transaction must be deterministic from the player's perspective at the moment they pay.
+
+**The model:** per `(gem_type, mastery_level)` combination, the system maintains a single "next available" enchantment slot. Each slot holds one pre-rolled outcome waiting to be claimed. Players query the slot to see what they would get, then either commit or walk away. The slot advances only when consumed — never on rejection, never on timeout, never on command spam.
+
+#### Data model
+
+```
+EnchantmentSlot
+├── table_key         "ruby_skilled", "sapphire_expert", etc.
+├── slot_number       monotonically increasing integer, for display
+├── current_outcome   the rolled result waiting to be claimed
+└── rolled_at         timestamp of when this outcome was generated
+```
+
+One row per `(gem_type, mastery_level)` combination. At bootstrap, each row is seeded with `slot_number=1` and a freshly rolled outcome. Every slot has an outcome ready from day one — players never see an empty slot.
+
+#### Query flow (`enchant <gem>`)
+
+```
+Player types: enchant ruby
+
+System reads the ruby_skilled slot (pure read, no DB write):
+
+    "The next ruby enchant [SKILLED] is enchant #312.
+     It will have these effects:
+       +1 perception bonus
+       +1 stealth bonus
+       Restriction: Thief class only
+
+     If another player accepts this before you, it will become unavailable.
+     Continue [Y]/N?"
+```
+
+**Nothing is modified.** The query is idempotent. Ten players can run `enchant ruby` back to back and all ten will see slot #312 until one of them commits.
+
+#### Commit flow (player types Y)
+
+The commit happens inside a database transaction using row-level locking:
+
+```
+BEGIN TRANSACTION
+    SELECT EnchantmentSlot FOR UPDATE WHERE table_key = "ruby_skilled"
+        ← lock acquired; concurrent commits block here
+
+    IF slot.slot_number == remembered_slot_number:
+        # ── Race won: slot is still what the player saw ──
+        apply outcome to the gem
+        consume gem + pay fee
+        slot.slot_number += 1
+        slot.current_outcome = roll_next_outcome()
+        slot.rolled_at = now()
+        COMMIT
+        Display: "Your ruby is now enchanted with: ..."
+
+    ELSE:
+        # ── Race lost: another player consumed #312 first ──
+        new_slot_number = slot.slot_number
+        new_outcome = slot.current_outcome
+        COMMIT (no changes written)
+        Display: "Someone else claimed ruby enchant #312 just before you.
+
+                  The next ruby enchant [SKILLED] is now #313.
+                  Effects: ...
+                  If another player accepts this before you, it will
+                  become unavailable.
+                  Continue [Y]/N?"
+        (re-prompt with the new slot number)
+```
+
+`SELECT ... FOR UPDATE` (Django's `select_for_update()`) guarantees only one commit transaction can be "inside" a given slot at a time. The second transaction waits for the first to finish, then reads the updated state. The `slot_number` check acts as a tiebreaker so the race loser knows to re-prompt with the new slot.
+
+#### Two rules, two purposes
+
+The design has two rules that are often conflated but serve different goals:
+
+1. **Pre-disclosure before commit** — *this is the compliance rule.* The player sees the outcome before paying, so there is no uncertain future event at the point of purchase. Legally, this is what removes the mechanic from the gambling definition.
+
+2. **Slot persists until consumed** — *this is the anti-abuse rule.* Without it, players could spam `enchant ruby` and reject repeatedly, forcing the system to keep rolling until they saw an outcome they liked. Compliance would still hold (they'd know every outcome before committing), but the market tension around rare outcomes would evaporate. Locking the slot until consumption preserves the intended game design — players must burn through undesirable slots or wait for someone else to consume them.
+
+#### Emergent market dynamics
+
+Because the slot advances only on consumption, and the next slot's outcome is only generated at the moment of consumption, the system creates natural market tension:
+
+- **Waiting strategy:** a player sees slot #312 is a mediocre outcome, walks away, hoping someone else consumes it so they can see #313.
+- **Burning strategy:** a player really wants a rare outcome, so they enchant mediocre gems in sequence (accepting each one) to advance the counter and reveal what comes next.
+- **Competitive claim:** when a rare outcome is sitting in the slot, any player with a gem can race to claim it — creating brief windows of intense demand for raw gems.
+
+None of these are gambling behaviours — every transaction is fully disclosed before payment.
 
 ### The Economic Loop
 
 1. **Base weapon** — commodity-priced via proxy token AMM
 2. **Raw gems** — commodity-priced via resource AMM (rare drop, so price reflects scarcity)
-3. **Gem enchanting** — enchanter rolls effect; result is inspectable before inset decision
+3. **Gem enchanting** — player views the next slot's pre-disclosed outcome, decides to commit or walk away; if committed, the outcome is applied and the next slot rolls
 4. **Gem inset** — jeweller inserts enchanted gem into weapon; consumes gem + fee
 5. **Enchanted weapon** — bespoke item sold player-to-player at player-determined price
-6. **Every step funds the economy** — rounding dust, AMM fees, crafting fees, and inset fees flow to SINK for reward recirculation and operational costs
+6. **Every step funds the economy** — rounding dust, crafting fees, and inset fees flow to SINK for reward recirculation and operational costs
 
 ---
 
@@ -478,7 +571,7 @@ The economic system supports multiple viable playstyles beyond combat:
 | **Crafter** | Process raw materials into finished goods | Material cost → finished item value spread |
 | **Trader/Arbitrageur** | Buy low, sell high, hold inventory | Exploit price swings between resources and over time |
 | **Self-sufficient crafter** | Gather own materials + craft | Lower costs = wider margins, but more time investment |
-| **Enchanter/Speculator** | Enchant weapons with gems | Risk vs reward — bad rolls lose money, good rolls sell high |
+| **Enchanter/Speculator** | Enchant gems for weapon inset | No runtime rolls — each outcome is pre-disclosed before commit. Speculation lives in *slot position* (burn through mediocre slots to reach a rare one, or wait for others to consume them) rather than in dice-based chance |
 | **Merchant** | Buy from crafters, sell on auction house | Middleman margin on Master/GM items |
 
 ### Trader Gameplay Example
