@@ -318,20 +318,20 @@ Recipes auto-granted at mastery level-up (no scrolls needed).
 | Sun Bleached Sash | Sash | +1 CON |
 | Scout's Cap | Leather Cap | +1 Initiative |
 | Pugilist's Gloves | Leather Gloves | +1 hit/dam unarmed |
-| Cowboy Boots | Leather Boots | TBD |
-| Title Belt | Leather Belt | TBD |
-| Rustler's Chaps | Leather Pants | TBD |
-| Shepherd's Sling | Sling | TBD |
-| Warden's Leather | Leather Armor | TBD |
-| Defender's Helm | Bronze Helm | TBD |
-| Bracers of Deflection | Bronze Bracers | TBD |
-| Greaves of the Vanguard | Bronze Greaves | TBD |
-| Nightseer's Ring | Copper Ring | TBD |
-| Runeforged Chain | Copper Chain | TBD |
-| Spellweaver's Bangle | Copper Bangle | TBD |
-| Truewatch Studs | Copper Studs | TBD |
-| Skydancer's Ring | Pewter Ring | TBD |
-| Aquatic N95 | N95 Mask | TBD |
+| Cowboy Boots | Leather Boots | Detect invisible |
+| Title Belt | Leather Belt | +10 bludgeoning resistance |
+| Rustler's Chaps | Leather Pants | +15 max move |
+| Shepherd's Sling | Sling | +1 hit / +1 damage with sling |
+| Warden's Leather | Leather Armor | +2 AC, +10 piercing resistance (no mages) |
+| Defender's Helm | Bronze Helm | Crit immune (no mages) |
+| Bracers of Deflection | Bronze Bracers | +10 slashing resistance (no mages) |
+| Greaves of the Vanguard | Bronze Greaves | +1 initiative (no mages) |
+| Nightseer's Ring | Copper Ring | Darkvision |
+| Runeforged Chain | Copper Chain | +1 hit / +1 damage (dwarf only) |
+| Spellweaver's Bangle | Copper Bangle | +5 max mana |
+| Truewatch Studs | Copper Studs | +1 perception |
+| Skydancer's Ring | Pewter Ring | Fly |
+| Aquatic N95 | N95 Mask | Water breathing |
 | Enchanted Ruby | Ruby | Random effect via gem table |
 
 All enchanting recipes are BASIC entry. Gem enchanting uses output tables with
@@ -722,21 +722,3 @@ No owner tracking on NPCs, no minion AI, no minion duration timers.
 |--------|-------|------|-------|
 | Illusion | Mass Confusion | EXPERT | CONFUSED not in conditions enum, combat tick random-target override needed |
 
-### Enchanting effects TBD
-
-| Recipe | Base Item | Notes |
-|--------|-----------|-------|
-| Cowboy Boots | Leather Boots | Effect not yet designed |
-| Title Belt | Leather Belt | Effect not yet designed |
-| Rustler's Chaps | Leather Pants | Effect not yet designed |
-| Shepherd's Sling | Sling | Effect not yet designed |
-| Warden's Leather | Leather Armor | Effect not yet designed |
-| Defender's Helm | Bronze Helm | Effect not yet designed |
-| Bracers of Deflection | Bronze Bracers | Effect not yet designed |
-| Greaves of the Vanguard | Bronze Greaves | Effect not yet designed |
-| Nightseer's Ring | Copper Ring | Effect not yet designed |
-| Runeforged Chain | Copper Chain | Effect not yet designed |
-| Spellweaver's Bangle | Copper Bangle | Effect not yet designed |
-| Truewatch Studs | Copper Studs | Effect not yet designed |
-| Skydancer's Ring | Pewter Ring | Effect not yet designed |
-| Aquatic N95 | N95 Mask | Effect not yet designed |
