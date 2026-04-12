@@ -1,5 +1,7 @@
 # SPAWN_BOSS_MOBS.md — Boss & Unique Mob Spawn System
 
+> ⚠️ **Refactor pending.** This document describes the current per-boss hardcoded approach. The boss/unique mob system is slated for refactor — the design will likely move toward a more general conditional spawn system (see "Future: Conditional Spawn System" below). Treat the details below as a snapshot of current behaviour rather than the long-term design. Some sections (notably the RatKing dungeon collapse description) are also out of step with the current `persistent_until_empty` model used by `DungeonInstanceScript`; those will be cleaned up as part of the refactor.
+
 > Design document for how boss mobs and unique named mobs are placed and respawn in the game world. For commodity mob spawning (wolves, kobolds, gnolls), see **SPAWN_COMMODITY_MOBS.md**.
 
 ---
