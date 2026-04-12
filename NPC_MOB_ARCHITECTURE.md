@@ -31,7 +31,7 @@ BaseActor
 │    + InnateRangedMixin              ← innate ranged attack (breath, bolts, venom)
 │    + FlyingMixin                    ← innate flight, preferred_height
 │    + SwimmingMixin                  ← innate swimming, preferred_depth
-│    + HumanoidWearslotsMixin         ← 19 wearslots, full weapon pipeline
+│    + HumanoidWearslotsMixin         ← humanoid wearslots, full weapon pipeline
 │    + FungibleInventoryMixin         ← gold/resource inventory (on CombatMob, not BaseNPC)
 │    + StateMachineAIMixin            ← tick-driven AI state machine
 │    + LLMAIMixin (future)            ← LLM tactical decisions
@@ -56,14 +56,19 @@ BaseActor
     │   └── QuestGivingLLMTrainer
     │       └── OakwrightNPC
     │
-    ├── CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, BaseNPC)  ← convenience class for common mobs
+    ├── CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, FollowableMixin, BaseNPC)  ← convenience class for common mobs
     │   ├── die() override: mob death (corpse, loot, XP, delete/respawn)
     │   └── Composed further with AI, aggression, flight, swimming, body type
     │
-    └── Hybrid NPCs (CombatMixin + service role)
-        ├── FightableCityGuard(CombatMixin, AggressiveMixin, HumanoidWearslotsMixin, LLMRoleplayNPC)
-        └── TavernDrunk(CombatMixin, LLMRoleplayNPC)
+    └── LLMCombatMob(LLMMixin, CombatMob)         ← combat mob with LLM-driven dialogue
+        ├── Townfolk(LLMCombatMob)                                     ← anonymous townspeople
+        ├── GuardSergeant(BashAbility, WeaponMasteryMixin, HumanoidWearslotsMixin, LLMCombatMob)
+        ├── MeleeGuard(BashAbility, WeaponMasteryMixin, MobFollowableMixin, HumanoidWearslotsMixin, LLMCombatMob)
+        ├── RangedGuard(BashAbility, WeaponMasteryMixin, MobFollowableMixin, HumanoidWearslotsMixin, LLMCombatMob)
+        └── CityWatch(MeleeGuard)
 ```
+
+**Hybrid combat+dialogue pattern:** Mobs that can both fight and hold a real conversation compose `LLMMixin` *into* `CombatMob` via the `LLMCombatMob` convenience class. The dialogue layer is `LLMMixin`; combat behaviour stays on `CombatMob`. This is the inverse of "compose CombatMixin into a service NPC" — in practice, the combat side is the heavier composition, so it sits at the bottom of the MRO and the LLM dialogue rides on top.
 
 ### NPC vs Mob — The Distinction
 
@@ -74,15 +79,15 @@ With composable combat, the NPC/mob distinction is no longer about who can fight
 
 A city guard is an **NPC** — you can talk to them, they have dialogue, they happen to also be fightable. A wolf is a **mob** — all you can do is fight it.
 
-**Why composable combat?** A city guard is an LLM NPC who can talk, de-escalate, *and* fight. A drunk in a tavern chats until provoked, then throws punches. These aren't mobs pretending to be NPCs or NPCs pretending to be mobs — they're NPCs with combat capability composed in. The LLM drives dialogue; `CombatMixin` handles what happens when swords come out.
+**Why composable combat?** A city guard is an LLM mob who can talk, de-escalate, *and* fight. These aren't mobs pretending to be NPCs or NPCs pretending to be mobs — they're combat mobs with LLM dialogue composed in via `LLMCombatMob`. `LLMMixin` drives dialogue; the underlying `CombatMob` machinery handles what happens when swords come out.
 
-**The common case stays simple:** 90% of fightable entities are wolves, kobolds, rats — they use `CombatMob(CombatMixin, BaseNPC)` and never think about the architecture. The composability is there for the 10% that need it.
+**The common case stays simple:** the typical fightable entity is a wolf, kobold, or rat — they extend `CombatMob` (via `AggressiveMob`) and never think about the architecture. The composability is there for the cases that need it.
 
 ---
 
-## Composition — Seven Axes
+## Composition Axes
 
-Every NPC capability is an independent axis composed via mixins. The same mixin set works for common mobs, boss encounters, and hybrid service-combat NPCs.
+Every NPC capability is an independent axis composed via mixins. The same mixin set works for common mobs, boss encounters, and hybrid combat-dialogue NPCs.
 
 | Axis | Options | Mechanism |
 |------|---------|-----------|
@@ -110,25 +115,27 @@ Crow(FlyingMixin, PackCourageMixin, AggressiveMob)                              
 DireWolf(TacticalDodgeMixin, AggressiveMob)                                               ← 25% dodge per combat tick
 CellarRat(AggressiveMob)                                                                  ← simple aggressive animal
 
-Humanoid mobs (HumanoidWearslotsMixin, equip MobWeapons/MobWearables):
+Humanoid mobs (HumanoidWearslotsMixin + WeaponMasteryMixin, equip MobWeapons/MobWearables):
 
-Kobold(PackCourageMixin, HumanoidWearslotsMixin, AggressiveMob)                           ← pack fighter with wearslots
-KoboldChieftain(HumanoidWearslotsMixin, AggressiveMob)                                    ← boss with wearslots
-Gnoll(RampageMixin, HumanoidWearslotsMixin, AggressiveMob)                                ← on-kill chain attacker with wearslots
-GnollWarlord(inherits from Gnoll)                                                         ← boss, gets wearslots from Gnoll
-Skeleton(HumanoidWearslotsMixin, AggressiveMob)                                           ← undead with wearslots
+Kobold(PackCourageMixin, WeaponMasteryMixin, HumanoidWearslotsMixin, AggressiveMob)       ← pack fighter with weapon mastery
+KoboldChieftain(...)                                                                       ← boss variant
+Gnoll(RampageMixin, WeaponMasteryMixin, HumanoidWearslotsMixin, AggressiveMob)            ← on-kill chain attacker with weapon mastery
+GnollArcher(Gnoll)                                                                         ← Gnoll subclass equipped with a bow
+GnollWarlord(...)                                                                          ← boss variant of Gnoll
+Skeleton(HumanoidWearslotsMixin, AggressiveMob)                                            ← undead with wearslots
+
+LLM-driven hybrid combat mobs (LLMMixin composed into CombatMob via LLMCombatMob):
+
+Townfolk(LLMCombatMob)                                                                                              ← anonymous townspeople
+GuardSergeant(BashAbility, WeaponMasteryMixin, HumanoidWearslotsMixin, LLMCombatMob)                                ← squad leader
+MeleeGuard(BashAbility, WeaponMasteryMixin, MobFollowableMixin, HumanoidWearslotsMixin, LLMCombatMob)               ← auto-follows sergeant
+RangedGuard(BashAbility, WeaponMasteryMixin, MobFollowableMixin, HumanoidWearslotsMixin, LLMCombatMob)              ← auto-follows sergeant, ranged
+CityWatch(MeleeGuard)                                                                                               ← city-specific guard variant
 
 Future examples:
 
-GnollArcher(AggressiveMixin, HumanoidWearslotsMixin, CombatMob)                           ← humanoid w/ bow
-TownGuard(HumanoidWearslotsMixin, CombatMob)                                              ← passive humanoid
 Dragon(AggressiveMixin, FlyingMixin, InnateRangedMixin, AdaptiveLLMAIMixin, CombatMob)    ← boss, flies, breathes fire, learns
 BanditChief(AggressiveMixin, HumanoidWearslotsMixin, LLMAIMixin, CombatMob)               ← humanoid, LLM tactics
-
-Hybrid NPCs (CombatMixin + FungibleInventoryMixin composed into service NPCs):
-
-FightableCityGuard(AggressiveMixin, CombatMixin, FungibleInventoryMixin, HumanoidWearslotsMixin, LLMRoleplayNPC)
-TavernDrunk(CombatMixin, FungibleInventoryMixin, LLMRoleplayNPC)
 ```
 
 ---
@@ -351,11 +358,12 @@ Player attacks any guard → `enter_combat()` pulls in target's group → all gu
 # Player character — gets combat handler accessors from CombatMixin
 FCMCharacter(CombatMixin, CarryingCapacityMixin, ..., BaseActor)
 
-# Common mobs — CombatMixin for combat, StateMachineAIMixin for AI, BaseNPC for NPC base
-CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, BaseNPC)
+# Common mobs — CombatMixin for combat, StateMachineAIMixin for AI, FollowableMixin for groups, BaseNPC for NPC base
+CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, FollowableMixin, BaseNPC)
 
-# Hybrid NPC — CombatMixin for commands, LLMRoleplayNPC for dialogue
-FightableCityGuard(CombatMixin, AggressiveMixin, HumanoidWearslotsMixin, LLMRoleplayNPC)
+# Hybrid combat+dialogue — LLMMixin composed into CombatMob
+LLMCombatMob(LLMMixin, CombatMob)
+GuardSergeant(BashAbility, WeaponMasteryMixin, HumanoidWearslotsMixin, LLMCombatMob)
 ```
 
 **Actual implementation:**
@@ -400,7 +408,7 @@ This is already one unified system — `take_damage()` on BaseActor calls `die()
 ### CombatMob — Convenience Class
 
 ```python
-class CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, BaseNPC):
+class CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, FollowableMixin, BaseNPC):
     """Convenience class for common fightable mobs — wolves, rats, kobolds, etc."""
 ```
 
@@ -415,7 +423,7 @@ Adds mob-specific attributes on top of CombatMixin's combat capability and State
 - `max_per_room` anti-stacking
 - `die()` override — mob death (corpse, loot, XP, delete/respawn)
 
-This is what 90% of mobs use. All existing mob subclasses inherit from `CombatMob` unchanged — backward compatible.
+This is what most mobs use. All existing mob subclasses inherit from `CombatMob` unchanged — backward compatible.
 
 **Passive mobs** (no `AggressiveMixin`) only fight when a player uses `attack` on them — `enter_combat()` creates handlers on both sides. Their AI can still include custom behaviors (Rabbit flees threats).
 
@@ -777,9 +785,9 @@ Grants innate aquatic ability. Available to any NPC — not just mobs. A shark, 
 Humanoid mobs compose in `HumanoidWearslotsMixin` — the **same mixin** `FCMCharacter` uses. This gives them full equipment capability with zero new code.
 
 **Gets from the mixin:**
-- 19 wearslots (head, chest, wield, hold, etc.)
+- The full humanoid wearslot set (head, chest, wield, hold, etc. — see [INVENTORY_EQUIPMENT.md](INVENTORY_EQUIPMENT.md) § Wearslot Architecture for the canonical list)
 - `wear()` / `remove()` / `get_slot()` / `get_all_worn()`
-- Full 14-hook weapon pipeline in combat
+- The full weapon hook pipeline in combat
 - Parry, riposte, dual-wield if weapon supports it
 
 ### Weapon Equipping
@@ -790,7 +798,7 @@ Done in `at_object_creation()` — create the weapon inside the mob, call `self.
 class GnollArcher(AggressiveMixin, HumanoidWearslotsMixin, StateMachineAIMixin, CombatMob):
     def at_object_creation(self):
         super().at_object_creation()
-        self.at_wearslots_init()  # initialize 19 humanoid slots
+        self.at_wearslots_init()  # initialize humanoid wearslots
         bow = create_object(
             "typeclasses.items.weapons.bow_nft_item.BowNFTItem",
             key="a crude shortbow", location=self,
@@ -798,6 +806,8 @@ class GnollArcher(AggressiveMixin, HumanoidWearslotsMixin, StateMachineAIMixin, 
         )
         self.wear(bow)
 ```
+
+(Note: `at_wearslots_init()` is auto-called from `BaseActor.at_object_creation()` — the explicit call above is illustrative, not required.)
 
 ### Weapon Mastery
 
@@ -816,18 +826,15 @@ Example mastery levels by mob difficulty:
 
 ### Loot on Death
 
-`CombatMob._create_corpse()` unequips worn items and transfers inventory to the corpse. However, not everything a mob carries should be lootable.
+`CombatMob._create_corpse()` unequips worn items and transfers contents to the corpse. The class-based filter (see § Corpse Loot Filtering above) decides what survives:
 
-**The loot tag rule:** Only NFT items tagged `loot` (category `item`) transfer to the corpse. Untagged NFT items (equipment the mob was using but that isn't intended as player loot) are deleted on death. Fungibles (gold, resources) always transfer — they are inherently loot.
+- **`MobItem` instances** (mob-only weapons, armour, consumables) — deleted on death. They never enter the player economy.
+- **NFT items** (placed by the spawn system as loot) — transferred to the corpse.
+- **Gold and resources** — always transferred to the corpse via `transfer_gold_to()` / `transfer_resource_to()`.
 
-**Why?** NPCs and humanoid mobs can wield weapons and wear armour for combat stat purposes without those items flooding the player economy. A gate guard wielding a bronze longsword fights with it but doesn't drop it. A gnoll carrying a scroll placed by the spawn system drops the scroll because the spawn system tagged it `loot`.
+**Why this works:** Mob weapons and armour are `MobItem` subclasses (`MobDagger`, `MobLongsword`, `MobWearable`, etc.) that share combat mechanics with the NFT versions but carry no NFT identity. A gate guard wields a `MobLongsword` for the stat bonus and combat hooks, and on death the weapon disappears — no economy flood. A gnoll carrying a scroll dropped by the spawn system carries an actual `BaseNFTItem` (not a MobItem), so the `isinstance(obj, MobItem)` filter lets it transfer to the corpse for players to loot.
 
-**Who tags items as loot?** The spawn system. When `NFTDistributor` places a scroll, recipe, or rare NFT onto a mob, it tags the item `loot` (category `item`). Items created at mob spawn time as equipment (weapons, armour) are not tagged — they exist purely for combat stats and disappear on death.
-
-**Summary:**
-- Fungibles (gold, resources): always transfer to corpse
-- NFT items with `loot` tag: transfer to corpse
-- NFT items without `loot` tag: deleted on death (equipment, cosmetic gear)
+The rule is purely class-based — there is no `loot` tag involved. The spawn system controls what becomes loot by choosing whether to place an NFT item or a MobItem on the mob.
 
 ### get_weapon() Integration and the Ranged Model
 
@@ -962,7 +969,7 @@ BanditChief(AggressiveMixin, HumanoidWearslotsMixin, LLMAIMixin, CombatMob)
 
 | System | How It Interacts |
 |--------|------------------|
-| **Combat (execute_attack)** | Humanoid mobs with weapons → full 14-hook pipeline. Animal mobs → `damage_dice` fallback |
+| **Combat (execute_attack)** | Humanoid mobs with weapons → full weapon hook pipeline. Animal mobs → `damage_dice` fallback |
 | **Height combat (height_utils)** | `can_reach_target()` checks wielded weapon type OR `InnateRangedMixin.mob_weapon_type` for animals |
 | **Spawning (ZoneSpawnScript)** | Weapon creation in `at_object_creation()`, not spawn JSON. JSON `attrs` can set mastery levels |
 | **Loot (corpse)** | `_create_corpse()` transfers worn equipment to corpse — already implemented |
@@ -997,31 +1004,37 @@ The refactor was **backward-compatible** — no database migration needed. All s
 ```
 typeclasses/
 ├── actors/
-│   ├── ai_handler.py                   ← AIHandler + StateMachineAIMixin (renamed from AIMixin)
-│   ├── mob.py                          ← CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, BaseNPC) convenience class
+│   ├── base_actor.py                   ← BaseActor (foundation, composes Height/Effects/DamageResistance)
+│   ├── ai_handler.py                   ← AIHandler + StateMachineAIMixin
+│   ├── character.py                    ← FCMCharacter (player)
+│   ├── npc.py                          ← BaseNPC
+│   ├── mob.py                          ← CombatMob + LLMCombatMob convenience classes
+│   ├── npcs/                           ← service NPC subclasses (bartender, baker, trainer, shopkeeper, etc.)
 │   └── mobs/
 │       ├── aggressive_mob.py           ← AggressiveMob(AggressiveMixin, CombatMob)
-│       ├── crow.py                     ← Crow(FlyingMixin, PackCourageMixin, AggressiveMob)
-│       ├── kobold.py                   ← Kobold(PackCourageMixin, AggressiveMob)
-│       ├── gnoll.py                    ← Gnoll(RampageMixin, AggressiveMob)
-│       ├── dire_wolf.py               ← DireWolf(TacticalDodgeMixin, AggressiveMob)
-│       ├── skeleton.py                 ← Skeleton(AggressiveMob) — auto-tags creature_type=undead
-│       ├── base_marine_mob.py         ← BaseMarineMob(SwimmingMixin, CombatMob) — passive aquatic base
-│       ├── wolf.py, rabbit.py, ...     ← other mobs
-│       └── [future humanoid mobs]
+│       ├── base_marine_mob.py          ← passive aquatic base (SwimmingMixin, CombatMob)
+│       ├── animal mobs                 ← wolf, dire_wolf, rabbit, crow, owl_bird, cellar_rat,
+│       │                                  bee_swarm, jagular, heffalump, woozle, wild_mule, ...
+│       ├── humanoid mobs               ← kobold, kobold_chieftain, gnoll, gnoll_warlord,
+│       │                                  skeleton, footpad, rat_king, ...
+│       └── LLM combat mobs             ← townfolk, town_guard, city_watch, librarian, training_dummy
 ├── mixins/
-│   ├── combat_mixin.py                 ← CombatMixin (extracted from CombatMob)
-│   ├── aggressive_mixin.py             ← AggressiveMixin (extracted from AggressiveMob)
-│   ├── innate_ranged_mixin.py          ← InnateRangedMixin (mob_weapon_type = "missile")
-│   ├── mob_behaviours/                 ← reusable mob behavior mixins
-│   │   ├── pack_courage_mixin.py       ← PackCourageMixin (pack fighting — Kobold, Crow)
-│   │   ├── rampage_mixin.py            ← RampageMixin (on-kill chain attack — Gnoll)
-│   │   └── tactical_dodge_mixin.py     ← TacticalDodgeMixin (random dodge — DireWolf)
-│   ├── llm_ai_mixin.py                 ← LLMAIMixin (future)
-│   ├── adaptive_llm_ai_mixin.py        ← AdaptiveLLMAIMixin (future)
+│   ├── combat_mixin.py                 ← CombatMixin (handler access, enter/exit/initiate)
+│   ├── aggressive_mixin.py             ← AggressiveMixin
+│   ├── innate_ranged_mixin.py          ← InnateRangedMixin
 │   ├── flying_mixin.py                 ← FlyingMixin
 │   ├── swimming_mixin.py               ← SwimmingMixin
+│   ├── llm_mixin.py                    ← LLMMixin (dialogue layer used by LLMCombatMob and LLMRoleplayNPC)
+│   ├── mob_behaviours/                 ← reusable mob behavior mixins
+│   │   ├── pack_courage_mixin.py       ← PackCourageMixin (Kobold, Crow)
+│   │   ├── rampage_mixin.py            ← RampageMixin (Gnoll)
+│   │   ├── tactical_dodge_mixin.py     ← TacticalDodgeMixin (DireWolf)
+│   │   └── mob_followable_mixin.py     ← MobFollowableMixin (auto-reacquire squad leader)
 │   └── wearslots/
-│       ├── base_wearslots.py           ← BaseWearslotsMixin (existing)
-│       └── humanoid_wearslots.py       ← HumanoidWearslotsMixin (existing)
+│       ├── base_wearslots.py           ← BaseWearslotsMixin
+│       └── humanoid_wearslots.py       ← HumanoidWearslotsMixin
 ```
+
+**Future mixins (not yet built):**
+- `llm_ai_mixin.py` — LLMAIMixin (per-tick LLM tactical decisions, replaces state machine for tactical mobs)
+- `adaptive_llm_ai_mixin.py` — AdaptiveLLMAIMixin (LLMAIMixin + CombatMemory persistent learning)
