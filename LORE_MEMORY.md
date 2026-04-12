@@ -77,7 +77,8 @@ class LoreMemory(models.Model):
     #   regional:    ["millholm"]
     #   local:       ["millholm_town"]
     #   faction:     ["mages_guild"]
-    #   multi-tag:   ["millholm", "mages_guild"]  (regional lore relevant to guild)
+    #   multi-tag:   ["millholm", "mages_guild"]
+    # Multi-tag uses AND semantics — see "Multi-tag scope semantics" below.
 
     # ── Embedding (dual-backend, same as NpcMemory / CombatMemory) ──
     embedding = models.BinaryField(null=True, blank=True)           # SQLite path
@@ -102,10 +103,20 @@ class LoreMemory(models.Model):
 **Design decisions:**
 
 - **Same `ai_memory` app and database** — shares the pgvector infrastructure, router, and dual-backend pattern. One migration adds the table.
-- **`scope_tags` as JSON list** — flexible multi-tagging without a join table. A lore entry about "the mages guild's role in the founding of Millholm" would have `scope_tags: ["millholm", "mages_guild"]` and be accessible to both regional Millholm NPCs and Mages Guild faction NPCs.
+- **`scope_tags` as JSON list** — flexible multi-tagging without a join table. Access uses AND semantics (see below).
 - **`source` field** — tracks where the lore came from. When `WORLD.md` is updated, you can find and re-embed all lore entries sourced from it.
 - **`title`** — human-readable label for admin/debugging. Not embedded or searched.
 - **No NPC ID or speaker ID** — lore is shared, not per-NPC. The NPC's scope tags determine access at query time.
+
+### Multi-tag scope semantics (AND, not OR)
+
+A lore entry with multiple `scope_tags` requires the NPC to have **all** of those tags before they can access the entry. This is the intersection, not the union.
+
+Example: an entry tagged `["millholm", "mages_guild"]` is accessible **only** to NPCs that are *both* in Millholm *and* members of the Mages Guild. A Millholm bartender (no guild tag) cannot see it. A mage in another city (no Millholm tag) cannot see it. Only an NPC carrying both tags qualifies.
+
+This is intentional — it prevents a thief in another city from knowing Millholm-specific guild secrets, and prevents a Millholm townsperson from knowing guild secrets. If you want a piece of lore to reach two distinct audiences, author two entries (one per scope) rather than combining tags.
+
+Implementation: `_npc_can_access_lore()` in `ai_memory/services.py` performs the AND check after the database pre-filter.
 
 ---
 
@@ -135,14 +146,18 @@ def get_relevant_lore(npc, query_text, top_k=3):
     # 1. Determine NPC's accessible scopes
     npc_tags = npc.lore_scope_tags  # e.g. ["millholm_town", "millholm", "mages_guild"]
 
-    # 2. Build queryset: continental (everyone) + matching tags
-    qs = LoreMemory.objects.using("ai_memory").filter(
-        Q(scope_level="continental") |
-        Q(scope_tags__overlap=npc_tags)  # Postgres JSON overlap
-    )
+    # 2. Build pre-filter: continental (everyone) + entries that contain
+    #    at least one of the NPC's tags. This is a permissive pre-filter —
+    #    AND semantics are enforced afterwards by _npc_can_access_lore().
+    q = Q(scope_level="continental")
+    for tag in npc_tags:
+        q |= Q(scope_tags__contains=[tag])  # Postgres JSON contains (per tag)
+    qs = LoreMemory.objects.using("ai_memory").filter(q)
 
     # 3. Semantic search within filtered set
     # (same pgvector / numpy branching as NpcMemory search)
+    # 4. Post-filter results through _npc_can_access_lore() to enforce
+    #    AND semantics on multi-tag entries
     ...
 ```
 
@@ -363,8 +378,8 @@ Knowledge gating happens naturally through scope tags. Rowan doesn't awkwardly k
 | `llm_use_lore` attribute | Built | `typeclasses/mixins/llm_mixin.py` — per-NPC toggle |
 | `_get_lore_scope_tags()` | Built | `typeclasses/mixins/llm_mixin.py` — room tags + faction tags |
 | `{lore_context}` prompt variable | Built | `typeclasses/mixins/llm_mixin.py` — `_get_context_variables()` |
-| Prompt templates | Built | All 11 templates in `llm/prompts/` updated |
+| Prompt templates | Built | NPC personality templates in `llm/prompts/` accept `{lore_context}` |
 | `lore_import` command | Built | `ai_memory/management/commands/lore_import.py` |
-| Lore YAML repo | Built | `FCM/lore/` — separate git repo |
-| Faction tags on NPCs | Built | Gareth and Vex tagged `thieves_guild` |
+| Lore YAML repo | Built | `FCM/lore/` — separate git repo, organised by scope (continental, regional, factions) |
+| Faction tags on NPCs | Built | Faction tags applied to NPCs across multiple guilds (mages, temple, thieves, warriors) |
 | Evennia tag system | Built | Zone + district tags on all rooms |
