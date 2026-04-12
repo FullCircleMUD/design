@@ -34,23 +34,40 @@ The law/chaos axis is collapsed — alignment is a single good/evil dimension.
 
 ### Mob Kills (Primary Mechanism)
 
-Each mob type carries an `alignment_influence` attribute on `CombatMob`:
+Alignment influence is a **derived property** on `CombatMob`, not a stored attribute. It's calculated from the mob's own alignment score:
 
 ```python
-alignment_influence = AttributeProperty(0)  # positive = good shift, negative = evil shift
+@property
+def alignment_influence(self):
+    """Kill impact on the killer's alignment. Derived from mob's alignment."""
+    return -(self.alignment_score // 50)
 ```
 
-| Mob Type | Influence | Rationale |
-|----------|-----------|-----------|
-| Undead (skeleton, zombie, lich) | +20 | Destroying undead is a good act |
-| Demon / fiend | +30 | Banishing evil |
-| Angel / celestial | -50 | Killing a holy being is deeply evil |
-| City guard / town NPC | -30 | Murder of innocents |
-| Bandit / highwayman | +5 | Removing a threat to society |
-| Wild animal (wolf, bear) | 0 | Neutral — survival |
-| Kobold / goblin | 0 | Neutral — self-defence |
+**Formula:** `-(mob_alignment_score ÷ 50)`
 
-When a mob dies, alignment influence is applied to all allies on the killer's combat side (same distribution as XP). Applied in `CombatMob.die()` alongside XP.
+- Killing an evil mob (negative score) gives a **positive** shift (good act)
+- Killing a good mob (positive score) gives a **negative** shift (evil act)
+- Killing a neutral mob (score 0) gives **no shift**
+
+| Mob | alignment_score | alignment_influence | Rationale |
+|-----|-----------------|---------------------|-----------|
+| Skeleton | -1000 | +20 | Destroying pure evil undead |
+| Footpad | -100 | +2 | Removing a petty criminal |
+| Gnoll | -60 | +1 | Killing a savage raider |
+| Kobold | -60 | +1 | Killing a hostile raider |
+| Crow | -30 | +1 | Aggressive pest |
+| Wolf, rat, rabbit, etc. | 0 | 0 | Neutral — survival |
+| Town Guard | +600 | -12 | Murder of a good protector |
+
+When a mob dies, alignment influence is applied to all allies on the killer's combat side (same distribution as XP). Applied in `CombatMob.die()`:
+
+```python
+influence = self.alignment_influence
+if influence:
+    for ally in recipients:
+        if hasattr(ally, "shift_alignment"):
+            ally.shift_alignment(influence)
+```
 
 ### Quest Completion
 
@@ -73,52 +90,52 @@ Quests can specify an `alignment_influence` value in their definition. Applied w
 
 ```
 alignment_score      — AttributeProperty(0), persisted integer
-shift_alignment(n)   — clamp score to [-1000, +1000]
-alignment_label      — property: "Pure Good" / "Good" / "Neutral" / "Evil" / "Pure Evil"
+shift_alignment(n)   — clamp score to [-1000, +1000], then check equipment restrictions
 alignment            — property: derives Alignment enum for backward compat
 ```
 
+**Equipment check on shift:** After every alignment change, `shift_alignment()` calls `_check_alignment_equipment()` which scans all equipped items for alignment restrictions. Any item the character no longer qualifies for is forcibly unequipped with a "zapped" message.
+
 ---
 
-## Migration (Existing Characters)
+## Remort
 
-Existing characters have an `Alignment` enum stored. Converted to starting score:
-
-| Current Alignment | Starting Score |
-|-------------------|----------------|
-| LAWFUL_GOOD, NEUTRAL_GOOD, CHAOTIC_GOOD | +500 |
-| LAWFUL_NEUTRAL, TRUE_NEUTRAL, CHAOTIC_NEUTRAL | 0 |
-| LAWFUL_EVIL, NEUTRAL_EVIL, CHAOTIC_EVIL | -500 |
-
-Handled lazily: if `alignment_score` is 0 (default) and the character has the old enum, migrate on first access.
+When a character remorts, they keep the same alignment score they had at the time of remort. Alignment is a persistent aspect of the character's moral journey — it does not reset.
 
 ---
 
 ## Display
 
-- **Score card:** alignment label with colour in header row (replaces raw enum)
-- **Holy Insight spell:** shows alignment label (optionally numeric score for divine casters)
+- **Score card:** alignment label with colour in header row
+- **Detect Alignment spell:** self-buff that shows alignment auras on characters/mobs in the room (red = Evil, gold = Good, white = Neutral)
+- **Holy Insight spell:** utility spell that reveals a target's alignment as coloured text
 
 ---
 
 ## Equipment & Class Checks
 
-Existing `required_alignments` / `excluded_alignments` on items and classes work unchanged — the `alignment` property returns a compatible enum. No changes to `ItemRestrictionMixin` or `CharClassBase`.
+### Item Restrictions (Score-Based)
 
-For finer-grained control in the future, items could check `alignment_score` directly (e.g. "requires score >= 500" for a holy relic).
+Items can define `min_alignment_score` and `max_alignment_score` fields via `ItemRestrictionMixin`. Characters automatically unequip items they no longer qualify for when alignment shifts.
+
+### Class Requirements (Score-Based)
+
+- **Paladin:** `min_alignment_score=500` (Good required after remort)
 
 ---
 
 ## Implementation Files
 
-| File | Change |
-|------|--------|
-| `typeclasses/actors/character.py` | `alignment_score`, `shift_alignment()`, `alignment_label`, update `alignment` property |
-| `typeclasses/actors/mob.py` | `alignment_influence` on CombatMob, apply in `die()` |
-| `commands/all_char_cmds/cmd_score.py` | Display `alignment_label` |
-| `server/main_menu/chargen/chargen_menu.py` | Remove alignment selection, start at 0 |
-| Mob subclasses | Set `alignment_influence` values |
-| Quest definitions | Add optional `alignment_influence` field |
+| File | Role |
+|------|------|
+| `typeclasses/actors/character.py` | `alignment_score`, `shift_alignment()`, `alignment` property, `_check_alignment_equipment()` |
+| `typeclasses/actors/mob.py` | `alignment_score` on CombatMob, `alignment_influence` derived property, applied in `die()` |
+| `typeclasses/mixins/item_restriction.py` | `min_alignment_score` / `max_alignment_score` fields |
+| `enums/alignment.py` | `Alignment` enum (5-tier: Pure Good → Pure Evil) |
+| `commands/all_char_cmds/cmd_score.py` | Display alignment label |
+| `world/spells/divine_revelation/detect_alignment.py` | Detect Alignment spell |
+| `world/spells/divine_revelation/holy_insight.py` | Holy Insight spell |
+| Mob definitions (e.g. `skeleton.py`, `town_guard.py`) | Set `alignment_score` values per mob type |
 
 ---
 
