@@ -276,7 +276,15 @@ For all resources traded via AMM (wheat, flour, ore, wood, etc.). Two inputs:
 
 ### 2. NFT Items — Saturation-Based Drops
 
-All non-AMM NFT items (scrolls, wands, recipes, rare items, rare ingredients) use a unified **saturation framework**. These items are discovery-only — never sold by shopkeepers, never in AMMs. Players find them as mob drops, quest rewards, or chest loot.
+Two categories of NFT use a **saturation framework** for spawning — their drop rate is driven by how saturated the player base is with them, not by fixed drop tables:
+
+1. **Knowledge items (implemented)** — spell scrolls and crafting recipes. The saturation algorithm counts how many eligible players already know a given spell or recipe and uses that to decide how many copies to inject into the world each cycle. Single-use: consuming a scroll/recipe permanently teaches the spell/recipe to the player.
+
+2. **Rare NFT items (future)** — very rare world items will use a general saturation-based spawn algorithm. The framework is in place (snapshots track circulation counts per item type) but the `rarity_divisor` config that drives saturation-based spawning for generic items is not yet implemented.
+
+Both categories are **discovery-only** — never sold by shopkeepers, never in AMMs. Players find them as mob drops, quest rewards, or chest loot.
+
+**Note:** Wands are planned to move out of saturation-based spawning and into a **player-driven crafted market** — mages who know a spell and have the right ingredients will craft their own wands. This removes wands from the discovery-only loop and puts them into player hands via crafting.
 
 #### The Saturation Concept
 
@@ -505,7 +513,7 @@ Hourly snapshots via `TelemetryService.take_snapshot()` → `TelemetryAggregator
 
 These must always hold true. If any are violated, something is broken:
 
-1. **Every trade has economic purpose:** every in-game trade generates rounding dust that flows to SINK (deflationary + reward recirculation). Every on-chain trade generates AMM fees on vault-owned liquidity. Withdrawal to a private wallet does not reduce supply — assets remain player-owned and in circulation.
+1. **Every trade has economic purpose:** every in-game trade generates rounding dust that flows to SINK (deflationary + reward recirculation). Withdrawal to a private wallet does not reduce supply — assets remain player-owned and in circulation. Note: game-item AMM pools are created with **0% LP provider fees** by default, so on-chain trades against those pools do not generate revenue for the vault. If a third party adds liquidity and successfully votes to raise the fee, that could change — but this is not the default behaviour, and the game does not rely on AMM fees as a revenue source.
 2. **Ceil buys / floor sells:** player always pays more than AMM cost (buys) or receives less than AMM yield (sells). Margin >= 0 on every trade, always.
 3. **Proxy tokens are closed-loop:** only the vault trades them. No external manipulation possible.
 4. **RESERVE reconciliation:** `RESERVE + SPAWNED + ACCOUNT + CHARACTER + SINK = vault on-chain balance` — must always hold for every fungible currency. NFT items: `RESERVE + SPAWNED + ACCOUNT + CHARACTER + ONCHAIN = total minted NFTs`. AUCTION is a future potential feature (auction house not yet built) — direct player-to-player trade is the current mechanism. Once AUCTION is live, add it to the NFT equation: `RESERVE + SPAWNED + ACCOUNT + CHARACTER + ONCHAIN + AUCTION = total minted NFTs`.
