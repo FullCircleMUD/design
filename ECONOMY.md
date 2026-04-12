@@ -19,7 +19,7 @@ This is the economic bible for FullCircleMUD. Everything that shapes how value f
 - [Gold Sink Model (90/10 Respawn/Revenue)](#gold-sink-model-9010-respawnrevenue)
 - [Market Structure — Three Tiers](#market-structure--three-tiers)
 - [Tier 1: Resource Shopkeepers (Fungible AMM)](#tier-1-resource-shopkeepers-fungible-amm)
-- [Tier 2: Equipment Shopkeepers (Tracker Token AMM)](#tier-2-equipment-shopkeepers-tracker-token-amm)
+- [Tier 2: Equipment Shopkeepers (Proxy Token AMM)](#tier-2-equipment-shopkeepers-proxy-token-amm)
 - [Tier 3: Auction House (Player-Driven)](#tier-3-auction-house-player-driven)
 - [Spawn Algorithms](#spawn-algorithms) (Resources, NFT Items)
 - [Supply-Side Levers](#supply-side-levers)
@@ -54,8 +54,8 @@ Every value flow path serves three purposes: (1) deflationary pressure to preven
 |---|---|
 | In-game buy (resource) | Ceil-rounding dust (gold) → SINK → recirculated as rewards / operational costs |
 | In-game sell (resource) | Floor-rounding dust (resource) → SINK → recirculated |
-| In-game buy (equipment) | Tracker token AMM spread + rounding → SINK |
-| In-game sell (equipment) | Tracker token AMM spread + rounding → SINK |
+| In-game buy (equipment) | Proxy token AMM spread + rounding → SINK |
+| In-game sell (equipment) | Proxy token AMM spread + rounding → SINK |
 | On-chain AMM trade (direct trade) | AMM trading fees on vault-owned liquidity |
 | Gold sinks | Crafting, training, travel, repair, etc. → SINK → 90% respawned as rewards, 10% operational |
 | Item destruction (junk, durability) | Returns assets to RESERVE — prevents item inflation |
@@ -70,7 +70,7 @@ Every trade path contributes to economic health. Withdrawal to a private wallet 
 |---|---|---|---|
 | Gold (FCMGold) | XRPL issued currency | Integer amounts in FungibleGameState | Base currency — everything priced in gold |
 | Resources (36 types) | XRPL issued currencies | Integer amounts in FungibleGameState | XRPL AMM pools (resource vs gold) |
-| Common NFT items | XRPL NFTs (NFTokens) | Evennia objects in game world | Tracker token AMMs (see below) |
+| Common NFT items | XRPL NFTs (NFTokens) | Evennia objects in game world | Proxy token AMMs (see below) |
 | Rare NFT items | XRPL NFTs (NFTokens) | Evennia objects in game world | Player-driven auction / external marketplace |
 | Scrolls & Recipes | XRPL NFTs (NFTokens) | Consumable Evennia objects | Not shopkeeper-tradeable — earned only |
 
@@ -187,20 +187,20 @@ Target: slight net negative flow (mildly deflationary) — scarcity supports val
 
 **Already implemented:** ShopkeeperNPC with list/quote/accept/buy/sell commands, AMMService integration, 6-operation atomic accounting.
 
-### Tier 2: Equipment Shopkeepers (Tracker Token AMM)
+### Tier 2: Equipment Shopkeepers (Proxy Token AMM)
 
 **What's sold:** Common NFT equipment items — weapons, armor, jewellery, tools. Items that are functionally fungible (one Iron Sword at full durability = any other Iron Sword at full durability).
 
-**Pricing:** Tracker token AMM pools (see [Tracker Tokens](#nft-item-market-making--tracker-tokens) below).
+**Pricing:** Proxy token AMM pools (see [Proxy Tokens](#nft-item-market-making--proxy-tokens) below).
 
 **Durability rule:** Shopkeepers only buy at full durability. "I don't buy damaged goods — repair it first." This means:
-- Clean 1:1 tracker token mapping (no fractional accounting)
+- Clean 1:1 proxy token mapping (no fractional accounting)
 - Repair cost is a gold sink that factors into sell decisions
 - Low-value items with high repair costs get junked instead → natural item drain → supports prices
 
 **Shop examples:** Blacksmith sells/buys weapons and metal armor. Tailor sells/buys cloth armor. Jeweller sells/buys rings and amulets. Equipment shops never sell raw resources.
 
-**Not yet implemented.** Requires tracker token infrastructure.
+**Not yet implemented.** Requires proxy token infrastructure.
 
 ### Tier 3: Auction House (Player-Driven)
 
@@ -219,7 +219,7 @@ Target: slight net negative flow (mildly deflationary) — scarcity supports val
 
 ---
 
-## NFT Item Market Making — Tracker Tokens
+## NFT Item Market Making — Proxy Tokens
 
 ### The Problem
 
@@ -227,28 +227,39 @@ Common NFT items (iron swords, leather armor, mage robes) are functionally fungi
 
 ### The Solution
 
-Issue "tracker tokens" — one XRPL issued currency per common NFT item type (e.g., `FCMTrkIronSword`, `FCMTrkMageRobe`). Set up real XRPL AMM pools: tracker token vs FCMGold. **Only the vault holds tracker tokens** — no external wallets can interfere.
+Issue "proxy tokens" — one XRPL issued currency per common NFT item type, prefixed `P` for proxy (e.g., `PTrainDagger`, `PBronzeSpear`, `PLeatherArmor`). Set up real XRPL AMM pools: proxy token vs **PGold** (a proxy for FCMGold, pegged 1:1). Proxy tokens exist solely to enable AMM pricing formulas for in-game shops — they must never be accessible on-chain to anyone other than the game vault wallet.
+
+**Two distinct AMM systems.** FCM's AMM usage splits into two categories with very different visibility:
+
+- **Public AMM pools (FCMGold ↔ resources)** — these ARE publicly accessible on XRPL. Players can export FCMGold and resource tokens and trade them directly on the ledger. The in-game shop uses the same pool for pricing, but external arbitrage is expected and healthy.
+- **Private AMM pools (PGold ↔ proxy tokens)** — these exist on XRPL but are **vault-only**. Proxy tokens are used purely as a computational pricing engine for in-game NFT shops. No player ever holds a proxy token.
+
+**Why a separate PGold, not FCMGold?** If an item proxy pool paired `FCMGold` directly (e.g., `FCMGold ↔ PTrainDagger`), a player could export FCMGold from the game to their XRPL wallet, trade it on that public AMM, and acquire proxy tokens. The proxy tokens would then be out in the wild — breaking the closed-loop pricing system and letting players manipulate in-game shop prices via on-chain trades. Using `PGold` (which no player ever holds) keeps the entire proxy system inside the vault.
+
+**Fungibility requires full durability.** NFTs of the same item type are only functionally fungible when all at 100% durability — an 80%-durability iron sword is not equivalent to a brand-new one and can't share the same proxy token price. To preserve the proxy token model, **in-game shopkeepers only trade in fully-repaired items**. Players bring damaged items to a repair NPC first, then sell to the shopkeeper. This ensures every item flowing through shop AMM pricing is interchangeable with every other item of the same type.
+
+**Only the vault holds proxy tokens and PGold** — no external wallets can interfere.
 
 ### How It Works
 
-- **Player sells an iron sword to shopkeeper** → vault sells 1 tracker token to AMM → gets gold → pays player (floor-rounded)
-- **Player buys an iron sword from shopkeeper** → vault buys 1 tracker token from AMM → pays gold → gives player an item from RESERVE (ceil-rounded)
+- **Player sells an iron sword to shopkeeper** → vault sells 1 proxy token to AMM → gets gold → pays player (floor-rounded)
+- **Player buys an iron sword from shopkeeper** → vault buys 1 proxy token from AMM → pays gold → gives player an item from RESERVE (ceil-rounded)
 - Same AMMService pipeline, same rounding, same 6-operation accounting, same margin
 
 ### Why This Works
 
 **Price discovery is automatic:**
-- Players flood market with crafted swords → vault sells trackers → price drops → swords cheaper than crafting cost → players stop crafting, start buying → price recovers
-- Swords become scarce → vault buys trackers → price rises → crafting becomes profitable → players craft more
+- Players flood market with crafted swords → vault sells proxies → price drops → swords cheaper than crafting cost → players stop crafting, start buying → price recovers
+- Swords become scarce → vault buys proxies → price rises → crafting becomes profitable → players craft more
 
-**Closed-loop security:** Only the vault trades tracker tokens. No external wallets hold them. On-chain AMM used as a computational pricing engine, not a public marketplace. Manipulation is impossible.
+**Closed-loop security:** Only the vault trades proxy tokens. No external wallets hold them. On-chain AMM used as a computational pricing engine, not a public marketplace. Manipulation is impossible.
 
 ### Setup Required
 
-- Issue tracker tokens per common NFT item type via a second issuer wallet
+- Issue proxy tokens per common NFT item type via a second issuer wallet
 - Seed AMM pools at recipe component cost (sum of resource AMM prices + crafting fee)
-- Register as `CurrencyType` rows with `is_nft_tracker=True` flag (or similar)
-- Extend shopkeeper to handle NFT buy/sell via tracker token AMM
+- Link each NFT item type to its proxy token via the `tracking_token` field on `NFTItemType` (e.g. `NFTItemType(name="Training Dagger", tracking_token="PTrainDagger")`)
+- Extend shopkeeper to handle NFT buy/sell via proxy token AMM
 
 ---
 
@@ -342,7 +353,7 @@ When a drop triggers, the system:
 | AMM liquidity | Price stability | Add liquidity = stabilize. Remove = let market find price. Per-resource. "Playing the Fed." |
 | Spawn rates | Quantity entering game | Node respawn timers, yield per node, mob drop rates. Adjusted by algorithm. |
 | Gold sinks | Gold inflation/deflation | Crafting fees, training, travel, repair, purgatory, binding. Tracked via SINK location. |
-| Tracker token pools | NFT item prices | Seed liquidity sets initial price. Market activity drives price from there. |
+| Proxy token pools | NFT item prices | Seed liquidity sets initial price. Market activity drives price from there. |
 
 ---
 
@@ -364,7 +375,7 @@ When a drop triggers, the system:
 |---|---|
 | **Large dumps** (crashing a resource price) | AMM slippage via constant product formula — large sells get progressively worse prices |
 | **Hoarding** (cornering supply) | Self-limiting: hoarding drives AMM price up → spawn rate increases → new supply flows to non-hoarders. The hoarder pays real cost to maintain their position and must sell into an underpriced market to crash it, losing value. As the economy scales with more players and spawn locations, cornering a market becomes impractical |
-| **External AMM manipulation** | Tracker tokens are closed-loop — only vault holds them, no external wallets can interfere |
+| **External AMM manipulation** | Proxy tokens are closed-loop — only vault holds them, no external wallets can interfere |
 | **Rounding exploitation** | Every trade pays rounding dust — there's no way to trade without paying the spread |
 | **Bot farming** | Per-node cooldowns, diminishing returns, captcha-like interactions (future) |
 
@@ -378,11 +389,11 @@ When a drop triggers, the system:
 |---|---|---|---|
 | Raw resources (wheat, ore, wood, etc.) | Yes — resource AMM | Resource shopkeepers | Tier 1 |
 | Processed resources (flour, ingots, timber, etc.) | Yes — resource AMM | Resource shopkeepers | Tier 1 |
-| Basic/Skilled equipment (weapons, armor) | Yes — tracker token AMM | Equipment shopkeepers | Tier 2, full durability only |
-| Some Expert equipment | Yes — tracker token AMM | Equipment shopkeepers | Edge of Tier 2 |
+| Basic/Skilled equipment (weapons, armor) | Yes — proxy token AMM | Equipment shopkeepers | Tier 2, full durability only |
+| Some Expert equipment | Yes — proxy token AMM | Equipment shopkeepers | Edge of Tier 2 |
 | Master/GM tier equipment | **No** | Player-to-player trade only — no external market is made | Tier 3 — player-driven |
 | Enchanted weapons (gem insets) | **No** | Player-to-player trade only — no external market is made | Bespoke names, unique combos |
-| Deterministic enchanted wearables (rings, amulets) | **Yes** — own tracker token | Equipment shopkeepers | Standardised output = fungible |
+| Deterministic enchanted wearables (rings, amulets) | **Yes** — own proxy token | Equipment shopkeepers | Standardised output = fungible |
 | Scrolls (spell scrolls) | **No** | Earned only (mob drops, quests) | Never NPC-sold, gates progression |
 | Recipes (crafting recipes) | **No (mostly)** | Earned from trainers or mob drops | Some lower-tier recipes trainer-sold, never shopkeeper-sold |
 | Ultra-rare drops | **No** | Auction house / external XRPL market | Population-gated |
@@ -402,7 +413,7 @@ This creates a natural economic progression: new players enter a stable, liquid 
 
 Enchanting wearables (rings, amulets, etc.) is **deterministic** — same inputs always produce the same output. A "Ruby Ring of Fire Resistance" is always the same as any other. This means:
 
-- Enchanted wearables CAN get their own tracker token AMM pools
+- Enchanted wearables CAN get their own proxy token AMM pools
 - Price naturally settles at: base item cost + material cost + enchanting fee + margin
 - If materials get expensive, the enchanted item's AMM price rises to match
 
@@ -413,11 +424,11 @@ Two distinct crafting roles combine to produce enchanted weapons:
 - **Enchanter** — enchants raw gems into enchanted gems. The outcome is probabilistic — the enchanter rolls on an effect table and the resulting gem has a known, inspectable effect. The risk (and speculation) is entirely at this step.
 - **Jeweller** — insets an enchanted gem into a weapon. This is a deliberate choice: the player can inspect the gem's effects before committing. The inset consumes the gem and the fee.
 
-Because there are potentially hundreds of weapon types and scores of possible gem enchants, every weapon+gem combination produces a functionally unique item with a bespoke name. These cannot be standardised into tracker token AMM pools — each one is one-of-a-kind and must be sold player-to-player.
+Because there are potentially hundreds of weapon types and scores of possible gem enchants, every weapon+gem combination produces a functionally unique item with a bespoke name. These cannot be standardised into proxy token AMM pools — each one is one-of-a-kind and must be sold player-to-player.
 
 ### The Economic Loop
 
-1. **Base weapon** — commodity-priced via tracker token AMM
+1. **Base weapon** — commodity-priced via proxy token AMM
 2. **Raw gems** — commodity-priced via resource AMM (rare drop, so price reflects scarcity)
 3. **Gem enchanting** — enchanter rolls effect; result is inspectable before inset decision
 4. **Gem inset** — jeweller inserts enchanted gem into weapon; consumes gem + fee
@@ -496,7 +507,7 @@ These must always hold true. If any are violated, something is broken:
 
 1. **Every trade has economic purpose:** every in-game trade generates rounding dust that flows to SINK (deflationary + reward recirculation). Every on-chain trade generates AMM fees on vault-owned liquidity. Withdrawal to a private wallet does not reduce supply — assets remain player-owned and in circulation.
 2. **Ceil buys / floor sells:** player always pays more than AMM cost (buys) or receives less than AMM yield (sells). Margin >= 0 on every trade, always.
-3. **Tracker tokens are closed-loop:** only the vault trades them. No external manipulation possible.
+3. **Proxy tokens are closed-loop:** only the vault trades them. No external manipulation possible.
 4. **RESERVE reconciliation:** `RESERVE + SPAWNED + ACCOUNT + CHARACTER + SINK = vault on-chain balance` — must always hold for every fungible currency. NFT items: `RESERVE + SPAWNED + ACCOUNT + CHARACTER + ONCHAIN = total minted NFTs`. AUCTION is a future potential feature (auction house not yet built) — direct player-to-player trade is the current mechanism. Once AUCTION is live, add it to the NFT equation: `RESERVE + SPAWNED + ACCOUNT + CHARACTER + ONCHAIN + AUCTION = total minted NFTs`.
 5. **Consumption routing completeness:** every gold fee and resource consumption must use `return_gold_to_sink()` / `return_resource_to_sink()`. No untracked sinks. AMM dust is routed RESERVE → SINK automatically.
 6. **Cleanup vs consumption distinction:** cleanup (corpse decay, dungeon teardown, world rebuild) uses `return_*_to_reserve()`. Consumption (fees, crafting, eating) uses `return_*_to_sink()`.
