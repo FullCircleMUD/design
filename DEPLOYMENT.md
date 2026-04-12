@@ -338,10 +338,10 @@ All variables are set on the **game service** (not shared variables).
 | Variable | Purpose | Format |
 |----------|---------|--------|
 | `BOT_LOGIN_ENABLED` | Enable bot login | `true` or `false` |
-| `BOT_ACCOUNT_USERNAMES_JSON` | Bot usernames | `["billy","bianca"]` |
-| `BOT_WALLET_ADDRESSES_JSON` | Bot wallet addresses | `{"billy":"rAddr1","bianca":"rAddr2"}` (valid JSON, no trailing commas) |
+| `BOT_ACCOUNT_USERNAMES_JSON` | Bot usernames | `["laura","lonnie","luke","liam"]` |
+| `BOT_WALLET_ADDRESSES_JSON` | Bot wallet addresses | `{"laura":"rAddr1","lonnie":"rAddr2"}` (valid JSON, no trailing commas) |
 | `BOT_DEFAULT_PASSWORD` | Default bot password | |
-| `BOT_PASSWORDS_JSON` | Per-bot passwords | `{"billy":"pw1","bianca":"pw2"}` |
+| `BOT_PASSWORDS_JSON` | Per-bot passwords | `{"laura":"pw1","lonnie":"pw2"}` |
 
 ### Networking
 
