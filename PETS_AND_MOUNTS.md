@@ -379,10 +379,10 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 | Pet auto-flee | **Built** | `commands/all_char_cmds/cmd_flee.py` |
 | Pet disband protection | **Built** | `commands/all_char_cmds/cmd_follow.py` |
 | Pet size restrictions | **Built** | `typeclasses/actors/character.py` |
-| Pet tests | **Built** | `tests/typeclass_tests/test_pets.py` (27 tests) |
+| Pet tests | **Built** | `tests/typeclass_tests/test_pets.py` |
 | `FollowableMixin` | Built | `typeclasses/mixins/followable.py` |
 | `FamiliarMixin` | **Built** | `typeclasses/mixins/familiar_mixin.py` — remote control, scouting |
-| Familiar types (5) | **Built** | `typeclasses/actors/pets/familiars/` — rat, cat, owl, hawk, imp |
+| Familiar types | **Built** | `typeclasses/actors/pets/familiars/` — rat, cat, owl, hawk, imp |
 | Find Familiar spell | **Built** | `world/spells/conjuration/find_familiar.py` |
 | Combat side system | Built | `combat/combat_utils.py` |
 | `DogWearSlot` | Built | Example of non-humanoid wearslots |
