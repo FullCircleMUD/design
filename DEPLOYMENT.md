@@ -718,7 +718,7 @@ if not _DATABASE_URL:
 
 **Fix:** Ensure valid JSON with double quotes and no trailing commas:
 ```json
-{"billy":"rAddr1","bianca":"rAddr2"}
+{"laura":"rAddr1","lonnie":"rAddr2"}
 ```
 
 ### 502 Bad Gateway / Application failed to respond
@@ -739,14 +739,19 @@ if not _DATABASE_URL:
 The deployment pipeline is fully automated and GitHub-driven:
 
 1. **Develop** on `dev` branch (local, SQLite)
-2. **Merge to `main`** → Railway auto-deploys to production (PostgreSQL)
-3. **`deploy_migrate.py`** handles migrations, pgvector, and error recovery
-4. **Database persists** between deploys via Railway Postgres volumes
-5. **No manual SQL** required for normal deployments
+2. **Merge to `staging`** → Railway auto-deploys to staging (PostgreSQL, dev API key, mock XRPL submit)
+3. **Test on staging** — real PostgreSQL, real XRPL data, no on-chain changes
+4. **Merge to `main`** → Railway auto-deploys to production (PostgreSQL, production API key, real XRPL submit)
+5. **`deploy_migrate.py`** handles migrations, pgvector extension, and error recovery on every deploy
+6. **Database persists** between deploys via Railway Postgres volumes
+7. **No manual SQL** required for normal deployments
+8. **Secrets synced** across dev machines via git-crypt (encrypted in git, decrypted transparently)
 
 Key files:
 - `railway.toml` — build and start commands
 - `deploy_migrate.py` — migration script for Railway
 - `server/conf/settings.py` — database config, router conditional
+- `server/conf/secret_settings.py` — local dev secrets (encrypted via git-crypt)
+- `.gitattributes` — git-crypt file list
 
 The **NFT Metadata API** runs as a separate Railway service sharing the same PostgreSQL instance, ensuring XRPL marketplace metadata resolution stays available regardless of game server state.
