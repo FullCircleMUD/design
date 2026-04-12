@@ -203,8 +203,8 @@ class LongswordNFTItem(WeaponNFTItem):
 
 ### Mastery vs Individual Weapon Power
 
-- **Mastery effects** = weapon TYPE skill (spear technique). Same across ALL spears — wooden spear, iron spear, Spear of the Gods all get the same mastery behavior
-- **Individual weapon power** = prototype data (damage dice, wear_effects, stat bonuses). A Spear of the Gods has higher base damage, +hit bonuses, maybe fire damage — but that's prototype data, not mastery
+- **Mastery effects** = weapon TYPE skill (spear technique). Same across ALL spears — bronze spear, iron spear, steel spear all get the same mastery behaviour (reach counter, extra attacks at higher tiers)
+- **Individual weapon power** = prototype data. All weapons of a type share the same `base_damage` key (all spears = d8, all daggers = d4). The `material` tier (wood, bronze, iron, steel, adamantine) determines how that base damage scales — higher material = more damage at every mastery level. Additional prototype fields (`wear_effects`, `max_durability`) further differentiate individual weapons
 
 ```python
 BRONZE_SPEAR = {
