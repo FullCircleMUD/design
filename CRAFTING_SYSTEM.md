@@ -15,7 +15,7 @@ Recipes are Python dicts registered in `world/recipes/__init__.py`. One file per
 ```python
 # world/recipes/carpentry/training_longsword.py
 RECIPE_TRAINING_LONGSWORD = {
-    "key": "training_longsword",
+    "recipe_key": "training_longsword",
     "name": "Training Longsword",
     "skill": skills.CARPENTER,
     "crafting_type": RoomCraftingType.WOODSHOP,
@@ -26,7 +26,7 @@ RECIPE_TRAINING_LONGSWORD = {
 
 # Recipes can also consume NFT items as ingredients:
 RECIPE_SPEAR = {
-    "key": "spear",
+    "recipe_key": "spear",
     "name": "Spear",
     "skill": skills.BLACKSMITH,
     "crafting_type": RoomCraftingType.SMITHY,
@@ -56,7 +56,7 @@ Enchanting is a **mage-only** crafting skill (`skills.ENCHANTING`) that transfor
 - **Non-enchantable items** keep their effects baked in: Gambeson (+1 AC, excludes mage), Coarse Robe (+10 mana), Brown Corduroy Pants (+10 move), Warrior's Wraps (+10 HP, excludes mage/cleric/thief).
 
 **Three tiers of enchanting ingredients (planned):**
-- BASIC/SKILLED: Arcane Dust (resource ID 15) — 2 per recipe
+- BASIC/SKILLED: Arcane Dust (resource ID 16) — 2 per recipe
 - EXPERT/MASTER: mid-game ingredient (TBD)
 - GRANDMASTER: late-game ingredient (TBD)
 
@@ -128,7 +128,7 @@ Commands: `craft` (aliases: `forge`, `carve`, `sew`, `brew`, `enchant` + prefix 
 
 - `ConsumableNFTItem` — base for single-use NFT items. `consume(consumer)` calls `at_consume()`, deletes item on success (returned to RESERVE via standard hooks).
 - `CraftingRecipeNFTItem` — teaches a recipe when consumed. `recipe_key` AttributeProperty matches `world.recipes` registry.
-- `PotionNFTItem` — potion with `potion_effects` list, `duration`, and `named_effect_key`. `at_consume()` applies instant restore effects directly, then timed effects (stat_bonus, condition) via `apply_named_effect(duration_type="seconds")`. Anti-stacking via `has_effect(key)` — keyed by stat (e.g. `"potion_strength"`), blocks consumption when effect is already active (potion saved). Supports dice-based restore (`"dice": "2d4+1"`) and int-based (`"value": 8`). Mastery scaling applied post-spawn by `cmd_craft.py` from `potion_scaling.py` tables.
+- `PotionNFTItem` — potion with `potion_effects` list, `duration`, and `named_effect_key`. `at_consume()` applies instant restore effects directly, then timed effects (stat_bonus, condition) via `apply_named_effect()` (duration_type auto-filled from the NamedEffect registry). Anti-stacking via `has_effect(key)` — keyed by stat (e.g. `"potion_strength"`), blocks consumption when effect is already active (potion saved). Supports dice-based restore (`"dice": "2d4+1"`) and int-based (`"value": 8`). Mastery scaling applied post-spawn by `cmd_craft.py` from `potion_scaling.py` tables.
 - `SpellScrollNFTItem` — spell scroll with `spell_key`. Consumed via `transcribe` command to learn spells.
 
 ---
