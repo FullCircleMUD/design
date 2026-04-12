@@ -133,7 +133,12 @@ The `subscribe` command follows the same Xaman payment pattern as `import`:
 
 ## Command Gating
 
-### Blocked when expired:
+Two helpers in `subscriptions/utils.py` drive the gates:
+
+- **`is_subscribed(account)`** — True while the account's `subscription_expires_date` is in the future (also True if the subscription system is disabled, or the account is exempt).
+- **`has_paid(account)`** — True if the account has *ever* recorded a `SubscriptionPayment` row. Free-trial-only accounts return False. Exempt accounts (superuser/bot) return True.
+
+### Blocked when subscription has expired (`is_subscribed`):
 
 | Command | File | Gate placement |
 |---------|------|----------------|
@@ -142,15 +147,26 @@ The `subscribe` command follows the same Xaman payment pattern as `import`:
 | `chardelete` | `cmd_override_chardelete.py` | Top of `func()`, before arg check |
 | `import` | `cmd_import.py` | After kill-switch check, before bot check |
 
-All show: "Your subscription has expired. Use subscribe to renew."
+All show: "Your subscription has expired. Use subscribe to renew." Commands remain visible (not hidden by lock) so players understand what happened and how to fix it.
 
-Commands remain visible (not hidden by lock) so players understand what happened and how to fix it.
+### Blocked while on the free trial only (`has_paid`):
 
-### Allowed when expired:
+| Command | File | Gate placement |
+|---------|------|----------------|
+| `import` | `cmd_import.py` | After `is_subscribed` check |
+| `export` | `cmd_export.py` | Top of `func()`, before bot check |
 
-`look` (OOC menu), `export`, `wallet`, `subscribe`, `quit`, `who`, `sessions`, and all other non-gated commands.
+`import` requires *both* an active subscription AND at least one historical payment — free-trial accounts cannot bring chain assets in. `export` is gated on `has_paid` **only** — once a player has ever paid, they retain export access even after their subscription expires.
 
-**Design rationale:** Players must always be able to see their status, manage their wallet, export assets, and renew. Blocking `export` would trap player assets.
+**Design rationale for asymmetric export gating:** A paid player must never be trapped — if they decide to stop subscribing, they need to be able to recover their on-chain assets. So once `has_paid` is True, export stays open forever. But the trial period must not become a self-service "spawn a free account, play 48 hours, export the haul, repeat" loop. Gating export on `has_paid` (and not `is_subscribed`) is the minimum that closes that exploit while still honouring the no-trap promise to paying players.
+
+### Allowed at all times:
+
+`look` (OOC menu), `wallet`, `subscribe`, `quit`, `who`, `sessions`, and all other non-gated commands.
+
+### Bot accounts and import/export
+
+Bot accounts bypass the subscription system itself (`is_subscribed`/`has_paid` both return True via `_is_exempt`), but `cmd_import.py` and `cmd_export.py` carry a separate name/wallet check (`BOT_ACCOUNT_USERNAMES`, `BOT_WALLET_ADDRESSES`) that explicitly blocks bots from import/export. Bots can play the game without a subscription but cannot move chain assets in or out — keep this distinction in mind when reading the "bots bypass all subscription checks" line in the overview.
 
 ---
 
@@ -236,6 +252,6 @@ evennia test --settings settings tests.command_tests.test_subscription_gating
 evennia test --settings settings tests.command_tests.test_cmd_subscribe
 ```
 
-- **test_subscription_utils** (22 tests) — is_subscribed, get_subscription_status, extend_subscription, grant_trial, feature flag disabled behaviour
-- **test_subscription_gating** (13 tests) — ic, charcreate, chardelete, import blocked when expired, allowed when subscribed/superuser, bypass when disabled
-- **test_cmd_subscribe** (5 tests) — early-return paths (no wallet, exempt, status display, disabled message)
+- **test_subscription_utils** — `is_subscribed`, `get_subscription_status`, `extend_subscription`, `grant_trial`, `has_paid`, feature flag disabled behaviour
+- **test_subscription_gating** — `ic`, `charcreate`, `chardelete`, `import` blocked when expired; allowed when subscribed/superuser; bypass when disabled
+- **test_cmd_subscribe** — early-return paths (no wallet, exempt, status display, disabled message)
