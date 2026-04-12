@@ -207,25 +207,28 @@ class LongswordNFTItem(WeaponNFTItem):
 - **Individual weapon power** = prototype data (damage dice, wear_effects, stat bonuses). A Spear of the Gods has higher base damage, +hit bonuses, maybe fire damage — but that's prototype data, not mastery
 
 ```python
-WOODEN_SPEAR = {
-    "typeclass": "typeclasses.items.weapons.SpearNFTItem",
-    "key": "wooden spear",
-    "damage_dice": "1d6",
-    "wear_effects": [],
+BRONZE_SPEAR = {
+    "prototype_key": "bronze_spear",
+    "typeclass": "typeclasses.items.weapons.spear_nft_item.SpearNFTItem",
+    "key": "Bronze Spear",
+    "base_damage": "d6",
+    "material": "bronze",
+    "speed": 1,
+    "max_durability": 3600,
 }
 
-SPEAR_OF_THE_GODS = {
-    "typeclass": "typeclasses.items.weapons.SpearNFTItem",
-    "key": "Spear of the Gods",
-    "damage_dice": "2d8+3",
-    "wear_effects": [
-        {"type": "stat_bonus", "stat": "total_hit_bonus", "value": 3},
-        {"type": "damage_resistance", "damage_type": "fire", "value": 15},
-    ],
+IRON_SPEAR = {
+    "prototype_key": "iron_spear",
+    "typeclass": "typeclasses.items.weapons.spear_nft_item.SpearNFTItem",
+    "key": "Iron Spear",
+    "base_damage": "d8",
+    "material": "iron",
+    "speed": 1,
+    "max_durability": 5400,
 }
 ```
 
-Both use `SpearNFTItem`, both get identical mastery effects. The prototype makes one a stick and the other legendary.
+Both use `SpearNFTItem`, both get identical mastery effects (reach counter, extra attacks at higher tiers). The prototype's `material`, `base_damage`, and `max_durability` make one a starter weapon and the other a meaningful upgrade.
 
 ### Crit Threshold System
 
