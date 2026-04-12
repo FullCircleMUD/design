@@ -207,19 +207,22 @@ Maps come in two scales with different visual conventions:
 - **Each row is a row of rooms.** No blank lines between rows needed (compact layout).
 - **POI symbols are specific** — individual shops, services, and buildings get their own symbol from the town POI table (smithy=`S`, bank=`$`, inn=`I`, etc.)
 
-Example (Millholm Town):
+Example (Millholm Town — 14 rows, Artisan's Way district in south):
 ```
-            C
-            @
-            #
-          I-#-H
-    T-S-W-#-#-#-B-A-J
-  X-#-#-#-#-#-#-#-#-#-X
-    h-h-*-#-#-#-$-P-L
-          +-#-G
-          #-#-G
-          I-#-g
-            @
+          X              row 0:  lake track (north exit)
+        C-@              row 1:  cemetery, cemetery gates
+          #              row 2:  north road
+        I-#-H            row 3:  inn, square north, stables
+  *-*-*-#-#-#-B-*-*     row 4:  north shops, square top
+X-#-#-#-#-#-#-#-#-#-X   row 5:  Old Trade Way (main road)
+  h-h-*-#-#-#-$-P-*     row 6:  south side shops
+        +-#-G            row 7:  shrine, south road, mages guild
+        #-#-G            row 8:  beggars alley, mid south, warriors guild
+    h-W-*-#-W-W-h       row 9:  artisan's way north side
+    #-#-#-#-#-#-#        row 10: artisan's way lane
+    W-*-W-#-g-*-W        row 11: artisan's way south side
+        I-#-g            row 12: broken crown, far south, gaol cell
+          @              row 13: south gate
 ```
 
 **Region maps** (zone overview) — zoomed out, one cell per area/district:
@@ -284,28 +287,33 @@ Streets, road segments, POI markers for shops and services, cemetery, stables, g
 
 **Target layout** (fully surveyed):
 ```
-            C
-            @
-            #
-          I-#-H
-    T-S-W-#-#-#-B-A-J
-  X-#-#-#-#-#-#-#-#-#-X
-    h-h-*-#-#-#-$-P-L
-          +-#-G
-          #-#-G
-          I-#-g
-            @
+          X              lake track (north exit)
+        C-@              cemetery, cemetery gates
+          #              north road
+        I-#-H            inn, square north, stables
+  *-*-*-#-#-#-B-*-*     north shops, square top
+X-#-#-#-#-#-#-#-#-#-X   Old Trade Way (main road)
+  h-h-*-#-#-#-$-P-*     south side shops
+        +-#-G            shrine, south road, mages guild
+        #-#-G            beggars alley, mid south, warriors guild
+    h-W-*-#-W-W-h       artisan's way north side
+    #-#-#-#-#-#-#        artisan's way lane
+    W-*-W-#-g-*-W        artisan's way south side
+        I-#-g            broken crown, far south, gaol cell
+          @              south gate
 ```
 
-**Legend:** `#`=Road `@`=Gate `C`=Cemetery `I`=Inn `H`=Stable `T`=Tailor `S`=Smithy `W`=Woodshop `B`=Bakery `A`=Apothecary `J`=Jeweller `h`=House `*`=Shop `$`=Bank `P`=Post Office `L`=Leathershop `+`=Temple `G`=Guild `g`=Gaol `X`=Zone Exit
+**Legend:** `#`=Road `@`=Gate `C`=Cemetery `I`=Inn `H`=Stable `B`=Bakery `W`=Workshop `*`=Shop `$`=Bank `P`=Post Office `+`=Temple `G`=Guild `g`=Gaol `X`=Zone Exit `h`=House
 
 **Key spatial decisions:**
 - The 3×3 market square (sq_nw, sq_n, sq_ne, sq_w, sq_center, sq_e, sq_sw, sq_s, sq_se) maps as 9 road cells
 - sq_center occupies 3 horizontal positions on the main road row to represent the wide square
 - sq_n occupies 2 vertical positions (row 3 + row 4) to give the north side breathing room
-- North shops align with the road rooms they connect to (textiles↔road_far_west, smithy↔road_mid_west, etc.)
+- North shops use generic `*` (shop) symbol — weapons, armour, clothing, magical supplies, jeweller
+- Artisan's Way (rows 9-11) is a new southern district with workshops (`W`) for smithy, apothecary, textiles, leathershop, jeweller, woodshop
 - South road branches have shrine, warriors guild, mages guild, broken crown, gaol flanking the road
-- Zone exits (`X`) mark connections to other districts (woods to the east, southern district to the south)
+- Zone exits (`X`) mark connections: lake track north, woods east, southern district south
+- Cemetery connects to the main north road via cemetery gates (`@`)
 
 ### `millholm_region`
 Region-scale (`scale: "region"`) zone overview. Each cell represents an area or district, not individual rooms. Multiple rooms tagged to the same cell — surveying any one reveals it. No adjacent cell revelation. Uses generalised POI symbols (`T` town, `F` farm/harvesting, `~` wilderness, `R` processing, `M` mine, `#` road, `Z` zone exit, `?` point of interest, `C` cemetery, `D` dungeon). Road connections shown with `--` dashes; wilderness adjacency implied by spacing only.
