@@ -67,8 +67,11 @@ A `TrainerNPC` is configured per instance with:
   `"warrior"`). Determines which class skill point pool is used for class
   skills.
 - **`trainer_masteries`** — dict mapping skill/weapon key to the trainer's
-  own mastery level (1-5). Caps how high a player can train with this
-  trainer (a trainer at SKILLED can teach up to BASIC).
+  own mastery level (1-5). A trainer can teach any student whose current
+  mastery is **strictly below** the trainer's. So a SKILLED trainer (2) can
+  train a BASIC student (1) up to SKILLED, and a GRANDMASTER trainer (5)
+  can train any student all the way up to GRANDMASTER. A trainer cannot
+  teach a student who is already at the trainer's level or above.
 - **`recipes_for_sale`** — dict of `{recipe_key: gold_cost}` for crafting
   recipes the trainer also sells.
 
