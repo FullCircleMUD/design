@@ -35,22 +35,23 @@ TrainerNPC teaches skills and weapons to characters. Configuration per instance:
 | `trainable_skills` | `list[str]` | Skill keys this trainer teaches |
 | `trainable_weapons` | `list[str]` | WeaponType value strings this trainer teaches |
 | `trainer_class` | `str` | Class key (determines skill point pool) |
-| `trainer_masteries` | `dict` | `{skill_key: mastery_int}` — max teachable level + success chance |
+| `trainer_masteries` | `dict` | `{skill_key: mastery_int}` — max teachable level (hard cap, no random component) |
 | `recipes_for_sale` | `dict` | `{recipe_key: gold_cost}` for recipe purchases |
 
-**Training flow:**
+**Training flow (deterministic — no random outcomes):**
 1. Validate skill/weapon access via enum-driven lookup (`_CLASS_MAPPINGS_LOOKUP` for skills, `_WEAPON_CLASSES` for weapons)
-2. Check trainer mastery > character's current mastery
-3. Calculate gold cost with CHA modifier discount/surcharge: `final = max(1, round(base * (1 - cha_mod * 0.05)))`
-4. Y/N confirmation showing cost, success chance, training time
-5. Deduct gold (non-refundable), start progress bar with `delay()` chain
-6. On completion: d100 roll vs success chance based on mastery gap
-   - **Success:** deduct skill points, advance mastery level
-   - **Failure:** gold lost, skill points kept, 1-hour cooldown with this trainer
+2. Check trainer mastery ≥ target level (`trainer_masteries[skill]` is the hard cap on what this trainer can teach)
+3. Verify the character has enough skill points to spend
+4. Calculate gold cost with CHA modifier discount/surcharge: `final = max(1, round(base * (1 - cha_mod * 0.05)))`
+5. Y/N confirmation showing cost, target mastery level, and training time — the player knows exactly what they will receive before paying
+6. Deduct gold and skill points, start progress bar with `delay()` chain
+7. On completion: advance mastery level — **always succeeds**
+
+**Compliance note:** Training is fully deterministic. There is no random failure roll, no "lose your gold to a d100" mechanic, and no per-trainer cooldown. Pre-payment disclosure is total, satisfying the gambling-law compliance requirement that consideration must be paid only for outcomes the player has been told about in advance. See [COMPLIANCE.md](COMPLIANCE.md) and `ops/COMPLIANCE_LEGAL.md` § 9.5.
 
 **Commands (injected via TrainerCmdSet):** `train` (list/train skills), `buy recipe` (list/buy recipes)
 
-**Key files:** `typeclasses/actors/npcs/trainer.py`, `commands/npc_cmds/cmdset_trainer.py`, `tests/command_tests/test_cmd_train.py` (55 tests)
+**Key files:** `typeclasses/actors/npcs/trainer.py`, `commands/npc_cmds/cmdset_trainer.py`, `tests/command_tests/test_cmd_train.py`
 
 ---
 
@@ -78,7 +79,7 @@ ShopkeeperNPC buys and sells resources with prices driven by live XRPL AMM pools
 - `sync_reserves` — recalculate RESERVE from on-chain vault state: `RESERVE = on_chain - (SPAWNED + ACCOUNT + CHARACTER + SINK)`. Always run `reconcile` first
 - `sync_nfts` — sync on-chain NFTs with game DB (placeholder → real NFToken IDs)
 
-**Key files:** `typeclasses/actors/npcs/shopkeeper.py`, `commands/npc_cmds/cmdset_shopkeeper.py`, `blockchain/xrpl/services/amm.py`, `blockchain/xrpl/xrpl_amm.py`, `commands/account_cmds/cmd_amm_check.py`, `commands/account_cmds/cmd_reconcile.py`, `blockchain/xrpl/management/commands/test_amm_trades.py`, `tests/xrpl_tests/test_amm_service.py` (17 tests), `tests/command_tests/test_cmd_shopkeeper.py` (19 tests)
+**Key files:** `typeclasses/actors/npcs/shopkeeper.py`, `commands/npc_cmds/cmdset_shopkeeper.py`, `blockchain/xrpl/services/amm.py`, `blockchain/xrpl/xrpl_amm.py`, `commands/account_cmds/cmd_amm_check.py`, `commands/account_cmds/cmd_reconcile.py`, `blockchain/xrpl/management/commands/test_amm_trades.py`, `tests/xrpl_tests/test_amm_service.py`, `tests/command_tests/test_cmd_shopkeeper.py`
 
 ---
 
@@ -139,6 +140,33 @@ BakerNPC is a QuestGivingShopkeeper subclass for Bron at the Goldencrust Bakery.
 
 ---
 
+## Other Quest-Giving NPCs (typeclasses/actors/npcs/)
+
+The starter quest chain involves several additional NPCs beyond Rowan and Bron, each implemented as a quest-aware LLM NPC. They follow the same pattern as `BakerNPC` (quest-state-driven `{quest_context}` injection plus role-specific prompt) but specialise on a different production loop.
+
+| NPC file | Character | Quest | Role |
+|---|---|---|---|
+| `mara_npc.py` | Mara Brightwater | `mara_moonpetal` | Apothecary at The Mortar and Pestle (alchemy ingredients) |
+| `elena_npc.py` | Elena Copperkettle | `elena_cloth` | Weaver at her cottage (textile chain) |
+| `hendricks_npc.py` | Old Hendricks | `hendricks_ore` | Blacksmith (metals chain) |
+| `oakwright_npc.py` | Master Oakwright | `oakwright_timber` | Carpenter at the woodshop |
+| `torben_npc.py` | Torben | — | Currently flavour-only NPC |
+| `tutorial_guide_npc.py` | Tutorial guide | — | NPC used inside the Tutorial Hub instances |
+
+Additional NPC variants used elsewhere in the world:
+
+| NPC file | Purpose |
+|---|---|
+| `quest_giving_llm_trainer.py` | Trainer + LLM dialogue + quest-giving combo (used by Oakwright-style NPCs) |
+| `llm_guildmaster_npc.py` | LLM-driven variant of GuildmasterNPC for guildmasters that hold real conversations |
+| `llm_shopkeeper_npc.py` | LLM-driven variant of ShopkeeperNPC for shopkeepers that hold real conversations |
+| `nft_shopkeeper.py` | NFT-trading shopkeeper (sells/buys NFT items rather than fungible resources) |
+| `llm_roleplay_npc.py` | Base class for non-combat LLM dialogue NPCs |
+
+All quest-giving NPCs share the `QuestGiverMixin` machinery (quest command, completion hook, account cap check) so adding a new quest-NPC is a matter of subclassing the closest existing variant and pointing `quest_key` at the new quest.
+
+---
+
 ## Quest System (world/quests/)
 
 Step-based quest engine with registry pattern (same as spells/races/classes).
@@ -166,9 +194,17 @@ Step-based quest engine with registry pattern (same as spells/races/classes).
 
 **Rat Cellar** (`world/quests/rat_cellar.py`): First combat quest. key="rat_cellar", quest_type="main", reward_xp=100, reward_gold=10, repeatable=False. QuestDungeonTriggerExit gates cellar entrance. Single step completes on `boss_killed` event (fired by RatKing.die()). No-death: defeated players teleport to inn at 1 HP.
 
-**Baker's Flour** (`world/quests/bakers_flour.py`): Starter delivery quest. key="bakers_flour", quest_type="side", reward_xp=100, reward_gold=4. Bring 3 Flour (resource ID 2) to Bron. Consumes flour on turn-in.
+**Baker's Flour** (`world/quests/bakers_flour.py`): Starter delivery quest. key="bakers_flour", quest_type="side", reward_xp=100, reward_gold=4, reward_bread=1. Bring 3 Flour (resource ID 2) to Bron at the Goldencrust Bakery. Consumes flour on turn-in.
 
-**Oakwright's Timber** (`world/quests/oakwright_timber.py`): Starter delivery quest. key="oakwright_timber", quest_type="side", reward_xp=100, reward_gold=5. Bring 4 Timber (resource ID 7) to Oakwright.
+**Oakwright's Timber** (`world/quests/oakwright_timber.py`): Starter delivery quest. key="oakwright_timber", quest_type="side", reward_xp=100, reward_gold=5, reward_bread=1. Bring 4 Timber (resource ID 7) to Master Oakwright at the woodshop.
+
+**Mara's Moonpetal** (`world/quests/mara_moonpetal.py`): Starter alchemy ingredient quest. key="mara_moonpetal", quest_type="side", reward_xp=150, reward_gold=5, reward_bread=1. Bring moonpetal to Mara Brightwater at The Mortar and Pestle. Teaches the alchemy ingredient supply chain.
+
+**Elena's Cloth** (`world/quests/elena_cloth.py`): Starter textile production quest. key="elena_cloth", quest_type="side", reward_xp=100, reward_gold=5, reward_bread=1. Cotton → loom → cloth, deliver to Elena Copperkettle at her cottage. Teaches the parallel textile chain alongside wheat.
+
+**Hendricks' Bronze** (`world/quests/hendricks_ore.py`): Hardest starter quest. key="hendricks_ore", quest_type="side", reward_xp=250, reward_gold=10 (no bread — gold reflects difficulty). Mine copper and tin from the abandoned mine, smelt to bronze ingots, deliver to Old Hendricks at the smithy. Teaches the full metals chain and introduces the mine zone.
+
+All six starter quests have `account_cap = 10` (account-level completion cap — see [NEW_PLAYER_EXPERIENCE.md](NEW_PLAYER_EXPERIENCE.md) § Account-Level Quest Caps).
 
 ### Adding a New Quest
 
@@ -179,4 +215,4 @@ Step-based quest engine with registry pattern (same as spells/races/classes).
 
 **Character command:** `CmdQuests` (key=`"quests"`, aliases=`["quest log", "questlog"]`) — view quest log, show details for specific quests. No conflict with `CmdNPCQuest` (key=`"quest"`) from QuestGiverMixin.
 
-**87 tests** in `tests/command_tests/test_quests.py`.
+Comprehensive test coverage in `tests/command_tests/test_quests.py` plus per-quest test modules under `tests/quest_tests/`.
