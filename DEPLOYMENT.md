@@ -56,6 +56,36 @@ Each Railway **environment** (staging, production) is completely isolated:
 - Its own deployment tied to a specific Git branch
 - Its own URL/domain
 
+### Staging ↔ Production XRPL Strategy
+
+Both staging and production point at the **same XRPL mainnet infrastructure** — same vault, same issuer, same AMM pools, same NFTs. The difference is how transactions are signed:
+
+- **Production** uses the co-signer's **production API key** (`API_KEY`). Transactions are fully signed, combined, and submitted to the XRPL ledger. On-chain state changes are real.
+- **Staging** uses the co-signer's **dev API key** (`DEV_API_KEY`). Transactions go through the full signing pipeline (build, autofill, sign with Key A, send to co-signer, validate business rules, sign with Key B, combine) but the final XRPL submission is **skipped**. The co-signer returns a mock success (`tx_hash`, `engine_result`) so the game server can complete its internal state transitions.
+
+This means staging:
+- **Reads real on-chain data** — AMM prices, reserve balances, NFT state are all live mainnet values
+- **Exercises the full code path** — every line of transaction-building, signing, and co-signing code runs exactly as it would in production
+- **Cannot modify on-chain state** — no gold moves, no NFTs transfer, no AMM trades execute on the ledger
+- **Drifts from on-chain reality** over time — staging's internal mirror DB diverges because it records state changes that never happened on-chain
+
+**Resynchronisation:** When staging drift needs to be corrected, run `sync_reserves` and `sync_nfts` on the staging server. These commands read the real XRPL state and reset the mirror DB to match, bringing staging back in line with production's on-chain reality.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    XRPL Mainnet                         │
+│  (AMM pools, vault, issuer, NFTs — shared by both)     │
+└──────────┬──────────────────────────┬───────────────────┘
+           │ read                     │ read + write
+           │                          │
+┌──────────▼──────────┐    ┌──────────▼──────────────┐
+│  Staging            │    │  Production              │
+│  DEV_API_KEY        │    │  API_KEY                 │
+│  mock submit        │    │  real submit             │
+│  drift → resync     │    │  on-chain = in-game      │
+└─────────────────────┘    └──────────────────────────┘
+```
+
 ---
 
 ## Branching Strategy
@@ -235,11 +265,11 @@ All variables are set on the **game service** (not shared variables).
 
 ### Multisig (when enabled)
 
-| Variable | Purpose |
-|----------|---------|
-| `XRPL_MULTISIG_ENABLED` | Enable multisig flow (`true`/`false`) |
-| `XRPL_COSIGNER_URL` | Co-signing service URL |
-| `XRPL_COSIGNER_API_KEY` | Co-signer API key |
+| Variable | Purpose | Staging vs Production |
+|----------|---------|----------------------|
+| `XRPL_MULTISIG_ENABLED` | Enable multisig flow (`true`/`false`) | Same on both |
+| `XRPL_COSIGNER_URL` | Co-signing service URL | Same on both (one co-signer serves both) |
+| `XRPL_COSIGNER_API_KEY` | Co-signer API key | **Staging: `DEV_API_KEY`** (mock submit). **Production: `API_KEY`** (real submit). This is the only variable that differs between environments for XRPL operations. |
 
 ### Xaman Wallet
 
