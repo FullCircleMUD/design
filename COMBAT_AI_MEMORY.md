@@ -58,7 +58,7 @@ class CombatMemory(models.Model):
     # ── Who fought ──
     mob_type = models.CharField(max_length=80, db_index=True)   # e.g. "gnoll_warlord"
     mob_level = models.IntegerField()
-    mob_name = models.CharField(max_length=80)                   # display name (fallback)
+    mob_name = models.CharField(max_length=80, db_index=True)     # display name (fallback)
 
     # ── Party composition (structured for filtering + ML) ──
     party_composition = models.JSONField()
@@ -90,6 +90,7 @@ class CombatMemory(models.Model):
             models.Index(fields=["mob_type", "created_at"]),
             models.Index(fields=["mob_type", "party_size"]),
             models.Index(fields=["mob_type", "outcome"]),
+            models.Index(fields=["mob_name", "created_at"]),
         ]
 ```
 
@@ -304,7 +305,7 @@ This system builds on existing infrastructure:
 | `get_sides()` | Built | Party composition detection (allies/enemies) |
 | Combat handler | Built | Round tracking, action logging |
 | `LLMService` | Built | Chat completion + embedding API |
-| `CombatMemory` model | Not yet built | New model in `ai_memory` app |
+| `CombatMemory` model | **Built** | Model in `ai_memory` app, migrated to both SQLite and Postgres |
 | Strategy bot service | Not yet built | New service — memory query + LLM synthesis |
 | Post-combat summariser | Not yet built | Hook on `stop_combat()` to log encounters |
 | Early warning triggers | Not yet built | Approach room detection for pre-computation |
