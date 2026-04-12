@@ -15,12 +15,16 @@ DefaultExit (Evennia)
 └── ExitBase
     └── ExitVerticalAware
         ├── ExitDoor (+ SmashableMixin, LockableMixin, CloseableMixin,
-        │               InvisibleObjectMixin, HiddenObjectMixin)
+        │   │           InvisibleObjectMixin, HiddenObjectMixin)
+        │   └── TrapDoor (+ TrapMixin — directional door trap)
+        ├── TripwireExit (+ TrapMixin — directional passage trap)
         ├── DungeonExit (lazy room creation inside procedural dungeons)
         ├── DungeonPassageExit (dungeon → world exit, cleans up instance tags)
         ├── ConditionalRoutingExit (routes between rooms based on conditions)
         ├── ProceduralDungeonExit (+ ProceduralDungeonMixin — simple dungeon entry)
-        └── ConditionalDungeonExit (+ ProceduralDungeonMixin — quest-gated dungeon)
+        ├── ConditionalDungeonExit (+ ProceduralDungeonMixin — quest-gated dungeon)
+        ├── ExitTutorialStart (spawns a TutorialInstanceScript on traverse)
+        └── ExitTutorialReturn (cleans up tutorial state, returns player to prior location)
 ```
 
 ### Composable Pieces
@@ -158,6 +162,35 @@ Quest-gated dungeon entry with fallback room. Condition met → `enter_dungeon()
 
 **Use for:** Quest-gated dungeons where non-quest players should reach a different room (e.g. rat cellar: quest active → dungeon instance, no quest → empty cellar).
 
+## Tutorial Hub Exits
+
+Two specialised exits drive the Tutorial Hub. Both inherit from `ExitVerticalAware`.
+
+### ExitTutorialStart
+
+**File:** `typeclasses/terrain/exits/exit_tutorial_hub.py`
+
+Per-chunk tutorial entry exit. Each instance carries a `tutorial_num` attribute (1, 2, or 3) selecting which tutorial chunk to launch. On traverse:
+
+1. Validates `tutorial_num` is in (1, 2, 3)
+2. Refuses entry if the player already has a `tutorial_character` tag
+3. Creates a fresh `TutorialInstanceScript`, wires it to the hub, and calls `start_tutorial(player, chunk_num)`
+
+The script is responsible for moving the player into the tutorial — `at_traverse` does not call `super()`.
+
+### ExitTutorialReturn
+
+**File:** `typeclasses/terrain/exits/exit_tutorial_hub.py`
+
+South exit from the Tutorial Hub. Returns the player to their pre-tutorial location, or The Harvest Moon if they're a brand-new character. On traverse:
+
+1. Resolves the destination via `db.pre_tutorial_location_id` → fallback to "The Harvest Moon" → last-resort Limbo
+2. Cleans up any lingering `tutorial_character` tags by collapsing the matching `TutorialInstanceScript` and removing the tag
+3. Deletes any inventory items flagged with `db.tutorial_item = True`
+4. Teleports the player and clears `pre_tutorial_location_id`
+
+This pattern (cleanup-on-leave rather than cleanup-on-enter) means a crash or disconnect inside the tutorial leaves no orphan state in the player's persistent inventory.
+
 ### DungeonExit
 
 **File:** `typeclasses/terrain/exits/dungeon_exit.py`
@@ -215,7 +248,7 @@ All bidirectional helpers use the `OPPOSITES` dict to auto-derive the reverse di
 
 | Helper | Exit Type | Purpose |
 |---|---|---|
-| `connect_oneway_loopback_exit(room, direction, key=None)` | ExitVerticalAware | Boundary illusion — exit loops back to the same room. Used for forest edges, deep water, lake shores. Returns the exit object. |
+| `connect_oneway_loopback_exit(room, direction, key=None, destination=None)` | ExitVerticalAware | Boundary illusion — exit loops back to the same room by default, or to `destination` if supplied. Used for forest edges, deep water, lake shores. Returns the exit object. |
 
 ## Mixins Used by Exits
 
@@ -241,12 +274,12 @@ Exit-specific mixins:
 4. **Use `set_direction()`, not manual alias adds** — it handles both the attribute and aliases atomically.
 5. **Distinct `door_name` values** when multiple doors exist in one room — prevents `open door` from matching the wrong one.
 6. **at_traverse super() chain** — each exit class checks its own conditions then calls `super().at_traverse()`. Breaking the chain skips downstream checks (e.g. skipping ExitVerticalAware's height checks). Dungeon entry exits (`ProceduralDungeonExit`) intentionally skip super since they handle movement internally.
-6. **Follower cascade bypasses exit at_traverse** — when a leader moves, followers are moved by `at_post_move` hooks, not by re-traversing the exit. Any cleanup that must happen for followers (e.g. dungeon tag removal) must be done explicitly in the leader's exit traverse.
-7. **ProceduralDungeonMixin is a capability, not an exit type** — it provides `enter_dungeon()` but never overrides `at_traverse`. The host class decides when to call it. This allows dungeon entry to compose with any exit behavior.
+7. **Follower cascade bypasses exit at_traverse** — when a leader moves, followers are moved by `at_post_move` hooks, not by re-traversing the exit. Any cleanup that must happen for followers (e.g. dungeon tag removal) must be done explicitly in the leader's exit traverse.
+8. **ProceduralDungeonMixin is a capability, not an exit type** — it provides `enter_dungeon()` but never overrides `at_traverse`. The host class decides when to call it. This allows dungeon entry to compose with any exit behavior.
 
 ## Test Coverage
 
-48 dungeon system tests covering:
+The dungeon and exit systems have comprehensive test coverage across:
 - Template registry and lookup
 - Instance lifecycle (creation, collapse, tick-based expiry)
 - Lazy room creation via DungeonExit
