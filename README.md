@@ -20,7 +20,7 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 | **CARTOGRAPHY.md** | Cartography skill — intra-zone district mapping (`survey`/`map` commands, district map NFTs). For inter-zone route discovery see `INTERZONE_TRAVEL.md` |
 | **NEW_PLAYER_EXPERIENCE.md** | Tutorial flow, starter quests, first-hour progression, Millholm onboarding |
 | **UNIFIED_ITEM_SPAWN_SYSTEM.md** | Calculator + Distributor architecture for resources, gold, knowledge NFTs, and rare items |
-| **SPAWN_COMODITY_MOBS.md** | Zone-based mob population maintenance via ZoneSpawnScript |
+| **SPAWN_COMMODITY_MOBS.md** | Zone-based mob population maintenance via ZoneSpawnScript |
 | **SPAWN_BOSS_MOBS.md** | Unique mob placement and delay-based respawn system |
 | **ROOM_ARCHITECTURE.md** | Room typeclass hierarchy, terrain types, specialised room types, mixins |
 | **EXIT_ARCHITECTURE.md** | Exit typeclass hierarchy, doors, locks, traps, vertical-aware exits |

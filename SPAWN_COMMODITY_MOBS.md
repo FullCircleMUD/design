@@ -34,22 +34,22 @@ Each zone has a JSON file (`world/spawns/<zone_key>.json`) that defines what liv
 ```json
 [
   {
-    "typeclass": "typeclasses.actors.mobs.Wolf",
+    "typeclass": "typeclasses.actors.mobs.wolf.Wolf",
+    "key": "a grey wolf",
     "area_tag": "millholm_woods",
-    "target_count": 6,
+    "target": 6,
     "max_per_room": 1,
     "respawn_seconds": 180,
-    "desc": "A grey wolf prowls through the undergrowth.",
-    "attrs": {}
+    "desc": "A grey wolf prowls through the undergrowth."
   },
   {
-    "typeclass": "typeclasses.actors.mobs.Kobold",
-    "area_tag": "millholm_mine",
-    "target_count": 8,
+    "typeclass": "typeclasses.actors.mobs.kobold.Kobold",
+    "key": "a kobold",
+    "area_tag": "mine_kobolds",
+    "target": 9,
     "max_per_room": 3,
     "respawn_seconds": 120,
-    "desc": null,
-    "attrs": {}
+    "desc": "A scrawny, reptilian creature crouches in the shadows."
   }
 ]
 ```
@@ -58,10 +58,10 @@ Each zone has a JSON file (`world/spawns/<zone_key>.json`) that defines what liv
 
 ### Population Audit (Every 15 Seconds)
 
-`ZoneSpawnScript` ticks every 15 seconds. On each tick:
+`ZoneSpawnScript` ticks every 15 seconds (`self.interval = 15`). On each tick:
 
 1. Count living mobs matching each rule (`typeclass + area_tag` tag)
-2. If count < `target_count` and the respawn cooldown has elapsed: spawn one replacement
+2. If count < `target` and the respawn cooldown has elapsed: spawn one replacement
 3. Repeat until count meets target (one spawn per tick per rule to avoid bursts)
 
 **Why 15 seconds?** Fast enough that players don't notice a dead mob zone after a group clears it. Slow enough that a single kill doesn't immediately respawn a replacement in view.
