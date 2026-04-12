@@ -90,19 +90,31 @@ This means staging:
 
 ## Branching Strategy
 
+### Current (pre-staging)
+
 ```
 main                    ← production deploys from here
  └── dev                ← development branch, merge to main when ready
       └── feature/*     ← your working branches
 ```
 
+### Target (with staging environment)
+
+```
+main                    ← production deploys from here
+ └── staging            ← staging deploys from here (dev API key, mock XRPL submit)
+      └── dev           ← development branch, merge to staging when ready to test
+           └── feature/* ← your working branches
+```
+
 ### Rules
 
-- **`main` is production.** It should always be stable. Only merge from `dev` after testing.
-- **`dev` is the working branch.** Develop here or on feature branches. Merge to `main` when ready to deploy.
-- **Feature branches** are where development happens. Branch from `dev`, PR back into `dev`.
+- **`main` is production.** It should always be stable. Only merge from `staging` after testing.
+- **`staging` is the proving ground.** Merge from `dev` here. Test with real PostgreSQL and real XRPL data (via dev API key). Break things safely.
+- **`dev` is the working branch.** Day-to-day development happens here. Does not auto-deploy anywhere.
+- **Feature branches** are for isolated work. Branch from `dev`, PR back into `dev`.
 
-### Typical workflow
+### Typical workflow (current — no staging)
 
 ```
 git checkout dev
@@ -120,6 +132,34 @@ git checkout main
 git merge dev
 git push origin main
 # Railway auto-deploys production
+git checkout dev
+```
+
+### Typical workflow (target — with staging)
+
+```
+git checkout dev
+git pull
+git checkout -b feature/new-spell
+
+# ... develop, test locally with SQLite ...
+
+git push -u origin feature/new-spell
+# Open PR: feature/new-spell → dev
+# Merge when ready
+
+# When ready to test on staging:
+git checkout staging
+git merge dev
+git push origin staging
+# Railway auto-deploys staging (dev API key, mock XRPL submit)
+# Test on staging server with real PostgreSQL
+
+# When staging is verified:
+git checkout main
+git merge staging
+git push origin main
+# Railway auto-deploys production (production API key, real XRPL submit)
 git checkout dev
 ```
 
