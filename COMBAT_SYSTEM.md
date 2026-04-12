@@ -211,8 +211,8 @@ BRONZE_SPEAR = {
     "prototype_key": "bronze_spear",
     "typeclass": "typeclasses.items.weapons.spear_nft_item.SpearNFTItem",
     "key": "Bronze Spear",
-    "base_damage": "d6",
-    "material": "bronze",
+    "base_damage": "d8",       # weapon type determines base die (all spears = d8)
+    "material": "bronze",      # material tier determines damage scaling
     "speed": 1,
     "max_durability": 3600,
 }
@@ -221,14 +221,18 @@ IRON_SPEAR = {
     "prototype_key": "iron_spear",
     "typeclass": "typeclasses.items.weapons.spear_nft_item.SpearNFTItem",
     "key": "Iron Spear",
-    "base_damage": "d8",
-    "material": "iron",
+    "base_damage": "d8",       # same base die — it's still a spear
+    "material": "iron",        # higher material tier = more damage at every mastery level
     "speed": 1,
     "max_durability": 5400,
 }
 ```
 
-Both use `SpearNFTItem`, both get identical mastery effects (reach counter, extra attacks at higher tiers). The prototype's `material`, `base_damage`, and `max_durability` make one a starter weapon and the other a meaningful upgrade.
+Both use `SpearNFTItem`, both get identical mastery effects (reach counter, extra attacks at higher tiers). Damage is resolved via a 3D lookup: `get_damage_dice(base_damage, material, mastery_level)` in `world/damage_tables.py`. The `base_damage` key is fixed per weapon type (all spears are d8, all daggers are d4). The `material` tier determines how damage scales with mastery. For example at BASIC mastery:
+- Bronze Spear: `d8 + bronze + BASIC` → `1d7`
+- Iron Spear: `d8 + iron + BASIC` → `1d8`
+
+Higher material tiers scale damage faster with mastery — an iron weapon at GRANDMASTER (`2d8`) hits harder than a bronze one at the same mastery (`2d7`).
 
 ### Crit Threshold System
 
