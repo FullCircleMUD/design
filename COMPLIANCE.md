@@ -107,6 +107,50 @@ Standard game activity logs (session times, economic activity, transfer logs) ar
 
 ---
 
+## Gambling Law — Deterministic Distribution + Pre-Disclosure
+
+FullCircleMUD is designed to sit clearly outside the legal definition of gambling in every jurisdiction where the game is available. The compliance strategy addresses the "chance" element of the gambling test directly — at no point does a player pay consideration for an outcome that is uncertain at the time of payment.
+
+### Loot Distribution (spawning)
+
+All item, currency, and knowledge distribution is **algorithmically deterministic**. No dice rolls, no `rand()` calls, no flat % drop chances. The spawn system runs hourly and pushes exact quantities of resources, gold, scrolls, recipes, and rare NFTs onto targets in the world based on calculated budgets from live game state. When a player kills a mob and finds a scroll, the scroll is there because the system placed it — not because of a per-kill roll.
+
+See [ECONOMY.md § Deterministic Push Spawn](ECONOMY.md#deterministic-push-spawn-no-random-loot-rolls) for the mechanical detail and `ops/COMPLIANCE_LEGAL.md` §9.5.3 for the legal framing.
+
+### Variable-Outcome Mechanics (enchanting)
+
+Certain crafting systems produce outcomes that vary between sessions — the most obvious example being **gem enchanting**, where a raw gem is transformed into an enchanted gem with one of many possible effect combinations. Pure determinism would remove the discovery aspect entirely and collapse these into recipe lookups. FullCircleMUD's solution is **pre-disclosure with informed consent**:
+
+1. For each variable-outcome mechanic, a single "next available" slot holds one pre-generated outcome waiting to be claimed.
+2. When a player queries the system (e.g. `enchant ruby`), the full details of the waiting outcome are disclosed — effects, restrictions, costs, everything.
+3. The player is asked to confirm. Declining does nothing — no payment, no slot change. Confirming applies the outcome, consumes the fee, and generates the next slot.
+4. If another player claims the slot between a player's query and their confirmation, the system detects the race (via row-level database lock), re-prompts the second player with the new slot's disclosed outcome, and never charges them for something they did not consent to.
+
+**The compliance test:** at the moment the player commits to paying, do they know exactly what they will receive? With the pre-disclosure model, the answer is always yes. The "uncertain future event" element of the gambling test is absent.
+
+**Internal use of RNG.** The system may use random number generation *internally* to generate the next slot's outcome after a previous slot is consumed. This is not part of any player's transaction — the player never pays for a roll, they pay for a disclosed outcome. The RNG runs in a separate system operation, and the result is not delivered to any player until it has been disclosed in full and explicitly consented to.
+
+**The design commitment** is therefore not "no random number generation anywhere in the codebase." It is the stricter, compliance-relevant commitment:
+
+> **No player will ever pay consideration for an outcome that is not fully disclosed to them before payment.**
+
+Every mechanic where a player spends gold, tokens, items, resources, or time-gated actions must either have a fully deterministic outcome (computable from public game state) or must use the pre-disclosure-with-consent model.
+
+### Design Guardrails
+
+The following must **never** be introduced without a gambling law review by legal counsel:
+
+- Purchasable loot boxes or mystery containers
+- Premium currency that can be spent on undisclosed outcomes
+- Pay-per-roll or pay-to-re-roll mechanics for crafting, enchanting, or any other system
+- Gacha-style mechanics (paying for a draw from a pool without disclosure of the specific item being purchased)
+- Any mechanic where a player spends something of value for an outcome not fully disclosed before payment
+- Any modification to the pre-disclosure flow for enchanting or similar variable-outcome systems that would reveal the outcome *after* payment rather than *before*
+
+See `ops/COMPLIANCE_LEGAL.md` §9.5 for the full legal analysis, compliance position, and design guardrails.
+
+---
+
 ## Transparency Reporting
 
 FullCircleMUD publishes periodic game economy reports to a public GitHub repository. These reports cover gold circulation, token trading activity, player metrics, and operating income/expenses.
