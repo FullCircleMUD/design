@@ -200,7 +200,7 @@ Target: slight net negative flow (mildly deflationary) — scarcity supports val
 
 **Shop examples:** Blacksmith sells/buys weapons and metal armor. Tailor sells/buys cloth armor. Jeweller sells/buys rings and amulets. Equipment shops never sell raw resources.
 
-**Not yet implemented.** Requires proxy token infrastructure.
+**Implemented.** Proxy token infrastructure is live — see [Proxy Tokens](#nft-item-market-making--proxy-tokens) for the full pricing mechanism.
 
 ### Tier 3: Auction House (Player-Driven)
 
