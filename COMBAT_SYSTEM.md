@@ -2,7 +2,7 @@
 
 ## Overview
 
-FCM uses a **real-time (twitch) combat system** — not turn-based, not round-based. Each combatant has an independent timer that fires attacks at their weapon's speed. Combat feels like classic MUDs: you type `attack dire wolf` and your character auto-attacks on a timer until you stop, the target dies, or you leave.
+FCM uses a **real-time combat system** with a fixed 4-second tick interval. Each combatant gets their own combat handler script with an independent ticker. Within each tick, initiative determines action order — faster weapons and higher DEX act first. Combat feels like classic MUDs: you type `attack dire wolf` and your character auto-attacks on a timer until you stop, the target dies, or you leave.
 
 ---
 
@@ -30,11 +30,14 @@ enter_combat(player, dire_wolf)
     ├── _get_or_create_handler(player)      → CombatHandler script on player
     ├── _get_or_create_handler(dire_wolf)   → CombatHandler script on dire wolf
     ├── Pull in player's group members      → handlers on all followers in room
-    └── Pull in target's group members      → handlers on all mob allies in room
+    ├── Pull in target's group members      → handlers on all mob allies in room
+    └── Roll initiative for all new combatants:
+        roll_initiative(obj) = d20 + effective_initiative + weapon_speed
+        calculate_initiative_delays() → stagger first tick across 75% of interval
     ↓
 handler.queue_action({"key": "attack", "target": dire_wolf, "dt": 4, "repeat": True})
     ↓
-TICKER_HANDLER fires every `dt` seconds
+TICKER_HANDLER fires every 4 seconds (COMBAT_TICK_INTERVAL)
     ↓
 handler.execute_next_action()
     ├── obj.at_combat_tick(handler)          → mob AI decision point (dodge? special attack?)
@@ -42,6 +45,7 @@ handler.execute_next_action()
     ├── tick_combat_round() on actor         → decrements all combat_round named effects
     ├── decrement_advantages()               → count-based advantage tracking
     └── execute_attack(attacker, target)     → full attack resolution with all weapon hooks
+        (fires effective_attacks_per_round times + off-hand attacks if dual-wielding)
 ```
 
 ---
@@ -703,7 +707,7 @@ tests/
 
 ## Design Notes
 
-**Weapon speed** determines attack interval: `dt = max(2, int(4 / speed))`. A longsword (speed 1.0) attacks every 4 seconds. A dagger (speed 1.5) attacks every ~2.6 seconds. Minimum 2 seconds prevents spam.
+**Combat tick** is a fixed 4-second interval (`COMBAT_TICK_INTERVAL = 4.0` in settings). All combatants act once per tick. **Weapon speed** (0-3) affects **initiative** (turn order within a tick), not attack frequency. Initiative roll: `1d20 + effective_initiative + weapon_speed`. Higher speed = earlier action in the round. Combatants are staggered across the first 75% of the tick window based on initiative rank. **Attacks per round** come from class base + weapon mastery extra attacks, not weapon speed. Example: a longsword at MASTER grants +1 extra attack per round regardless of speed.
 
 **Room gating:** `allow_combat = True` required for combat. `allow_pvp = True` required for PvP. Banks, inns, shops are safe zones by default.
 
