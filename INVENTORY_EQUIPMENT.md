@@ -172,6 +172,57 @@ Data-driven item usage restrictions mixed into `BaseNFTItem`. Default is unrestr
 - `is_restricted` property — `True` if any field is non-default
 - Hooked into `wear()` validation chain — `can_use()` runs before `can_wear()`
 
+## Durability
+
+Items wear out over time and use. Durability is a single integer on each item (`durability` / `max_durability`) with a repairable flag (`repairable`). When `durability` reaches zero, the item is broken — equipment stops applying its effects and weapons no longer deal bonus damage (precise behaviour depends on the subclass hook).
+
+### Sources of wear
+
+| Source | Trigger | Loss |
+|---|---|---|
+| **Combat hit** | Weapon strikes a target | -1 on the weapon, -1 on the target's body armour |
+| **Parry** | Parry succeeds | -1 on both the attacker's weapon and the defender's parrying weapon |
+| **Crit downgrade** | Helmet's CRIT_IMMUNE reduces an incoming crit to a normal hit | -1 on the helmet |
+| **Passive decay** | Global daily tick (`DurabilityDecayService`, 1 game day = 3600 real seconds) | -1 on every equipped item, for each IC/puppeted character |
+
+Combat wear and passive decay **stack** — an item in heavy use wears out faster than its baseline material tier suggests.
+
+### Material Durability Tiers
+
+The passive decay service gives each material a baseline lifetime in **game days** of continuous wear (ignoring combat). Material tier is the dominant lever for balancing gear longevity vs economy turnover.
+
+| Material | Baseline game days |
+|---|---|
+| Cloth | 720 |
+| Silk / Leather / Wood | 1,440 |
+| Hardwood / Wyvern leather | 2,880 |
+| Bronze / Copper / Silver | 3,600 |
+| Iron | 5,400 |
+| Steel | 7,200 |
+| Mithral / Adamantine | 9,000 |
+
+At `TIME_FACTOR=24`, 1 game day = 1 real hour of play. A cloth item worn continuously while online lasts roughly 720 real hours of play before passive decay alone exhausts it; a mithral item lasts ~9,000 hours. Combat pulls these numbers down.
+
+### DurabilityDecayService (`typeclasses/scripts/durability_decay_service.py`)
+
+Global persistent script. Ticks every 3,600 real seconds (1 game day). Each tick:
+
+1. Iterate every IC (puppeted, online) character.
+2. For each, call `reduce_durability(1)` on every equipped item via `get_all_worn()`.
+3. Stagger per-character processing via `delay()` so a full server doesn't block the reactor on a single tick.
+
+Key design choices:
+
+- **No offline catch-up** — items only decay while the character is being played. Logging out preserves gear.
+- **Puppeted only** — unpuppeted characters on the login screen are skipped.
+- **Per-character independent** — one character's decay tick does not affect another's.
+
+`get_game_day_number()` is a module-level free function returning the absolute game-day count, usable by any system that needs "what game day is it" without caring which phase of the cycle.
+
+### Repair
+
+`repair_to_full()` on `DurabilityMixin` restores durability in full. Surfaced via the `repair` command at `RoomCrafting` rooms — see `CRAFTING_SYSTEM.md § Repair Flow`. The `repairable` flag gates this: disposable or degradation-locked items can be marked non-repairable.
+
 ## Carrying Capacity
 
 ### Three Weight Components
