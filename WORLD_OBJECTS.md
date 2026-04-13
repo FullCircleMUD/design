@@ -50,6 +50,8 @@ Permanent light source — torch sconces, braziers, magical glow-crystals. The r
 
 Readable book that transports players to themed zones. `read <book>` shows flavour text and teleports the reader to the book's configured destination room. `recall` returns them to the library room they entered from. The entry point for the book-zone system (Hundred Acre Wood, etc.).
 
+Both `read` and `recall` pace their flavour text paragraph-by-paragraph with a one-second beat between each, and lock the player in place (`ndb.book_transport`) so they can't move or re-trigger a transition mid-transport. Builders author `book_description` as plain text — `cmd_read` prefers explicit `\n\n` paragraph breaks and falls back to sentence splitting when none are present, so older single-string descriptions still pace nicely. The recall flavour is shared across all books and lives in `cmd_recall.py` (`RECALL_PARAGRAPHS`); only the read text is per-book.
+
 ### KeyItem (`typeclasses/world_objects/key_item.py`)
 
 Takeable consumable key. Subclass of `WorldItem`. Matched to a lock via `key_tag` — `LockableMixin.unlock()` consumes (deletes) the key on successful use. Use for any lock that should cost a physical key to open.
