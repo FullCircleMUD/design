@@ -438,9 +438,7 @@ BaseNFTItem.spawn_into(token_id, target_location)               # create game ob
 
 No on-chain transaction at spawn time — the blank tokens were pre-minted in bulk. This keeps placement fast with no blockchain latency.
 
-3. **Tag as loot** — after placement, the item is tagged `loot` (category `item`): `item.tags.add("loot", category="item")`. This marks it as player-lootable on mob death.
-
-**Why tag at placement?** Humanoid mobs can carry two kinds of NFT items: spawn-placed loot (scrolls, recipes, rare drops) and equipment (weapons, armour given at creation for combat stats). On death, only loot-tagged NFTs transfer to the corpse — equipment is deleted. Fungibles (gold, resources) always transfer regardless of tags. The loot tag is the single discriminator between "intended player loot" and "mob combat gear."
+**No loot tag needed.** Items placed by NFTDistributor are real `BaseNFTItem` instances. Humanoid mobs can also carry equipment — weapons and armour they wield or wear for combat stats — but those are `MobItem` subclasses (`MobDagger`, `MobLongsword`, etc.), a separate class hierarchy that never enters the NFT supply. On death, `CombatMob._create_corpse()` uses `isinstance(obj, MobItem)` as the discriminator: MobItem instances are deleted, everything else (real NFT loot, fungibles) transfers to the corpse. The class split means there is no need for a per-item `loot` tag — the item's own type tells you whether it's player loot or mob combat gear. See [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md) § Loot on Death and [INVENTORY_EQUIPMENT.md](INVENTORY_EQUIPMENT.md) § MobItem Hierarchy for the full class split.
 
 **NFT type name resolution:** The distributor resolves a config `type_key` (e.g. `"scroll_magic_missile"`) to the `NFTItemType.name` needed by `assign_to_blank_token()` via `_resolve_nft_item_type_name()`. This looks up the `prototype_key` from the config entry, then finds the matching `NFTItemType` record.
 
@@ -771,7 +769,7 @@ Spell scrolls and recipe scrolls are fully integrated into the unified system:
 - **ScrollDistributor** / **RecipeDistributor** (NFTDistributor subclasses) place those scrolls onto tagged targets via the standard drip-feed
 - Targets are discovered via `spawn_scrolls` / `spawn_recipes` tags; `spawn_scrolls_max` / `spawn_recipes_max` dicts define per-tier capacity with at-or-below filtering
 - Within a tier, the most undersaturated scroll type is placed first (saturation-priority)
-- When a mob dies, loot-tagged scrolls transfer to the corpse — players loot them normally. The distributor tags all placed NFTs as `loot` (category `item`) at placement time
+- When a mob dies, placed NFT scrolls transfer to the corpse — players loot them normally. No loot tag is needed: the corpse filter uses `isinstance(obj, MobItem)` to delete mob combat gear while transferring everything else (real NFTs, fungibles) to the corpse
 
 This replaces the previous event-driven design where drop chance was rolled at mob death. Instead, scrolls are pre-placed on living mobs by the distributor. The statistical outcome is identical — undersaturated scrolls appear on more mobs — but with one fewer system to maintain.
 
@@ -816,7 +814,7 @@ The enchanting *process* consumes gems, the gems may have been drops, the finish
 
 - **Commodity NFT supply** — player crafting. Not system-spawned. (Future: Tracker Token AMM for pricing.)
 - **Gold sink/reallocation** — the 90/10 SINK → RESERVE cycle via `ReallocationServiceScript` is unchanged. The gold calculator just reads the resulting RESERVE balance.
-- **Daily saturation snapshot** — `NFTSaturationScript` still runs daily to feed the `KnowledgeCalculator`. The unified system consumes this data, not replaces it.
+- **Saturation snapshot** — `NFTSaturationScript` runs hourly (60s after telemetry, 60s before spawn — see [TELEMETRY.md](TELEMETRY.md) § Scheduled Scripts — Hourly Pipeline) to feed the `KnowledgeCalculator`. The unified system consumes this data, not replaces it.
 
 ---
 
@@ -828,7 +826,7 @@ The enchanting *process* consumes gems, the gems may have been drops, the finish
 | **Telemetry** | Calculators read `ResourceSnapshot`, `EconomySnapshot` for consumption baselines |
 | **Player Sessions** | GoldCalculator uses player activity data; KnowledgeCalculator uses eligible player count (players with requisite skill/mastery) for saturation denominator |
 | **FungibleGameState** | GoldCalculator reads RESERVE balance |
-| **NFTSaturationScript** | Daily saturation snapshot consumed by KnowledgeCalculator |
+| **NFTSaturationScript** | Hourly saturation snapshot consumed by KnowledgeCalculator |
 | **SaturationSnapshot** | Per-item saturation data read by KnowledgeCalculator at each hourly cycle |
 | **BaseNFTItem** | NFTDistributor calls `assign_to_blank_token()` + `spawn_into()` for NFT placement |
 | **SpellbookMixin / RecipeBookMixin** | Source of `known_by` data for saturation calculation |
@@ -850,17 +848,17 @@ All 9 phases are complete:
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Calculator + Distributor infrastructure (all calculators, distributors, budget state, headroom, service orchestrator) | Complete — 99 unit tests |
+| 1 | Calculator + Distributor infrastructure (all calculators, distributors, budget state, headroom, service orchestrator) | Complete |
 | 2 | Migrate resource spawning to unified tags + `UnifiedSpawnScript` | Complete |
 | 3 | Disconnect old `ResourceSpawnService`, `RESOURCE_SPAWN_CONFIG`, `MOB_RESOURCE_SPAWN_CONFIG` | Complete |
-| 4 | Knowledge item spawning — scrolls/recipes pre-placed on mobs via `ScrollDistributor` / `RecipeDistributor` | Complete — 32 tests |
+| 4 | Knowledge item spawning — scrolls/recipes pre-placed on mobs via `ScrollDistributor` / `RecipeDistributor` | Complete |
 | 5 | Disconnect old knowledge infrastructure — doc update only (no code to remove) | Complete |
 | 6 | Quest debt methods — `allocate_quest_reward()`, `add_quest_debt()`, `get_spawn_service()` | Complete (built in Phase 1) |
-| 7 | Retrofit quest givers — `FCMQuest.complete()` registers quest debt for gold and bread rewards | Complete — 181 quest tests pass |
-| 8 | Gold spawning — `spawn_gold` tags on mobs and `WorldChest` | Complete — 16 tests |
-| 9 | Rare NFT spawning POC — `RareNFTCalculator` placeholder + end-to-end test | Complete — 16 tests |
+| 7 | Retrofit quest givers — `FCMQuest.complete()` registers quest debt for gold and bread rewards | Complete |
+| 8 | Gold spawning — `spawn_gold` tags on mobs and `WorldChest` | Complete |
+| 9 | Rare NFT spawning POC — `RareNFTCalculator` placeholder + end-to-end test | Complete |
 
-**Total spawn system tests:** 174+
+Comprehensive test coverage across `tests/spawn_tests/` and `tests/quest_tests/` covers calculators, distributors, budget state, headroom, service orchestration, scroll/recipe placement, gold spawning, rare NFT placeholder, and quest debt integration.
 
 ### Deferred (Not In This Plan)
 
@@ -916,9 +914,10 @@ All 9 phases are complete:
 | Headroom utils | `blockchain/xrpl/services/spawn/headroom.py` — `get_current_count()`, `count_nfts()` |
 | Service orchestrator | `blockchain/xrpl/services/spawn/service.py` — `SpawnService`, `get_spawn_service()` |
 | Hourly script | `typeclasses/scripts/unified_spawn_service.py` — `UnifiedSpawnScript` |
-| Saturation script | `blockchain/xrpl/services/nft_saturation_service.py` — `NFTSaturationScript` |
+| Saturation script | `typeclasses/scripts/nft_saturation_service.py` — `NFTSaturationScript` |
+| Saturation service | `blockchain/xrpl/services/nft_saturation.py` — `NFTSaturationService.take_daily_snapshot()` (still so named, but runs hourly) |
 | Mob base (tags) | `typeclasses/actors/mob.py` — `CombatMob`, `_build_tier_max()` |
 | Zone spawn (tag sync) | `typeclasses/scripts/zone_spawn_script.py` — `ZoneSpawnScript._spawn_mob()` |
 | Quest debt hook | `world/quests/base_quest.py` — `FCMQuest._register_quest_debt()` |
 | Chest (gold tags) | `typeclasses/world_objects/chest.py` — `WorldChest` |
-| Tests | `tests/spawn_tests/` — 174+ tests across 12 test files |
+| Tests | `tests/spawn_tests/` and `tests/quest_tests/` |
