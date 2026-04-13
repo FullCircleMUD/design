@@ -6,32 +6,73 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 
 ## Document Index
 
+### World & Narrative
+
 | Document | What It Covers |
 |---|---|
 | **WORLD.md** | Zone structure, world regions, lore, NPC placement, narrative design |
-| **ECONOMY.md** | Gold sinks, AMM pricing, market tiers, resource economics, revenue model |
-| **COMBAT_SYSTEM.md** | Real-time combat architecture, weapon hooks, parry/riposte, skills, weapon mastery, stealth, dual-wield |
-| **EFFECTS_SYSTEM.md** | EffectsManagerMixin (3-layer effect system), conditions, named effects, damage resistance, damage pipeline |
-| **SPELL_SKILL_DESIGN.md** | Spell system architecture, all 12 spell school tables, crafting recipe catalog, spell implementation patterns |
-| **CRAFTING_SYSTEM.md** | Crafting/processing system architecture, recipe format, enchanting, gem insetting, room types |
-| **NPC_QUEST_SYSTEM.md** | NPC hierarchy, training, shopkeeping, quest engine, implemented quests |
-| **INVENTORY_EQUIPMENT.md** | Item system, equipment/wearslots, carrying capacity, NFT ownership, wear effects |
+| **NEW_PLAYER_EXPERIENCE.md** | Tutorial flow, starter quests, first-hour progression, Millholm onboarding |
 | **INTERZONE_TRAVEL.md** | Zone-to-zone travel — `explore`/`travel`/`sail` commands, cartography mastery gates, ship tiers, route map NFTs, food costs, party mechanics |
 | **CARTOGRAPHY.md** | Cartography skill — intra-zone district mapping (`survey`/`map` commands, district map NFTs). For inter-zone route discovery see `INTERZONE_TRAVEL.md` |
-| **NEW_PLAYER_EXPERIENCE.md** | Tutorial flow, starter quests, first-hour progression, Millholm onboarding |
-| **UNIFIED_ITEM_SPAWN_SYSTEM.md** | Calculator + Distributor architecture for resources, gold, knowledge NFTs, and rare items |
-| **SPAWN_COMMODITY_MOBS.md** | Zone-based mob population maintenance via ZoneSpawnScript |
-| **SPAWN_BOSS_MOBS.md** | Unique mob placement and delay-based respawn system |
-| **ROOM_ARCHITECTURE.md** | Room typeclass hierarchy, terrain types, specialised room types, mixins |
-| **EXIT_ARCHITECTURE.md** | Exit typeclass hierarchy, doors, locks, traps, vertical-aware exits |
 | **PROCEDURAL_DUNGEONS.md** | Dungeon template system, instance lifecycle, passage dungeons, collapse mechanics |
 | **VERTICAL_MOVEMENT.md** | Climbing, flying, swimming, underwater mechanics, vertical exit gates |
-| **WEBSITE.md** | Web frontend pages, geo-detection infrastructure, page inventory, implementation status |
+
+### Combat, Spells, Effects
+
+| Document | What It Covers |
+|---|---|
+| **COMBAT_SYSTEM.md** | Real-time combat architecture, weapon hooks, parry/riposte, skills, weapon mastery, stealth, dual-wield |
+| **WEAPON_DAMAGE_SCALING.md** | Material-tier × mastery damage tables, base die lookup, weapon balance and identities |
+| **EFFECTS_SYSTEM.md** | EffectsManagerMixin (3-layer effect system), conditions, named effects, damage resistance, damage pipeline |
+| **SPELL_SKILL_DESIGN.md** | Spell system architecture, per-school tables, spell implementation patterns, reactive spells |
+| **ALIGNMENT_SYSTEM.md** | Alignment score, alignment-gated items, shifts on player action |
+
+### NPCs, Mobs, Pets
+
+| Document | What It Covers |
+|---|---|
+| **NPC_MOB_ARCHITECTURE.md** | BaseNPC / CombatMob composition hierarchy, mixin system, mob AI tiers, hybrid LLM combat mobs |
+| **NPC_QUEST_SYSTEM.md** | NPC hierarchy, training, shopkeeping, quest engine, implemented quests |
+| **LORE_MEMORY.md** | Embedded world knowledge for NPCs — scope-tagged lore entries, semantic retrieval, multi-tag AND semantics |
+| **COMBAT_AI_MEMORY.md** | Combat memory and strategy bot for Tier 4 bosses — pre-encounter briefing, post-combat logging |
+| **LANGUAGE_SYSTEM.md** | Languages, garble engine, NPC/mob/animal language integration, Speak With Animals |
+| **PETS_AND_MOUNTS.md** | Persistent pet NFTs, familiars, mounts, taming, stabling |
+
+### Items & Rooms
+
+| Document | What It Covers |
+|---|---|
+| **INVENTORY_EQUIPMENT.md** | Item system, equipment/wearslots, carrying capacity, NFT ownership, wear effects |
+| **CRAFTING_SYSTEM.md** | Crafting/processing system architecture, recipe format, enchanting, gem insetting, room types |
+| **ROOM_ARCHITECTURE.md** | Room typeclass hierarchy, terrain types, specialised room types, mixins |
+| **EXIT_ARCHITECTURE.md** | Exit typeclass hierarchy, doors, locks, traps, vertical-aware exits |
+| **WORLD_OBJECTS.md** | WorldFixture / WorldItem base classes, interaction mixins (climbable, switch, lit, trap), builder patterns |
+
+### Economy & Spawning
+
+| Document | What It Covers |
+|---|---|
+| **ECONOMY.md** | Gold sinks, AMM pricing, market tiers, resource economics, revenue model |
+| **TREASURY.md** | Three-wallet architecture (issuer/vault/operating), subscription processing, issuance discipline |
+| **UNIFIED_ITEM_SPAWN_SYSTEM.md** | Calculator + Distributor architecture for resources, gold, knowledge NFTs, and rare items |
+| **SPAWN_COMMODITY_MOBS.md** | Zone-based mob population maintenance via ZoneSpawnScript |
+| **SPAWN_BOSS_MOBS.md** | Unique mob placement and delay-based respawn system (pending refactor) |
+| **TELEMETRY.md** | Economy telemetry snapshots, player session tracking, saturation snapshots |
+
+### Compliance, Billing, Chain Boundary
+
+| Document | What It Covers |
+|---|---|
 | **COMPLIANCE.md** | Legal/regulatory framework (no-redemption model), token classification, game economy management, language policy |
 | **SUBSCRIPTIONS.md** | Subscription billing — payment flow, lifecycle, character-entry gating (`ic`/`charcreate`/`chardelete`), trial period |
 | **IMPORT_EXPORT.md** | Chain-boundary `import`/`export` commands — gate stack, asymmetric trial gating, Xaman flow, mirror state transitions, planned OFAC SDN screening |
-| **DATABASE.md** | Django app layout, three-database architecture, model overview, migrations |
-| **TELEMETRY.md** | Economy telemetry snapshots, player session tracking, saturation snapshots |
+
+### Infrastructure
+
+| Document | What It Covers |
+|---|---|
+| **DATABASE.md** | Django app layout, four-database architecture, model overview, migrations |
+| **WEBSITE.md** | Web frontend pages, geo-detection infrastructure, page inventory, implementation status |
 
 > Deployment, infrastructure, recovery runbooks, and Railway/CI configuration live in the private `ops/` repository, not in `design/`.
 
@@ -70,7 +111,7 @@ AMM Buy/Sell Prices                            (ore+ingot→iron sword)
 
 **Key feedback loops:**
 - Price rises → spawn rate increases → supply recovers → price normalises
-- Hoarding (high per-capita supply) → supply modifier dampens spawn → new supply flows to actual consumers
+- Hoarding drives AMM price up → the price modifier responds → spawn rate rises until new supply flows to non-hoarders
 - Items junked or destroyed → leave circulation entirely → saturation drops → new copies more likely to drop
 - Players withdrawing to their private wallet does NOT reduce saturation — the item still exists and is still player-owned
 
@@ -88,8 +129,9 @@ ZoneSpawnScript (15s tick)
     │       ▼                          ▼
     │   [deleted on death]       CombatHandler (per-combatant)
     │       │                          │
-    │       └── repopulated by    execute_attack() (14 hooks)
-    │           next ZoneSpawnScript tick    │
+    │       └── repopulated by    execute_attack() — full weapon
+    │           next ZoneSpawnScript       hook pipeline
+    │           tick                       │
     │                                   Weapon mastery effects
     │                                   Parry / Riposte
     │                                   Named effects (stun/prone/etc.)
@@ -97,9 +139,13 @@ ZoneSpawnScript (15s tick)
     └── Boss Mobs (is_unique=True)           ▼
             │                         Mob dies → Corpse (loot)
             ▼                                │
-        Legacy _respawn()                    ▼
-        (delay-based, 10min)         Quest events fire
-                                     XP awarded
+        Per-boss _respawn() (current) ──┐    ▼
+        Slated for refactor — see       │   Quest events fire
+        SPAWN_BOSS_MOBS.md              │   XP awarded
+                                        │
+                                        ▼
+                          ZoneSpawnScript fills the gap
+                          for commodity mobs on the next tick
 ```
 
 ---
@@ -113,54 +159,59 @@ PATH A — Common Equipment (Tracker Token AMM — NOT YET BUILT)
     Crafting Room → player crafts sword → NFT spawns → sold to Shopkeeper
     Shopkeeper → Tracker Token AMM (price discovery) → sold to next player
 
-PATH B — Rare/Unique Items (Saturation-based drops)
-    Mob dies → loot roll → saturation snapshot consulted
-    → undersaturated items weighted higher → item drops to corpse
-    → player loots → CHARACTER location
-    → player may withdraw to private wallet (ONCHAIN) → item remains in circulation
-    → saturation only drops if item is junked or destroyed
+PATH B — Knowledge and Rare NFTs (Pre-placed by unified spawn system)
+    Each hour, UnifiedSpawnScript asks per-item calculators for a
+    budget, then ScrollDistributor / RecipeDistributor / RareNFTDistributor
+    pre-place the NFTs onto tagged targets (mobs, containers, rooms)
+    via drip-feed ticks. Players encounter the mob, kill it, and loot
+    the corpse normally — no loot-roll-on-death step.
+
+    Player loots → CHARACTER location → player may withdraw to
+    private wallet (ONCHAIN) → item remains in circulation.
 
 KNOWLEDGE ITEMS (Scrolls and Recipes)
-    Same saturation mechanism but saturation measures how many active
-    players *already know* the spell/recipe, not just circulation count.
-    Scrolls consumed (transcribed) → permanently reduce future demand.
-    Saturation only rises, never falls naturally.
+    Pre-placed via ScrollDistributor / RecipeDistributor exactly as
+    above. The calculator uses a gap-based budget:
+        budget = max(0, eligible_players - known_by - unlearned_copies)
+    Scrolls consumed (transcribed) permanently reduce future demand.
+    See UNIFIED_ITEM_SPAWN_SYSTEM.md § KnowledgeCalculator.
 
-DAILY SNAPSHOT (NFTSaturationScript)
-    ─ runs at midnight
-    ─ queries spellbooks, recipe books, NFTGameState
-    ─ writes SaturationSnapshot rows
-    ─ mob loot selection reads these snapshots (loot selection not yet wired)
+HOURLY SATURATION SNAPSHOT (NFTSaturationScript)
+    ─ runs hourly in the pipeline (60s after telemetry, 60s before spawn)
+    ─ queries spellbooks, recipe books, NFTGameState, SPELL_REGISTRY, RECIPES
+    ─ writes SaturationSnapshot rows (one per tracked item per day,
+      rewritten each hour with the latest state)
+    ─ KnowledgeCalculator reads these snapshots when the next spawn
+      cycle fires
 ```
 
 ---
 
 ### Resource Spawn in Detail
 
-The three-factor algorithm prevents both inflation and scarcity simultaneously:
+The two-factor algorithm self-corrects for inflation and scarcity:
 
 ```
-FACTOR 1: Consumption baseline (what players actually used in last 24h)
+FACTOR 1: Consumption baseline (24h rolling average of actual
+          consumption — crafting, processing, eating, repair)
               ↓
-         × FACTOR 2: Price modifier (AMM price vs target band)
+         × FACTOR 2: Price modifier (AMM buy price vs target band)
               │  price too high → modifier > 1.0 (spawn more)
               │  price in band  → modifier = 1.0 (stable)
               │  price too low  → modifier < 1.0 (spawn less)
               ↓
-         × FACTOR 3: Supply modifier (per-player-hour circulating supply)
-              │  too much supply → modifier < 1.0 (dampen)
-              │  healthy supply  → modifier = 1.0
-              │  too little      → modifier > 1.0 (boost)
-              ↓
          = SPAWN_AMOUNT (units this hour)
               │
               ▼
-         Allocated to RoomHarvesting rooms by weight (1-5 per room)
+         Distributed across tagged targets (rooms, mobs, containers)
+         proportionally by headroom, with alternating sort direction
               │
               ▼
          Drip-fed across the hour (max 12 ticks, min 5 min apart)
          so early-login players don't harvest everything before others arrive
 ```
+
+**Note:** An earlier design included a third factor (circulating supply per player-hour) intended as an anti-hoarding defence. It was removed — consumption already captures demand and AMM price already captures market conditions, so a third factor with a manually-configured target was redundant guesswork. See UNIFIED_ITEM_SPAWN_SYSTEM.md § Why Not a Supply Modifier for the full rationale.
 
 ---
 
@@ -172,8 +223,10 @@ BEFORE COMBAT:
     Spell buffs (named effects) → conditions + stats (also via recalculate)
 
 DURING COMBAT:
-    CombatHandler tick (every weapon.speed seconds)
-        → execute_attack() (14 hooks)
+    CombatHandler tick (fixed COMBAT_TICK_INTERVAL, default 4.0s)
+        → weapon speed affects INITIATIVE, not tick rate (speed + DEX
+          modifier determines turn order within the tick)
+        → execute_attack() runs the full weapon hook pipeline
         → weapon mastery effects (at_hit, at_crit, at_kill, etc.)
         → named effects applied/ticked (stun, slow, prone, etc.)
         → reactive spells (Shield on hit, Smite on kill)
@@ -186,7 +239,7 @@ AFTER COMBAT (combat ends):
 
 POST-KILL:
     at_kill() on weapon → mob special abilities (Rampage, Cleave)
-    XP awarded (10 × mob level)
+    XP awarded to the killer (formula in BaseActor.die / _award_xp)
     Corpse dropped with mob's loot
     is_unique=False → mob deleted, ZoneSpawnScript repopulates
     is_unique=True → mob stays in DB, _respawn() scheduled
@@ -261,14 +314,14 @@ RESERVE + SPAWNED + ACCOUNT + CHARACTER + SINK = vault on-chain balance
 
 All service calls (GoldService, ResourceService, NFTService) are accessed through encapsulation layers (FungibleInventoryMixin, BaseNFTItem hooks) — game code never calls services directly. This ensures every in-game state change is paired with the correct DB operation.
 
-### 90/10 Gold Model
+### Gold Sink Model
 
-All gold that leaves player hands flows to SINK. Daily reallocation moves SINK → RESERVE (currently 100%). When gold burn is implemented (target: 90% respawn, 10% revenue), the split happens in the reallocation step — no changes to gameplay code needed.
+All gold that leaves player hands flows to SINK. `ReallocationServiceScript` drains SINK → RESERVE daily (currently 100%). A future evolution will burn a percentage of gold as a deflationary counterweight to active player provisioning — the burn step belongs inside the existing reallocation path, not a new system. See TREASURY.md § Gold Sink Integration for the planned split.
 
 ### Population Scaling
 
 Several systems scale with active player count (`active_players_7d` from `PlayerSession`):
-- **Resource spawn:** supply modifier uses player-hours as denominator
+- **Resource spawn:** consumption baseline and price modifier are measured against live player activity — the 24h rolling consumption window naturally scales with how many players are actually using the resource
 - **NFT saturation:** targets are expressed as "N copies per X active players"
 - **Knowledge saturation:** denominator is eligible players (those with requisite skill/mastery)
 
