@@ -1,6 +1,10 @@
 # Treasury & Subscription Processing
 
 > **Scope:** Internal fiscal and monetary policy automation for FullCircleMUD. This document describes operational systems for managing game revenue and disciplining in-game currency issuance.
+>
+> **See also:** [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) for the subscription billing flow, [IMPORT_EXPORT.md](IMPORT_EXPORT.md) for the chain-boundary `import`/`export` commands and the planned OFAC SDN screening, [COMPLIANCE.md](COMPLIANCE.md) for the no-redemption model and language policy, and [ECONOMY.md](ECONOMY.md) for the in-game economy and SINK→RESERVE reallocation.
+>
+> **See also:** [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) for the subscription billing flow, [IMPORT_EXPORT.md](IMPORT_EXPORT.md) for the chain-boundary `import`/`export` commands and the planned OFAC SDN screening, [COMPLIANCE.md](COMPLIANCE.md) for the no-redemption model and language policy, and [ECONOMY.md](ECONOMY.md) for the in-game economy and SINK→RESERVE reallocation.
 
 ---
 
@@ -24,31 +28,33 @@
 
 ## Wallet Architecture
 
-### Current (Two Wallets)
+The three-wallet infrastructure exists on-chain today. The game code only references **two** of the three wallets (issuer and vault). The operating wallet is **intentionally kept off the game server** and managed manually — it is the operator's business banking layer, not part of the game runtime. This is by design, not a temporary state waiting for code to catch up.
 
-| Wallet | Role |
-|---|---|
-| **Issuer** | Issues all FCM currencies, mints NFTs, receives subscription payments |
-| **Vault** | Holds game asset inventory, executes AMM swaps, processes imports/exports |
-
-### Proposed (Three Wallets)
-
-| Wallet | Role | Holds |
-|---|---|---|
-| **Issuer** | Central financial authority — issues all FCM currencies, mints NFTs, receives subscription payments, holds treasury (RLUSD + T-Bills), issues gold on subscription events | Subscription revenue, RLUSD, T-Bills, game currency issuance authority |
-| **Vault** | Game operations — holds game asset inventory, executes AMM swaps, processes imports/exports | Game gold, resources, NFTs, AMM LP tokens |
-| **Operating** (NEW) | Business expenses — hosting, LLM API fees, development costs | RLUSD allocated from subscription splits; funds may be moved to exchange for fiat conversion |
+| Wallet | Role | Holds | Game-server visibility |
+|---|---|---|---|
+| **Issuer** | Central financial authority — issues all FCM currencies, mints NFTs, receives subscription payments, holds treasury (RLUSD + T-Bills), issues gold on subscription events | Subscription revenue, RLUSD, T-Bills, game currency issuance authority | Yes (`XRPL_ISSUER_ADDRESS`) |
+| **Vault** | Game operations — holds game asset inventory, executes AMM swaps, processes imports/exports | Game gold, resources, NFTs, AMM LP tokens | Yes (`XRPL_VAULT_ADDRESS`) |
+| **Operating** | Business expenses — hosting, LLM API fees, development costs, fiat conversion | RLUSD moved from the issuer manually after subscription revenue has been accumulated | **No — and not planned to be.** Operated entirely outside the game server. |
 
 ### Why a Separate Operating Wallet?
 
-The issuer is the game's central financial authority — it receives revenue, holds treasury assets, and controls currency issuance. That role should not be muddied with day-to-day expense payments. Separating the operating wallet:
+The issuer is the game's central financial authority — it receives revenue, holds treasury assets, and controls currency issuance. That role is kept separate from day-to-day expense payments. The split:
 
-- **Issuer** remains the fiscal centre — revenue in, gold out, treasury management. Tightly controlled.
-- **Operating** receives its allocation (10% of subscription revenue) and is used freely for business expenses without touching the issuer's treasury position.
-- **Vault** remains the game operations wallet — player-facing transactions only.
+- **Issuer** is the fiscal centre — revenue in, gold out, treasury management. Tightly controlled.
+- **Operating** receives a periodic allocation from the issuer (the operator's accounting decision, not an automated 1-payment-1-split flow) and is used freely for business expenses without touching the issuer's treasury position.
+- **Vault** is the game operations wallet — player-facing transactions only.
 - Vault and issuer each have distinct multisig cosigner rules appropriate to their roles. Operating does not use multisig — it is secured by the shared regular key (Key C) with its master key disabled.
 
-> **No migration needed** — subscription payments already go to the issuer. The issuer sends the operating split to the new operating wallet.
+### Why the operating wallet is kept off the game server
+
+The operating wallet handles real-world business expenses — hosting bills, LLM API fees, development costs, and conversion to fiat. None of those flows belong inside the game runtime:
+
+- **Reduced attack surface.** Operational funds are isolated from any game-server compromise. A vulnerability in the game server cannot drain expense funds because the server has no signing authority over the operating wallet.
+- **Manual operator judgement.** Allocation decisions, fiat off-ramp timing, and expense pacing are accounting decisions made by the operator, not automatable game-server behaviour. There is no mechanical rule that should be running them.
+- **Clean separation of concerns.** The game runtime deals with player-facing chain operations (issuer mint, vault swaps, player imports/exports). Business banking is a different category and lives in a different operational tool (Xaman, manually).
+- **No player-facing dependency.** Nothing in the game economy or player experience depends on the operating wallet. It can be moved, frozen, or restructured without any impact on the running game.
+
+The operator periodically reviews issuer subscription revenue and moves an appropriate portion to operating manually. The 10% figure mentioned later in this doc is a guideline for that allocation, not an automated split rule.
 
 ---
 
@@ -57,17 +63,18 @@ The issuer is the game's central financial authority — it receives revenue, ho
 ### Flow
 
 ```
-Player pays $20 RLUSD ──→ Issuer Wallet
+Player pays $20 RLUSD ──→ Issuer Wallet (held in full)
                               │
-                              ├──→ 10% ($2 RLUSD) ──→ Operating Wallet
-                              │    (business expenses — hosting, LLM, dev)
-                              │
-                              ├──→ 90% ($18 RLUSD) ──→ Retained in issuer
-                              │    (treasury management — RLUSD / T-Bill allocation)
+                              ├──→ Treasury management — RLUSD / T-Bill allocation
+                              │    (issuer-side automated rebalancing — see Treasury Management below)
                               │
                               └──→ Active player signal received
                                    ──→ Issuer issues GOLD_PER_SUBSCRIPTION ──→ Vault (RESERVE)
                                    (per-player economy provisioning — see Active Player Signal below)
+
+Operator manually moves RLUSD from issuer to Operating Wallet
+periodically, on a schedule the operator decides. The operating wallet
+is not addressable from the game server. See Wallet Architecture above.
 ```
 
 ### Gold Provisioning — Per-Player Economy Allocation
@@ -106,23 +113,21 @@ XRPL mainnet does not support on-chain Hooks. All processing is server-side:
 1. **Transaction monitoring** — game server subscribes to the issuer wallet's transaction stream via XRPL WebSocket (`subscribe` command)
 2. **Payment detection** — filter for incoming RLUSD Payment transactions
 3. **Subscription verification** — match against pending subscription requests (existing `verify_fungible_payment()` pattern)
-4. **Operating split** — issuer sends 10% RLUSD to operating wallet
-5. **Active player provisioning** — subscription receipt triggers the active player signal; issuer issues `GOLD_PER_SUBSCRIPTION` gold to vault via Payment
-6. **Subscription activation** — existing `extend_subscription()` flow
-7. **Memo tagging** — all transactions carry structured memos (see Memo System below)
+4. **Active player provisioning** — subscription receipt triggers the active player signal; issuer issues `GOLD_PER_SUBSCRIPTION` gold to vault via Payment
+5. **Subscription activation** — existing `extend_subscription()` flow
+6. **Memo tagging** — all transactions carry structured memos (see Memo System below)
+
+The game server does **not** send RLUSD to the operating wallet — that flow is operator-managed manually outside the game runtime.
 
 ### Configuration
 
 ```python
 # Subscription processing
 SUBSCRIPTION_PAYMENT_DESTINATION = XRPL_ISSUER_ADDRESS    # issuer is the fiscal centre
-SUBSCRIPTION_OPS_SPLIT_PCT = 10          # % of subscription RLUSD to operating wallet
 GOLD_PER_SUBSCRIPTION = 5000            # gold provisioned per active player per month (game balance parameter)
-
-# Operating wallet (business expenses — hosting, LLM, dev, fiat conversion)
-XRPL_OPERATING_ADDRESS = "<operating_address>"
-XRPL_OPERATING_WALLET_SEED = os.environ.get("XRPL_OPERATING_WALLET_SEED", "")
 ```
+
+The operating wallet has no game-server config because the game server has no signing authority over it. See Wallet Architecture above.
 
 ---
 
@@ -130,7 +135,7 @@ XRPL_OPERATING_WALLET_SEED = os.environ.get("XRPL_OPERATING_WALLET_SEED", "")
 
 ### Asset Allocation
 
-The issuer wallet holds business revenue (after the operating split) in two forms:
+The issuer wallet holds business revenue in two forms (after the operator has periodically moved a portion to the operating wallet manually — see Wallet Architecture):
 
 | Asset | Purpose | Target Allocation |
 |---|---|---|
@@ -248,9 +253,10 @@ Each transaction includes one Memo with:
 | MemoType | Trigger | MemoData Example |
 |---|---|---|
 | `fcm/subscription` | Active player gold provisioning | `{"goldAmount":5000,"policyRate":"GOLD_PER_SUBSCRIPTION"}` |
-| `fcm/ops-split` | Operating split from subscription | `{"subscriptionTx":"<hash>","splitPct":10,"amount":"2.00"}` |
 | `fcm/rebalance` | Treasury RLUSD/T-Bill rebalance | `{"direction":"buy-tbill","amount":"100","rlusdPctBefore":25,"rlusdPctAfter":20}` |
 | `fcm/sink-burn` | Gold burned from SINK (10%) | `{"amount":"500","sinkTotal":"5000","burnPct":10}` |
+
+> Issuer-to-operating transfers are operator-managed in Xaman, not generated by the game server. They get whatever memo the operator chooses to attach (or none) and are not part of the game-server memo audit trail.
 
 ### Memo Design Principles
 
@@ -269,19 +275,24 @@ Add memo support to all existing transaction paths:
 - Game server: `xrpl_tx.py` functions accept optional memo parameter
 - Xaman payloads: include memos in payment/offer templates
 
-### Phase 2: Operating Wallet
+### Phase 2: Operating Wallet (Already Deployed — No Game-Server Work)
 
-- Create third XRPL wallet for operating expenses
-- Configure multisig with appropriate cosigner rules
-- Trust line for RLUSD
-- Issuer trust lines for T-Bill issuer (when selected)
+The operating wallet exists on-chain today:
+- Regular key signed by Key C (Key C is the shared regular key for the wallet)
+- Master key disabled
+- RLUSD trust line in place
+
+There is **no game-server work** for this phase. The operating wallet is intentionally kept off the game runtime — see Wallet Architecture § "Why the operating wallet is kept off the game server". The operator handles allocation and fiat conversion manually in Xaman.
+
+The only Phase 2 game-side task is adding the issuer trust line for the T-Bill issuer when one is selected, which is properly part of Phase 4 (Treasury Rebalancing).
 
 ### Phase 3: Subscription Processing
 
 - Server-side transaction monitor for issuer wallet
-- Revenue split logic (10% ops / 90% retained)
-- Gold provisioning trigger (issuer → vault)
+- Gold provisioning trigger (issuer → vault) on subscription receipt
 - `GOLD_PER_SUBSCRIPTION` configuration and admin adjustment interface
+
+(No automated revenue split — the operator moves RLUSD from issuer to operating wallet manually as part of normal accounting.)
 
 ### Phase 4: Treasury Rebalancing
 
