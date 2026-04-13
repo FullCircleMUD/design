@@ -37,7 +37,7 @@ Players need an active subscription to play FullCircleMUD. Payment is entirely i
 - Subscription expiry stored on the Account typeclass as an `AttributeProperty`
 - Payment records stored in separate `subscriptions` database (4th database)
 - Replay protection via unique `tx_hash` constraint on payment records
-- Superuser and bot accounts bypass all subscription checks
+- Game moderator and bot accounts bypass all subscription checks
 
 ---
 
@@ -136,7 +136,7 @@ The `subscribe` command follows the same Xaman payment pattern as `import`:
 Two helpers in `subscriptions/utils.py` drive every subscription check in the codebase:
 
 - **`is_subscribed(account)`** — True while the account's `subscription_expires_date` is in the future (also True if the subscription system is disabled, or the account is exempt).
-- **`has_paid(account)`** — True if the account has *ever* recorded a `SubscriptionPayment` row. Free-trial-only accounts return False. Exempt accounts (superuser/bot) return True.
+- **`has_paid(account)`** — True if the account has *ever* recorded a `SubscriptionPayment` row. Free-trial-only accounts return False. Exempt accounts return True.
 
 ### Character entry gates (`is_subscribed`):
 
@@ -166,7 +166,7 @@ The `{subscription}` placeholder in `ooc_appearance_template` shows status betwe
 
 | State | Display |
 |-------|---------|
-| Exempt (superuser/bot) | Empty string (nothing shown) |
+| Exempt account | Empty string (nothing shown) |
 | Subscribed, > 48h remaining | `Subscribed until 09:13 UTC on 13 April 2026` |
 | Subscribed, < 48h remaining | Red: `*** Your subscription expires in 27 hours and 56 minutes ***` |
 | Expired | Red: `*** Your subscription has expired ***` + `Use subscribe to renew your subscription.` |
@@ -185,7 +185,7 @@ New accounts receive a free trial on creation (in `at_account_creation()`, after
 - No-op if account already has an expiry set
 - No message at creation time (no session yet) — the OOC menu shows status on first look
 
-Superuser accounts don't receive trials (they're exempt from subscription checks entirely).
+Exempt accounts don't receive trials (they're exempt from subscription checks entirely).
 
 ---
 
@@ -200,7 +200,7 @@ All subscription settings in `server/conf/settings.py`:
 | `SUBSCRIPTION_CURRENCY_ISSUER` | `""` (env var) | XRPL issuer address for the currency |
 | `SUBSCRIPTION_PAYMENT_DESTINATION` | `XRPL_ISSUER_ADDRESS` | Wallet receiving payments |
 | `SUBSCRIPTION_TRIAL_HOURS` | `48` | Free trial period for new accounts |
-| `SUBSCRIPTION_BYPASS_SUPERUSER` | `True` | Superusers skip subscription checks |
+| `SUBSCRIPTION_BYPASS_SUPERUSER` | `True` | Moderator accounts skip subscription checks |
 
 Currency code and issuer are environment-variable driven.
 
@@ -244,5 +244,5 @@ evennia test --settings settings tests.command_tests.test_cmd_subscribe
 ```
 
 - **test_subscription_utils** — `is_subscribed`, `get_subscription_status`, `extend_subscription`, `grant_trial`, `has_paid`, feature flag disabled behaviour
-- **test_subscription_gating** — `ic`, `charcreate`, `chardelete` blocked when expired; allowed when subscribed/superuser; bypass when disabled. Also covers the `import` and `export` chain-boundary gates (asymmetric `is_subscribed` / `has_paid` model — see [IMPORT_EXPORT.md](IMPORT_EXPORT.md))
+- **test_subscription_gating** — `ic`, `charcreate`, `chardelete` blocked when expired; allowed when subscribed or for exempt accounts; bypass when disabled. Also covers the `import` and `export` chain-boundary gates (asymmetric `is_subscribed` / `has_paid` model — see [IMPORT_EXPORT.md](IMPORT_EXPORT.md))
 - **test_cmd_subscribe** — early-return paths (no wallet, exempt, status display, disabled message)

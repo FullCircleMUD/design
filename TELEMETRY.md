@@ -251,7 +251,7 @@ One row per tracked item per snapshot cycle. Controls knowledge NFT spawn budget
 |---|---|---|---|
 | SpawnService (ResourceCalculator) | EconomySnapshot, ResourceSnapshot, FungibleGameState, PlayerSession | Two-factor resource spawn algorithm | See [UNIFIED_ITEM_SPAWN_SYSTEM.md](UNIFIED_ITEM_SPAWN_SYSTEM.md) |
 | Markets web page | ResourceSnapshot (latest hour), CurrencyType, NFTItemType | Public economic dashboard | `/markets/` route |
-| Admin `economy` command | EconomySnapshot (latest), ResourceSnapshot (latest) | Superuser monitoring | `economy [resource]` |
+| Admin `economy` command | EconomySnapshot (latest), ResourceSnapshot (latest) | Moderator monitoring | `economy [resource]` |
 | SpawnService (KnowledgeCalculator) | SaturationSnapshot (latest) | Gap-based knowledge item budgets (eligible - known - unlearned) | See [UNIFIED_ITEM_SPAWN_SYSTEM.md](UNIFIED_ITEM_SPAWN_SYSTEM.md) |
 
 ---

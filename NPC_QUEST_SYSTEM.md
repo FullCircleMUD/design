@@ -73,7 +73,7 @@ ShopkeeperNPC buys and sells resources with prices driven by live XRPL AMM pools
 
 **Pricing:** Constant product formula (x * y = k) with AMM trading fee. Buy prices ceil-rounded, sell prices floor-rounded — all gold amounts are integers. Favorable slippage goes to the game. See **design/ECONOMY.md** for the full AMM trade accounting model.
 
-**Superuser commands:**
+**Moderator commands:**
 - `amm_check` / `amm_check <resource>` — query AMM pool states (reserves, fees). Read-only, no trades
 - `reconcile` / `recon` — compare vault on-chain balances vs game-state DB per currency. Shows Reserve, Distributed, Sink, Delta
 - `sync_reserves` — recalculate RESERVE from on-chain vault state: `RESERVE = on_chain - (SPAWNED + ACCOUNT + CHARACTER + SINK)`. Always run `reconcile` first

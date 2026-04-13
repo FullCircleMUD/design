@@ -57,7 +57,7 @@ Both `import` and `export` run a sequence of gates before any chain interaction.
 
 **Gates 4 and 5 are defensive — they should be unreachable in practice.** Every account is provisioned with a linked XRPL wallet and an `AccountBank` at creation time (`at_account_creation()`), so a player who reaches the `import`/`export` command should always satisfy both checks. The gates exist to fail loudly rather than crashing if account provisioning is ever incomplete (e.g. partial migration, manual DB editing, or an account created before wallet/bank provisioning was wired up). If either of these fires in production it's a sign of a real provisioning bug, not a player misconfiguration.
 
-**Universal kill switch is absolute.** When `XRPL_IMPORT_EXPORT_ENABLED=False`, *no one* — not superusers, not bots, not paying players — can use either command. This is the alpha-phase default and is the master safety switch for outages, key rotations, vault maintenance, or sanctions incidents.
+**Universal kill switch is absolute.** When `XRPL_IMPORT_EXPORT_ENABLED=False`, *no account* can use either command — paying players, bots, and moderator accounts alike are blocked. This is the alpha-phase default and is the master safety switch for outages, key rotations, vault maintenance, or sanctions incidents.
 
 **Bot accounts** bypass the subscription helpers (`is_subscribed` and `has_paid` both return True for exempt accounts via `_is_exempt`), but `cmd_import.py` and `cmd_export.py` carry a *separate* per-command name/wallet check that explicitly blocks them. Bots can play the game without a subscription but cannot move chain assets in or out — keep that distinction in mind.
 
