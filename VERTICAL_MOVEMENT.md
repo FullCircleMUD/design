@@ -21,18 +21,35 @@ Rooms define vertical bounds:
 
 ## HeightAwareMixin — Vertical Position Tracking
 
-All objects that exist within a room's vertical space share a single mixin: `HeightAwareMixin` (`typeclasses/mixins/height_aware_mixin.py`). It provides one attribute:
+All objects that exist within a room's vertical space share a single mixin: `HeightAwareMixin` (`typeclasses/mixins/height_aware_mixin.py`).
 
 ```python
 class HeightAwareMixin:
     room_vertical_position = AttributeProperty(0)
+
+    # Opt-in height-gated visibility. None = visible at all heights.
+    visible_min_height = AttributeProperty(None, autocreate=False)
+    visible_max_height = AttributeProperty(None, autocreate=False)
+
+    def is_height_visible_to(self, looker):
+        ...
 ```
 
 **Composed into:** `BaseActor`, `Corpse`, `BaseNFTItem`, `WorldFixture`, `WorldItem`.
 
 **NOT composed into:** Rooms and exits — they *define* vertical space, they don't exist within it.
 
-This is the single source of truth for an object's vertical position. All height checks (combat reachability, exit gating, room display filtering) read this attribute.
+`room_vertical_position` is the single source of truth for an object's vertical position. All height checks (combat reachability, exit gating, room display filtering) read this attribute.
+
+### Height-Gated Visibility
+
+`visible_min_height` and `visible_max_height` are **opt-in** visibility filters. Most objects leave them as `None` and are visible to a looker at any height. Setting either (or both) restricts the object to lookers whose own `room_vertical_position` falls within the range, via `is_height_visible_to(looker)`.
+
+Used by `RoomBase.get_display_characters()` and `get_display_things()` to filter who and what appears in the room display:
+- A shipwreck at the bottom of the bay can set `visible_max_height = -1` so it only appears to divers (surface swimmers and boats pass over it without seeing it).
+- A tutorial prop at ground level can set both to `0` so it's only visible to ground-level characters and disappears when the player flies up.
+
+This is a building block for height-specific content — builders opt in per-object when they want something hidden from the wrong elevation.
 
 ### Death-Height Behavior
 
@@ -46,7 +63,7 @@ When an actor dies, their corpse inherits (or adapts) their vertical position:
 
 **Implementation:** Height is captured at the very top of `_real_death()` / `_defeat()` / `_create_corpse()` — BEFORE `clear_all_effects()` or `exit_combat()` run. This is critical because equipment-granted FLY (e.g. Skydancer's Ring) persists through `clear_all_effects()` (which only strips named effects). The height must be read before any state changes.
 
-**Tests:** 9 tests in `tests/typeclass_tests/test_height_aware_mixin.py`.
+**Tests:** `tests/typeclass_tests/test_height_aware_mixin.py`.
 
 ---
 
@@ -162,7 +179,7 @@ All changes are backward-compatible additions to existing classes (all defaults 
 
 4. **CmdExits** + **CmdLook direction handler** — height filtering integrated.
 
-**Tests:** 18 tests in `tests/typeclass_tests/test_height_adapter.py`.
+**Tests:** `tests/typeclass_tests/test_height_adapter.py`.
 
 ## Gameplay Examples
 
@@ -281,6 +298,8 @@ Global character command: `climb up [target]` / `climb down [target]`
 
 - ~~**Height-dependent mob AI**~~ — **Done.** See `design/COMBAT_SYSTEM.md` § Height Combat and `design/NPC_MOB_ARCHITECTURE.md` for mob height-matching, retargeting, and flee behavior.
 - ~~**Climbing**~~ — **Done.** ClimbableMixin + CmdClimb. See above.
-- **Height-aware visibility** — vertical fog of war, `look up`/`look down` commands, objects only visible at compatible heights
+- ~~**Height-gated object visibility**~~ — **Done.** `visible_min_height` / `visible_max_height` on `HeightAwareMixin`, enforced in `RoomBase.get_display_characters()` / `get_display_things()`. See § Height-Gated Visibility above.
+- **`look up` / `look down` commands** — explicit commands to inspect what's above or below the character's current height (would use the same `is_height_visible_to` filter but display other heights, not just the current one)
+- **Vertical fog of war** — atmospheric/distance effects when looking at things several heights away
 - **Get/drop/loot height gating** — items at different heights, fishing from surface, etc.
 - **Gradual descent** — falling could be a multi-tick event rather than instant, allowing reactions
