@@ -63,7 +63,7 @@ The operator periodically reviews issuer subscription revenue and moves an appro
 ### Flow
 
 ```
-Player pays $20 RLUSD ──→ Issuer Wallet (held in full)
+Player pays subscription (RLUSD) ──→ Issuer Wallet (held in full)
                               │
                               ├──→ Treasury management — RLUSD / T-Bill allocation
                               │    (issuer-side automated rebalancing — see Treasury Management below)

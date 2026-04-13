@@ -29,10 +29,8 @@ Players need an active subscription to play FullCircleMUD. Payment is entirely i
 ## Overview
 
 - Monthly subscription paid in RLUSD via XRPL (price stored in DB, adjustable without code changes)
-- Staged pricing by development phase:
-  - **Pre-Alpha:** Free — `SUBSCRIPTION_ENABLED=false`, no payment required
-  - **Alpha:** 2 RLUSD/month — covers hosting and LLM costs
-  - **Beta / Full Release:** 20 RLUSD/month — full subscription
+- Staged pricing by development phase — current figures per phase live in `web/templates/website/costs.html` (Pre-Alpha / Alpha / Beta). The website is authoritative for pricing; this doc intentionally does not restate the numbers so they can't drift
+- `SUBSCRIPTION_ENABLED=false` during pre-alpha — no payment required
 - Payment destination: the issuer wallet (`XRPL_ISSUER_ADDRESS`)
 - Subscription expiry stored on the Account typeclass as an `AttributeProperty`
 - Payment records stored in separate `subscriptions` database (4th database)

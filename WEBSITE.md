@@ -60,7 +60,7 @@ Design pillars, world description, technical foundation. No financial product la
 | Template | `costs.html` |
 | Status | Built, compliant |
 
-Subscription pricing (2 RLUSD alpha, 20 RLUSD go-live), game economy overview, running costs breakdown.
+Subscription pricing per phase, game economy overview, running costs breakdown. Figures live in `costs.html` — the website is authoritative for pricing.
 
 ### Terms of Service
 
