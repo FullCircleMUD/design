@@ -1,6 +1,6 @@
 # SUBSCRIPTIONS.md
 
-> **THIS FILE covers the subscription payment system** — how players pay for game access via XRPL, the subscription lifecycle, command gating, trial periods, and the payment flow. For database architecture, see **design/DATABASE.md**. For economic design, see **design/ECONOMY.md**. For technical implementation details, see **src/game/CLAUDE.md**.
+> **THIS FILE covers the subscription payment system** — how players pay for game access via XRPL, the subscription lifecycle, command gating for character entry, trial periods, and the payment flow. For the chain-boundary `import`/`export` commands and how they use the subscription helpers, see [IMPORT_EXPORT.md](IMPORT_EXPORT.md). For database architecture, see [DATABASE.md](DATABASE.md). For economic design, see [ECONOMY.md](ECONOMY.md). For technical implementation details, see `src/game/CLAUDE.md`.
 
 ---
 
@@ -133,40 +133,30 @@ The `subscribe` command follows the same Xaman payment pattern as `import`:
 
 ## Command Gating
 
-Two helpers in `subscriptions/utils.py` drive the gates:
+Two helpers in `subscriptions/utils.py` drive every subscription check in the codebase:
 
 - **`is_subscribed(account)`** — True while the account's `subscription_expires_date` is in the future (also True if the subscription system is disabled, or the account is exempt).
 - **`has_paid(account)`** — True if the account has *ever* recorded a `SubscriptionPayment` row. Free-trial-only accounts return False. Exempt accounts (superuser/bot) return True.
 
-### Blocked when subscription has expired (`is_subscribed`):
+### Character entry gates (`is_subscribed`):
+
+These commands are gated on an active subscription. They are the touchpoints for *playing* the game — entering a character, creating a new one, or deleting one — so an expired sub blocks them immediately.
 
 | Command | File | Gate placement |
-|---------|------|----------------|
+|---|---|---|
 | `ic` | `cmd_override_ic.py` | Top of `func()`, before `super().func()` |
 | `charcreate` | `cmd_override_charcreate.py` | Top of `func()`, before slot check |
 | `chardelete` | `cmd_override_chardelete.py` | Top of `func()`, before arg check |
-| `import` | `cmd_import.py` | After kill-switch check, before bot check |
 
 All show: "Your subscription has expired. Use subscribe to renew." Commands remain visible (not hidden by lock) so players understand what happened and how to fix it.
 
-### Blocked while on the free trial only (`has_paid`):
+### Chain-boundary gates (handled by IMPORT_EXPORT.md)
 
-| Command | File | Gate placement |
-|---------|------|----------------|
-| `import` | `cmd_import.py` | After `is_subscribed` check |
-| `export` | `cmd_export.py` | Top of `func()`, before bot check |
-
-`import` requires *both* an active subscription AND at least one historical payment — free-trial accounts cannot bring chain assets in. `export` is gated on `has_paid` **only** — once a player has ever paid, they retain export access even after their subscription expires.
-
-**Design rationale for asymmetric export gating:** A paid player must never be trapped — if they decide to stop subscribing, they need to be able to recover their on-chain assets. So once `has_paid` is True, export stays open forever. But the trial period must not become a self-service "spawn a free account, play 48 hours, export the haul, repeat" loop. Gating export on `has_paid` (and not `is_subscribed`) is the minimum that closes that exploit while still honouring the no-trap promise to paying players.
+The `import` and `export` commands use the same `is_subscribed` / `has_paid` helpers but with an asymmetric model — `import` requires both an active sub and a payment on record, while `export` requires only `has_paid` so paid players are never trapped with their assets. The full gate stack, the trial-recycling rationale, and the future OFAC SDN screening design live in [IMPORT_EXPORT.md](IMPORT_EXPORT.md).
 
 ### Allowed at all times:
 
-`look` (OOC menu), `wallet`, `subscribe`, `quit`, `who`, `sessions`, and all other non-gated commands.
-
-### Bot accounts and import/export
-
-Bot accounts bypass the subscription system itself (`is_subscribed`/`has_paid` both return True via `_is_exempt`), but `cmd_import.py` and `cmd_export.py` carry a separate name/wallet check (`BOT_ACCOUNT_USERNAMES`, `BOT_WALLET_ADDRESSES`) that explicitly blocks bots from import/export. Bots can play the game without a subscription but cannot move chain assets in or out — keep this distinction in mind when reading the "bots bypass all subscription checks" line in the overview.
+`look` (OOC menu), `wallet`, `subscribe`, `quit`, `who`, `sessions`, and all other non-gated commands. Players must always be able to see their status and renew, regardless of subscription state.
 
 ---
 
@@ -237,10 +227,11 @@ Currency code and issuer are environment-variable driven.
 | `server/conf/settings.py` | INSTALLED_APPS, DATABASES, DATABASE_ROUTERS, subscription settings |
 | `typeclasses/accounts/accounts.py` | `ooc_appearance_template` + `_build_subscription_line()` + `at_look()` subscription display + `at_account_creation()` trial grant |
 | `commands/account_cmds/cmdset_account_custom.py` | Register CmdSubscribe |
-| `commands/account_cmds/cmd_override_ic.py` | Subscription gate |
-| `commands/account_cmds/cmd_override_charcreate.py` | Subscription gate |
-| `commands/account_cmds/cmd_override_chardelete.py` | Subscription gate |
-| `commands/account_cmds/cmd_import.py` | Subscription gate |
+| `commands/account_cmds/cmd_override_ic.py` | Subscription gate (`is_subscribed`) |
+| `commands/account_cmds/cmd_override_charcreate.py` | Subscription gate (`is_subscribed`) |
+| `commands/account_cmds/cmd_override_chardelete.py` | Subscription gate (`is_subscribed`) |
+| `commands/account_cmds/cmd_import.py` | `is_subscribed` + `has_paid` gates — see [IMPORT_EXPORT.md](IMPORT_EXPORT.md) |
+| `commands/account_cmds/cmd_export.py` | `has_paid` gate only — see [IMPORT_EXPORT.md](IMPORT_EXPORT.md) |
 
 ---
 
@@ -253,5 +244,5 @@ evennia test --settings settings tests.command_tests.test_cmd_subscribe
 ```
 
 - **test_subscription_utils** — `is_subscribed`, `get_subscription_status`, `extend_subscription`, `grant_trial`, `has_paid`, feature flag disabled behaviour
-- **test_subscription_gating** — `ic`, `charcreate`, `chardelete`, `import` blocked when expired; allowed when subscribed/superuser; bypass when disabled
+- **test_subscription_gating** — `ic`, `charcreate`, `chardelete` blocked when expired; allowed when subscribed/superuser; bypass when disabled. Also covers the `import` and `export` chain-boundary gates (asymmetric `is_subscribed` / `has_paid` model — see [IMPORT_EXPORT.md](IMPORT_EXPORT.md))
 - **test_cmd_subscribe** — early-return paths (no wallet, exempt, status display, disabled message)

@@ -28,6 +28,8 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 | **VERTICAL_MOVEMENT.md** | Climbing, flying, swimming, underwater mechanics, vertical exit gates |
 | **WEBSITE.md** | Web frontend pages, geo-detection infrastructure, page inventory, implementation status |
 | **COMPLIANCE.md** | Legal/regulatory framework (no-redemption model), token classification, game economy management, language policy |
+| **SUBSCRIPTIONS.md** | Subscription billing — payment flow, lifecycle, character-entry gating (`ic`/`charcreate`/`chardelete`), trial period |
+| **IMPORT_EXPORT.md** | Chain-boundary `import`/`export` commands — gate stack, asymmetric trial gating, Xaman flow, mirror state transitions, planned OFAC SDN screening |
 | **DATABASE.md** | Django app layout, three-database architecture, model overview, migrations |
 | **DEPLOYMENT.md** | Server deployment, infrastructure, environment configuration |
 | **TELEMETRY.md** | Economy telemetry snapshots, player session tracking, saturation snapshots |
