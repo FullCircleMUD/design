@@ -46,7 +46,13 @@ Builders should use their judgement when assigning tiers to non-metal weapons. T
 
 Each table is keyed by **(base_die, material_tier)**. The prototype declares these two values; the full mastery→dice mapping is resolved from the table. No per-prototype damage dicts.
 
-### d4 Base (Dagger, Blowgun)
+The examples in each subsection below (e.g. "d8, e.g. longsword") are illustrative only — they're meant to anchor the reader, not enumerate every weapon that maps to that base. For the authoritative per-weapon assignment, read the `base_damage` field on the prototype in `world/prototypes/weapons/`.
+
+### d1 Base (e.g. blowgun)
+
+Fixed 1 damage regardless of material or mastery — for weapons whose purpose is not raw damage (delivery of poisons, immobilisation, etc.). Every entry in the table is `1`. Present as a first-class base die so the lookup path is uniform: special-casing these weapons outside the table would cost more than one five-line dict.
+
+### d4 Base (e.g. dagger)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -58,7 +64,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (1d4) on the diagonal.
 
-### d6 Base (Shortsword, Handaxe, Mace, Club, Sai, Nunchaku)
+### d6 Base (e.g. shortsword)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -70,7 +76,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (1d6) on the diagonal.
 
-### d8 Base (Longsword, Rapier, Spear, Staff, Bow, Crossbow, Ninjato)
+### d8 Base (e.g. longsword)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -82,7 +88,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (1d8) on the diagonal.
 
-### d10 Base (Greatclub, Battleaxe, Halberd)
+### d10 Base (e.g. battleaxe)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -94,7 +100,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (1d10) on the diagonal.
 
-### d12 Base (Greataxe)
+### d12 Base (e.g. greataxe)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -106,7 +112,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (1d12) on the diagonal.
 
-### 2d6 Base (Greatsword)
+### 2d6 Base (e.g. greatsword)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -118,7 +124,7 @@ Each table is keyed by **(base_die, material_tier)**. The prototype declares the
 
 **Bold** = 5e baseline (2d6) on the diagonal. Adamantine GM = 8d4 (avg 20) — tight bell curve, consistent peak damage for the ultimate greatsword.
 
-### 2d7 Base (Lance — mounted cavalry weapon)
+### 2d7 Base (e.g. lance — mounted cavalry weapon)
 
 | Material | UNSKILLED | BASIC | SKILLED | EXPERT | MASTER | GM |
 |---|---|---|---|---|---|---|
@@ -242,6 +248,7 @@ The shortsword peaks a full tier before the longsword. For a mid-game character 
 ## Heavy Weapons Balance — Speed 0 Two-Handers
 
 Four heavy two-handed weapons share speed 0 (slowest initiative) and no parries. Each has a distinct party role and mechanical identity. None is strictly better than another — the choice depends on scenario, party composition, and content type.
+
 
 ### Heavy Weapons Summary (Adamantine GM)
 
@@ -378,12 +385,12 @@ QUARTERSTAFF = {
     "prototype_key": "quarterstaff",
     "typeclass": "typeclasses.items.weapons.staff_nft_item.StaffNFTItem",
     "key": "Quarterstaff",
-    "base_damage": "d8",
+    "base_damage": "d6",
     "material": "bronze",       # tier 1 — physically wood, but a proper weapon
     "damage_type": DamageType.BLUDGEONING,
-    "speed": 2,
+    "speed": 1,
     "weight": 2.0,
-    "max_durability": 1440,
+    "max_durability": 2880,
 }
 ```
 
@@ -511,9 +518,7 @@ Enchanted weapons and named legendaries can still override damage if needed — 
 
 ### Special Weapons
 
-Some weapons have fixed damage regardless of material (e.g. Blowgun = always 1, Bola = always 1). These can either:
-- Use a special `"fixed"` material entry in the table, or
-- Continue to use a `damage` dict override on the prototype.
+Weapons with fixed damage regardless of material or mastery (e.g. blowgun, bola) use the `d1` base — every entry in the table is `1`. The prototype declares `base_damage = "d1"` and the lookup path is the same as any other weapon.
 
 ## Wood Progression — Design Notes
 
