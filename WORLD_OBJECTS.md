@@ -4,9 +4,14 @@
 
 ## Overview
 
-World objects are non-NFT, immovable objects placed into rooms by zone builders. They provide environmental interactions — things players look at, open, climb, pull, search, and interact with. They are NOT blockchain-tracked and cannot be picked up.
+World objects are non-NFT objects placed into rooms by zone builders. They provide environmental interactions — things players look at, open, climb, pull, search, read, and interact with. They are NOT blockchain-tracked.
 
-All world objects inherit from `WorldFixture` which provides `get:false` lock, hidden/invisible support, and height-aware positioning.
+There are **two base class lineages** for world objects, depending on whether the object is takeable:
+
+- **`WorldFixture`** — immovable, `get:false` lock. The base for permanent environmental objects: signs, chests, climbables, switches, lit fixtures, library books. The bulk of this document is about `WorldFixture` and its mixins.
+- **`WorldItem`** — takeable but non-NFT. The base for physical-but-non-blockchain items: keys, quest items, novelty props. `KeyItem` is the current concrete subclass.
+
+Both lineages include `HeightAwareMixin` (vertical position + height-gated visibility) and `HiddenObjectMixin` (find-DC discovery).
 
 ---
 
@@ -30,6 +35,28 @@ Read-only ASCII art sign. `sign_text`, `sign_style` (post/hanging/wall/stone). D
 ### WorldChest (`typeclasses/world_objects/chest.py`)
 
 Closeable + lockable + smashable container with `FungibleInventoryMixin`. Starts closed. Contents gated on open state. Supports `loot_gold_max`, `spawn_scrolls_max`, `spawn_recipes_max` for unified spawn system integration.
+
+### TrapChest (`typeclasses/world_objects/trap_chest.py`)
+
+`WorldChest` + `TrapMixin`. Opening triggers the trap (whether or not it was detected via `search`). Smashing a trapped chest triggers the trap on all room occupants before breaking it open. Disarm via the `disarm` command (SUBTERFUGE skill check).
+
+Builder sets `is_trapped`, `trap_damage_dice`, `trap_damage_type`, `trap_disarm_dc`, `trap_description` on the instance after creation.
+
+### LitFixture (`typeclasses/world_objects/lit_fixture.py`)
+
+Permanent light source — torch sconces, braziers, magical glow-crystals. The room's lighting system reads `is_lit` on any fixture present; a lit fixture satisfies the "has a light in the room" condition and suppresses the dark-room display. Unlike torches and lanterns (which are NFT items with consumable fuel), lit fixtures have no fuel management — they're permanent environmental lighting set by the builder.
+
+### LibraryBook (`typeclasses/world_objects/library_book.py`)
+
+Readable book that transports players to themed zones. `read <book>` shows flavour text and teleports the reader to the book's configured destination room. `recall` returns them to the library room they entered from. The entry point for the book-zone system (Hundred Acre Wood, etc.).
+
+### KeyItem (`typeclasses/world_objects/key_item.py`)
+
+Takeable consumable key. Subclass of `WorldItem`. Matched to a lock via `key_tag` — `LockableMixin.unlock()` consumes (deletes) the key on successful use. Use for any lock that should cost a physical key to open.
+
+### XPButton (`typeclasses/world_objects/xp_button.py`) — dev tool only
+
+Dev-only fixture that awards XP when pressed. Place it in a test room to level a character up fast so you can inspect how different classes and skills operate at different mastery tiers. **Not for live world placement** — do not ship any zone that exposes an XPButton to players.
 
 ---
 
@@ -137,31 +164,29 @@ See `typeclasses/mixins/trap.py` and subclasses. Traps can be placed on:
 
 ```
 typeclasses/
-├── world_objects/
-│   ├── base_fixture.py       ← WorldFixture (base class)
-│   ├── sign.py               ← WorldSign (ASCII art signs)
-│   ├── chest.py              ← WorldChest (container + gold/scroll spawn)
-│   ├── climbable_fixture.py  ← ClimbableFixture
-│   ├── switch_fixture.py     ← SwitchFixture
-│   ├── lit_fixture.py        ← LitFixture (permanent light source)
-│   └── jobs_board.py         ← JobsBoard
-├── mixins/
-│   ├── climbable_mixin.py    ← ClimbableMixin
-│   ├── switch_mixin.py       ← SwitchMixin
-│   ├── closeable.py          ← CloseableMixin
-│   ├── lockable.py           ← LockableMixin
-│   ├── smashable.py          ← SmashableMixin
-│   ├── trap.py               ← TrapMixin
-│   ├── container.py          ← ContainerMixin
-│   ├── hidden_object.py      ← HiddenObjectMixin
-│   ├── invisible_object.py   ← InvisibleObjectMixin
-│   └── light_source.py       ← LightSourceMixin
-commands/
-├── all_char_cmds/
-│   ├── cmd_climb.py          ← CmdClimb (climb up/down)
-│   ├── cmd_switch.py         ← CmdSwitch (pull/push/turn/flip)
-│   ├── cmd_search.py         ← search (find hidden + detect traps)
-│   ├── cmd_open.py           ← open/close
-│   ├── cmd_lock.py           ← lock/unlock
-│   └── cmd_light.py          ← light/extinguish/refuel
+├── world_objects/              ← concrete fixture and world item classes
+│   ├── base_fixture.py           (WorldFixture — the untakeable base)
+│   ├── base_world_item.py        (WorldItem — the takeable base)
+│   └── ...                       (one file per fixture subclass described above)
+├── mixins/                     ← composable interaction mixins
+│   ├── climbable_mixin.py
+│   ├── switch_mixin.py
+│   ├── closeable.py
+│   ├── lockable.py
+│   ├── smashable.py
+│   ├── trap.py
+│   ├── container.py
+│   ├── hidden_object.py
+│   ├── invisible_object.py
+│   └── light_source.py
+
+commands/all_char_cmds/         ← player-facing interaction commands
+├── cmd_climb.py                  (climb up/down)
+├── cmd_switch.py                 (pull/push/turn/flip)
+├── cmd_search.py                 (find hidden + detect traps)
+├── cmd_open.py                   (open/close)
+├── cmd_lock.py                   (lock/unlock)
+└── cmd_light.py                  (light/extinguish/refuel)
 ```
+
+The Base Classes section above is the source of truth for which concrete subclasses exist. Directory listings are intentionally sparse so new fixture types can be added without touching this doc.
