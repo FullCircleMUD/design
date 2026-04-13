@@ -342,11 +342,12 @@ Taming works like crafting:
 
 ### Taming Process
 
-1. Character finds a wild animal (spawned mob with `tameable` tag)
-2. `tame <animal>` — contested check: d20 + CHA mod + ANIMAL_HANDLING bonus vs animal's tame DC
-3. Success: wild mob is consumed, pet NFT is created in tamer's inventory
-4. Failure: animal may flee or become aggressive
-5. Pet inherits stats from the wild animal template (HP, damage, size, movement type)
+1. Character finds a wild animal (spawned mob with `tameable` attribute)
+2. `tame <animal>` — contested check: d20 + CHA mod + ANIMAL_HANDLING mastery bonus vs animal's tame DC
+3. **Success**: the wild mob is consumed, a pet NFT is minted and spawned beside the tamer, and starts following them automatically. Tamer gains `required_mastery × 50` XP (BASIC = 50, SKILLED = 100, …, GM = 250).
+4. **Failure**: the animal shies away. The tamer gains `required_mastery × 10` XP (you learn from the attempt), and a **per-(tamer, target) 120-second cooldown** kicks in — the same character cannot re-try this specific animal until the cooldown expires. A different player, or a freshly-spawned replacement animal, is not affected.
+5. **No numbers leaked**: the player never sees the d20 roll, the modifiers, the total, or the tame DC — only success/failure flavour text and the XP gained. This preserves immersion and prevents DC farming.
+6. Pet inherits stats from the wild animal template (HP, damage, size, movement type).
 
 ### Economy
 
@@ -386,9 +387,9 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 | Find Familiar spell | **Built** | `world/spells/conjuration/find_familiar.py` |
 | Combat side system | Built | `combat/combat_utils.py` |
 | `DogWearSlot` | Built | Example of non-humanoid wearslots |
-| `cmd_tame` | **Built** | Tame wild animal into pet — contested d20 + CHA + mastery vs tame DC |
+| `cmd_tame` | **Built** | Hidden contested d20 + CHA + mastery vs tame DC, 120s per-(tamer,target) fail cooldown, XP on both outcomes |
 | `ANIMAL_HANDLING` skill | Defined | General skill, all classes |
-| `WildMule` | **Built** | Tameable mob POC (Eeyore's Gloomy Place, tame_dc=10, BASIC) |
+| `WildMule` | **Built** | Tameable mob POC, wanders the Hundred Acre Wood via ZoneSpawnScript (target=1, 12h respawn), tame_dc=10, BASIC |
 | Pet NFTItemTypes | **Built** | Mule, War Dog, Horse seeded in migration |
 
 ---
@@ -451,11 +452,14 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 - Dismiss gating: only current owner can dismiss, not creator
 
 ### Phase 7: Taming ✅
-- `CmdTame` — contested d20 + CHA modifier + mastery bonus vs tame DC
+- `CmdTame` — contested d20 + CHA modifier + mastery bonus vs tame DC, all rolls and DC hidden from the player
+- Per-(tamer, target) 120-second cooldown after a failed attempt (`target.db.tame_cooldowns`, keyed by caller id)
+- XP rewards on both outcomes — `required_mastery × 50` on success, `required_mastery × 10` on failure (granted via `at_gain_experience_points`)
 - `WildMule` tameable mob typeclass (passive, tame_dc=10, BASIC mastery)
-- Taming flow: validate tameable → check mastery → roll → assign_item_type → spawn_pet → auto-follow
+- Taming flow: validate tameable → check mastery → fail-cooldown check → hidden contested roll → assign_item_type → spawn_pet → auto-follow → award XP
 - Pet NFTItemType seed data: Mule, War Dog, Horse in migration
-- POC: WildMule in Eeyore's Gloomy Place (Hundred Acre Wood book zone)
+- POC: WildMule wanders the whole Hundred Acre Wood grid (30 rooms) via `ZoneSpawnScript` with `world/spawns/book_hundred_acre_wood.json`, `target=1`, `respawn_seconds=43200` (12 hours). No longer a one-shot world-build spawn.
+- Book transport (`read` / `recall`) explicitly carries same-room followers (pets + grouped players) through the teleport, so a tamed mule comes home with you to the library.
 - Tested end-to-end: tame → follow → book zone recall → library transitions
 
 ### Remaining (Future)
