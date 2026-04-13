@@ -126,7 +126,7 @@ sail <destination> <#>      — sail with the chosen ship
 
 ### Ship Tiers
 
-Five ship types map 1:1 to mastery tiers. Ships are **NFTs** — owned by players, tradeable, not spawned as in-game objects (`prototype_key=None`).
+Five ship types map 1:1 to mastery tiers. Ships are NFT items implemented as `ShipNFTItem` (a `WorldAnchoredNFTItem` → `BaseNFTItem` subclass). They live in `character.contents` with zero weight and are hidden from the normal `inventory` listing — players view their ships via the `owned` command. They are tradeable and exportable via the same NFT pipeline as any other NFT item.
 
 | Ship | Tier | Mastery Level | Routes Reached |
 |---|---|---|---|
