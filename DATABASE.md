@@ -1,6 +1,6 @@
 # DATABASE.md
 
-> **THIS FILE covers database architecture** for FullCircleMUD — the four-database design, the SQLite/PostgreSQL toggle, how migrations work, and developer workflow. For deployment pipeline, CI/CD, Railway configuration, and branching strategy, see **design/DEPLOYMENT.md**. For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **design/ECONOMY.md**. For the three embedding memory systems, see **design/COMBAT_AI_MEMORY.md** (combat), **design/LORE_MEMORY.md** (world knowledge), and **design/NPC_MOB_ARCHITECTURE.md** § Three Memory Systems (overview). For subscription payment system, see **design/SUBSCRIPTIONS.md**.
+> **THIS FILE covers database architecture** for FullCircleMUD — the four-database design, the SQLite/PostgreSQL toggle, how migrations work, and developer workflow. Deployment pipeline, CI/CD, Railway configuration, and branching strategy live in the private ops repository (`ops/DEPLOYMENT.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **design/ECONOMY.md**. For the three embedding memory systems, see **design/COMBAT_AI_MEMORY.md** (combat), **design/LORE_MEMORY.md** (world knowledge), and **design/NPC_MOB_ARCHITECTURE.md** § Three Memory Systems (overview). For subscription payment system, see **design/SUBSCRIPTIONS.md**.
 
 ---
 
@@ -23,7 +23,7 @@ FullCircleMUD is built on Evennia (a Python/Django MUD framework). Like all Djan
 
 The game uses **four separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). In production on Railway, they're PostgreSQL (robust, handles concurrent connections). A single environment variable controls which backend is used — no code changes needed.
 
-For how this fits into the deployment pipeline, see [DEPLOYMENT.md](DEPLOYMENT.md).
+For how this fits into the deployment pipeline, see the deployment runbook in the private ops repository.
 
 ---
 
@@ -100,7 +100,7 @@ if not _DATABASE_URL:
 
 **On Railway**, all aliases point to the **same** Postgres instance. Enabling routers here is actively harmful — their `allow_migrate()` method would block table creation for non-default apps during a single `migrate` call, leaving the `xrpl`, `ai_memory`, and `subscriptions` tables uncreated while still recording the migrations as applied.
 
-For how Railway injects `DATABASE_URL` and manages environments, see [DEPLOYMENT.md § Environment Variables](DEPLOYMENT.md#environment-variables).
+For how Railway injects `DATABASE_URL` and manages environments, see the deployment runbook in the private ops repository.
 
 ---
 
@@ -187,7 +187,7 @@ Local development and Railway deployment migrate differently because of the SQLi
 - **Local (SQLite, routers active):** Use `evennia migrate --database <alias>` for each custom database. The routers require this.
 - **Railway (Postgres, routers disabled):** A single `migrate` call handles everything. This is what `deploy_migrate.py` does automatically.
 
-For how Railway runs migrations automatically on deploy, see [DEPLOYMENT.md § How Code Gets Deployed](DEPLOYMENT.md#how-code-gets-deployed).
+For how Railway runs migrations automatically on deploy, see the deployment runbook in the private ops repository.
 
 ### Why this is safe
 

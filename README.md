@@ -31,8 +31,9 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 | **SUBSCRIPTIONS.md** | Subscription billing — payment flow, lifecycle, character-entry gating (`ic`/`charcreate`/`chardelete`), trial period |
 | **IMPORT_EXPORT.md** | Chain-boundary `import`/`export` commands — gate stack, asymmetric trial gating, Xaman flow, mirror state transitions, planned OFAC SDN screening |
 | **DATABASE.md** | Django app layout, three-database architecture, model overview, migrations |
-| **DEPLOYMENT.md** | Server deployment, infrastructure, environment configuration |
 | **TELEMETRY.md** | Economy telemetry snapshots, player session tracking, saturation snapshots |
+
+> Deployment, infrastructure, recovery runbooks, and Railway/CI configuration live in the private `ops/` repository, not in `design/`.
 
 ---
 
