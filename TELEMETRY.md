@@ -25,27 +25,31 @@ Hourly Aggregation (TelemetryService.take_snapshot)
   └── ResourceSnapshot       (1 row per currency per hour — circulation, velocity, AMM prices)
   │
   ▼
-Daily Aggregation (NFTSaturationService.take_daily_snapshot)
-  └── SaturationSnapshot     (1 row per tracked item per day — spell/recipe/item saturation)
+Hourly Saturation Pass (NFTSaturationService.take_daily_snapshot)
+  └── SaturationSnapshot     (1 row per tracked item per day — overwritten hourly with the latest state)
 ```
 
 ## Scheduled Scripts — Hourly Pipeline
 
-Three services run on a staggered hourly cycle, each offset by 60 seconds so downstream services always have fresh data from upstream:
+Three services form an hourly pipeline. All three run on the **same** 3600-second interval — the staggered offsets that establish their pipeline order are set once at cold boot by staggering the script *creation moments*, not by giving each script a different interval.
 
-| Script | Interval | Offset | Service Method | Purpose |
+| Script | Interval | Creation offset | Service Method | Purpose |
 |---|---|---|---|---|
 | TelemetryAggregatorScript | 3600s | +0s | `TelemetryService.take_snapshot()` | AMM prices, gold flows, circulation |
-| NFTSaturationScript | 3660s | +60s | `NFTSaturationService.take_daily_snapshot()` | Knowledge gaps (eligible - known - unlearned) |
-| UnifiedSpawnScript | 3720s | +120s | `SpawnService.run_hourly_cycle()` | Distribute resources, gold, and knowledge NFTs |
+| NFTSaturationScript | 3600s | +60s | `NFTSaturationService.take_daily_snapshot()` | Knowledge gaps (eligible − known − unlearned) |
+| UnifiedSpawnScript | 3600s | +120s | `SpawnService.run_hourly_cycle()` | Distribute resources, gold, and knowledge NFTs |
 
-**Pipeline order:** Telemetry → Saturation → Spawn. The spawn calculator needs current AMM prices (from telemetry) and current knowledge gaps (from saturation). The 60-second stagger ensures each service has completed before the next reads its output.
+**Pipeline order:** Telemetry → Saturation → Spawn. The spawn calculator needs current AMM prices (from telemetry) and current knowledge gaps (from saturation). The 60-second / 120-second stagger guarantees each service has completed before the next one reads its output.
 
-**Why stagger, not chain?** Each service runs independently via Twisted's reactor timer. The timer resets from the *scheduled* time, not the completion time, so drift is effectively zero — nanoseconds per tick from floating point rounding. Over months of uptime the services cannot drift by even 1 second relative to each other, let alone the 60-second gap between them. Chaining would add coupling (telemetry failure blocks spawning) without meaningful benefit.
+**Why stagger creation, not interval?** Each Evennia script runs on its own repeating timer that fires every `interval` seconds from the moment of script creation. If the three scripts had *different* intervals (e.g. 3600 / 3660 / 3720), the gap between them would grow by the interval-difference every cycle — after a week the spawn script would have drifted hours behind the telemetry it's supposed to consume, and would eventually start running in a different wall-clock hour bucket entirely. By using **identical 3600s intervals** plus a one-time stagger at creation, the gap stays at exactly 60s/120s indefinitely with zero drift.
+
+**How the stagger is established.** `_ensure_global_scripts()` (in `server/conf/at_server_startstop.py`) calls `_create_pipeline_scripts()`, which creates the telemetry script immediately and schedules the other two via `evennia.utils.delay()` with 60s and 120s offsets. From that point on, each script's first fire happens at `creation_moment + 3600s` and every fire after that is exactly 3600s later.
 
 **Threading:** All three services run their work in background threads via `deferToThread` so the Twisted reactor stays responsive during DB queries and XRPL API calls.
 
-All scripts are created once at server start via `_ensure_global_scripts()` in `at_server_startstop.py` and persist across restarts.
+**Resetting the pipeline.** If a script's interval is changed in code, or a script becomes wedged, a moderator can run the `reset_scripts` command to stop and recreate any global service script. The command operates on an explicit allowlist — per-actor scripts (combat handlers, dot effects, dungeon instances, tutorial instances) are unreachable, so running it during live combat or an active dungeon is safe. Pipeline scripts are recreated as a group so the staggered offsets are preserved. See the `reset_scripts` command help for usage.
+
+All scripts are created once at server start via `_ensure_global_scripts()` and persist across restarts.
 
 ### Server Boot Recovery
 
@@ -65,7 +69,7 @@ Tracks individual play sessions. Written in real-time on every puppet/unpuppet.
 |---|---|---|
 | `account_id` | IntegerField | Evennia account ID (not unique per session) |
 | `character_key` | CharField(80) | Character `db_key` at session start (snapshot, not live) |
-| `started_at` | DateTimeField | auto_now_add — session creation |
+| `started_at` | DateTimeField | Set explicitly by `record_session_start()` (not `auto_now_add`) |
 | `ended_at` | DateTimeField (null) | Set on unpuppet; NULL = session still open |
 
 **Indexes**: `started_at`, `(account_id, started_at)`
@@ -161,13 +165,15 @@ This is necessary because proxy token AMM pools use PGold (not FCMGold) as the p
 
 ### SaturationSnapshot
 
-One row per tracked item per snapshot cycle. Controls knowledge NFT spawn budgets.
+One row per tracked item per **day**, but the row is rewritten *every hour* with the latest state. The pipeline runs hourly (NFTSaturationScript fires every 3600s alongside the rest of the pipeline), and `update_or_create((day, item_key, category))` overwrites the day's row each cycle. Net effect: the table holds one current row per item per day, refreshed within an hour of any change.
+
+Controls knowledge NFT spawn budgets.
 
 | Field | Type | Description |
 |---|---|---|
 | `day` | DateField | Date of snapshot |
 | `item_key` | CharField(80) | Prefixed spell/recipe key (e.g. `scroll_magic_missile`, `recipe_bronze_dagger`) |
-| `category` | CharField(10) | `SPELL`, `RECIPE`, or `ITEM` |
+| `category` | CharField(10) | `spell`, `recipe`, or `item` (lowercase — see `CATEGORY_SPELL` / `CATEGORY_RECIPE` / `CATEGORY_ITEM` constants on the model) |
 | **Unique constraint** | | `(day, item_key, category)` |
 | **Knowledge Metrics** | | |
 | `active_players_7d` | IntegerField | Distinct players active in past 7 days |
