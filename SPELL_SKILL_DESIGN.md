@@ -399,6 +399,7 @@ sea routes.
 | BASIC | Acid Arrow | Workhorse | DoT: 1d4+1 acid per round for 1–5 rounds (scales with tier). New cast replaces existing DoT. Spammable. |
 | BASIC | Light | Utility | Conjures a magical light orb that illuminates the room for everyone. Follows caster. 30 min–4 hours per tier. Shares LIGHT_SPELL effect with Divine Light. Mana refund on recast. |
 | BASIC | Find Familiar | Summon | Summons a familiar with remote control (see through eyes, move room-to-room, return on command). Tier determines creature type: rat (BASIC) → cat/stealth (SKILLED) → owl/flies (EXPERT) → hawk/flies+fights (MASTER) → imp/flies+fights+light (GM). One per caster. Persistent until dismissed or killed. |
+| SKILLED | Knock | Utility | Magically unlocks AND opens any LockableMixin object (door, chest) whose `lock_dc` is within the caster's tier ceiling. Deterministic, no roll. SKILLED ≤ 15, EXPERT ≤ 20, MASTER ≤ 25, GRANDMASTER no limit. Cancels any pending auto-relock script on success. `target_type="world_item"` — targets are visibility-filtered (hidden/invisible objects must be discovered first). Mana is consumed even on out-of-tier failure (matches existing spell convention). Works on ExitDoor, WorldChest, TrapChest, and any future LockableMixin subclass via duck-typing. |
 | SKILLED | Teleport | Utility *(stub)* | Self-teleport within range (district → zone → world by tier). Blocked by `no_teleport_out`/`no_teleport_to` room flags and DIMENSION_LOCKED. 60s cooldown. |
 | EXPERT | Dimensional Lock | **Fireball eq.** *(stub)* | Unsafe AoE — applies DIMENSION_LOCKED to all in room (blocks flee/teleport/summon) for 1–3 rounds. Contested WIS save (Expert normal, Master disadvantage, GM no save). |
 | MASTER | Conjure Elemental | Combat summon *(stub)* | Summons a lesser/greater elemental (fire/ice/earth/air) for 10–30 minutes. One active at a time. Recasting replaces existing. Blocked by DIMENSION_LOCKED. |
@@ -560,7 +561,35 @@ class MagicMissile(Spell):
 - `school` — `skills` enum member (e.g. `skills.EVOCATION`). Use `spell.school_key` property for string lookups against `class_skill_mastery_levels` dict.
 - `min_mastery` — `MasteryLevel` enum (BASIC=1 through GRANDMASTER=5)
 - `mana_cost` — dict `{tier: cost}` (e.g. `{1: 5, 2: 8, ...}`)
-- `target_type` — `"hostile"`, `"friendly"`, `"self"`, or `"none"`
+- `target_type` — see Target Types section below
+
+### Target Types
+
+`target_type` is the spell's intent category. The cast/zap commands use it to drive target resolution before invoking `_execute()`. Two families:
+
+**Actor targets** (resolved via `caller.search()`):
+
+| Value | Meaning |
+|---|---|
+| `"hostile"` | An enemy in the room. Target required. |
+| `"friendly"` | An ally in the room. Defaults to self if blank. |
+| `"self"` | The caster, always. |
+| `"none"` | No target. |
+| `"any"` | Any actor in the room. |
+
+**Item targets** (resolved via `world.spells.spell_utils.resolve_item_target`):
+
+| Value | Meaning |
+|---|---|
+| `"inventory_item"` | An NFT item in the caster's own contents. Always visible to the owner — no hidden/invisible filtering. Examples: Mending, Recharge, Enchant Weapon. |
+| `"world_item"` | An object or exit in the caster's room, filtered by `is_visible_to(caster)` so hidden/invisible objects are excluded until discovered. Delegates to `utils/find_exit_target.py` and inherits its directional qualifier handling ("door south"). Examples: Knock, Shatter. |
+| `"any_item"` | Try `world_item` first (the room takes precedence), then fall through to `inventory_item`. Use only when a spell genuinely works on either context. |
+
+Item-target spells receive the resolved item as `target` in `_execute()` and dispatch via duck-typing on the relevant capability (`hasattr(target, "is_locked")`, `hasattr(target, "durability")`, etc.) rather than `isinstance`. This keeps each spell content-complete for any future typeclass that adopts the same capability mixin.
+
+**Knock** (Conjuration, SKILLED) is the worked example — see the Conjuration section below.
+
+**Wand integration**: the same target_type vocabulary works for wand zaps. The `cmd_zap` command mirrors `cmd_cast`'s resolution branches and routes the spell through `spell.cast()` exactly as a memorised cast would, so any item-targeting spell becomes wand-craftable for free via the dynamic wand recipe system.
 
 **File structure**: `world/spells/<school>/<spell_name>.py` — one file per spell, organised by school/domain.
 
