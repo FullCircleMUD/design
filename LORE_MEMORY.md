@@ -246,30 +246,39 @@ entries:
 
 ### Importing lore
 
-The `lore_import` management command reads YAML files from the lore repo, embeds the content via OpenAI `text-embedding-3-small`, and stores entries in the `LoreMemory` table.
+The importer is a **standalone Python tool** that lives in the lore repo at [`FCM/lore/tools/import_lore.py`](../lore/tools/import_lore.py). It connects to the game's `ai_memory` database directly via psycopg (Postgres) or sqlite3 (local SQLite) — no Django, no Evennia dependency. Same script runs locally for development and on Railway in production.
+
+**Why standalone:** the Railway game container does not include the lore repo files, so an in-game management command can't see them. The standalone tool deploys as a separate Railway service in the same project as the game, sharing `DATABASE_URL` and `OPENAI_API_KEY` via service references. Each push to the lore repo auto-deploys the service, runs the import, and exits.
 
 ```bash
-cd FCM/src/game
-evennia lore_import                              # import all YAML files
-evennia lore_import --file millholm/regional.yaml  # import specific file
-evennia lore_import --dry-run                    # show what would happen
-evennia lore_import --lore-dir /path/to/lore     # override lore directory
+# Local
+cd FCM/lore/tools
+pip install -r requirements.txt
+cp .env.example .env   # set OPENAI_API_KEY
+set -a; source .env; set +a
+python import_lore.py
+python import_lore.py --dry-run    # preview, no DB writes, no embedding calls
+python import_lore.py --prune      # delete DB entries no longer in YAML (off by default)
 ```
 
-The default lore directory is `FCM/lore/` (auto-detected relative to the game directory). The game server does not need to be running.
+The default lore directory is the parent of `tools/` (the lore repo root). The game server does not need to be running. See [`FCM/lore/tools/README.md`](../lore/tools/README.md) for full usage including Railway deployment.
 
-**Idempotent:** Entries are matched on `(source, title)`. Re-running the import:
+**Idempotent:** Entries are matched on `(source, title)`. A unique constraint on those columns (added by `ai_memory/migrations/0005_lorememory_unique_source_title.py`) makes the upsert atomic via Postgres `INSERT ... ON CONFLICT`. Re-running the import:
 - **New entry** → created and embedded
 - **Content changed** → updated and re-embedded
 - **Content unchanged** → skipped (no wasted embedding calls)
 
+**Schema dependency:** the standalone tool writes directly to the `ai_memory_lorememory` table by column name. If you change the `LoreMemory` Django model, update the column list in `import_lore.py` to match. The script's top-of-file comment calls this out.
+
 ### Adding new lore
 
 1. Add or edit entries in the YAML files in the lore repo
-2. Run `evennia lore_import` from the game directory
+2. Push to the lore repo — Railway auto-deploys the importer service, which runs and exits
 3. All NPCs with `llm_use_lore=True` immediately have access to the new knowledge
 
-No code changes, no migrations, no server restart required.
+For local dev: run `python tools/import_lore.py` from the lore repo after editing.
+
+No code changes, no game-side migrations, no server restart required.
 
 ### Chunk sizing
 
@@ -379,7 +388,7 @@ Knowledge gating happens naturally through scope tags. Rowan doesn't awkwardly k
 | `_get_lore_scope_tags()` | Built | `typeclasses/mixins/llm_mixin.py` — room tags + faction tags |
 | `{lore_context}` prompt variable | Built | `typeclasses/mixins/llm_mixin.py` — `_get_context_variables()` |
 | Prompt templates | Built | NPC personality templates in `llm/prompts/` accept `{lore_context}` |
-| `lore_import` command | Built | `ai_memory/management/commands/lore_import.py` |
+| Standalone `import_lore.py` | Built | `FCM/lore/tools/import_lore.py` (in the lore repo, runs on Railway as its own service) |
 | Lore YAML repo | Built | `FCM/lore/` — separate git repo, organised by scope (continental, regional, factions) |
 | Faction tags on NPCs | Built | Faction tags applied to NPCs across multiple guilds (mages, temple, thieves, warriors) |
 | Evennia tag system | Built | Zone + district tags on all rooms |
