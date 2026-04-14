@@ -453,11 +453,19 @@ Extracted from `WorldAnchoredNFTItem`, provides patterns for items that live in 
 - `db.world_location` — room where the object is in the world
 - `set_world_location(room)` — update Evennia attribute AND patch the NFT mirror metadata so the location is visible on external marketplaces and survives chain export/import (see § NFT Metadata Persistence below)
 - `get_world_location_display()` — human-readable location
+- `get_owned_display()` (subclass-defined) — single-line summary including berth info, used by `owned`, bank `balance`, OOC `bank`, and any other listing
 - `at_pre_get()` / `at_pre_drop()` blocks — can't be picked up or dropped
 - `at_pre_give()` allows — ownership transfer
 - `get:false()` lock and zero weight on init
 
-**Note:** Pets do NOT use this mixin. Pets are actors in rooms, not items in character.contents. Ships use this mixin because they sit in character.contents with a `world_location` pointer.
+**Ownership transfer surfaces.** World-anchored items can change hands via three flows, all of which preserve `db.world_location`:
+- `give` — synchronous, both characters in the same room
+- `deposit`/`withdraw` at any bank room — asynchronous through the shared `AccountBank`. Cross-character transfer between characters of the same account is the primary use case. The bank `balance` command renders ships in their own `|wShips:|n` subsection by default (no `balance all` gate). For the broader cross-surface display rules, see `design/INTERZONE_TRAVEL.md` § Banking & Cross-Character Transfer.
+- `export`/`import` via XRPL — chain round-trip; `world_location` survives via mirror metadata persistence (see § NFT Metadata Persistence below).
+
+In all three flows, the new owner does NOT auto-relocate to the dock — they have to travel there themselves before using the ship.
+
+**Note:** Pets do NOT use this mixin. Pets are actors in rooms, not items in character.contents. Ships use this mixin because they sit in character.contents with a `world_location` pointer. Pets have their own banking flow via stable rooms (`stable` / `retrieve` commands on `RoomStable`) and are deliberately hidden from bank-room commands.
 
 ```
 OwnedWorldObjectMixin (typeclasses/mixins/owned_world_object.py)

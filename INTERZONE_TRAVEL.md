@@ -165,6 +165,26 @@ GM ships require collaborative effort across multiple skilled crafters (Carpente
 
 **Economic note:** Ships are NFTs. A player who owns the only GM-level Galleon on the server controls access to Vaathari. They can charge for passage. Passenger limits apply — food costs per character still apply to all passengers.
 
+### Banking & Cross-Character Transfer
+
+Ships can be deposited and withdrawn at any bank room using the standard `deposit` / `withdraw` commands — the same flow as any other NFT item. This is the asynchronous counterpart to `give` (which requires both characters to be in the same room at the same time): a player can `deposit` a ship from one character, log out, switch to another character on the same account, walk into a bank, and `withdraw` it. Ownership effectively transfers between characters via the shared `AccountBank`.
+
+The ship's berth location (`db.world_location`) is preserved across the bank cycle. The mirror-metadata persistence layer (see `design/INVENTORY_EQUIPMENT.md` § NFT Metadata Persistence) writes `world_location_dbref` and `world_location_name` into `NFTGameState.metadata` on every dock arrival, and `ShipNFTItem.at_restore_from_metadata` rehydrates it on respawn — so the location also survives an XRPL export → re-import round-trip.
+
+A new owner who withdraws a ship at a bank does **not** auto-relocate to its dock. They have to travel to that dock themselves before they can `sail` it. This is intentional friction matching the design note in `ship_nft_item.py:9-13` ("New owner must travel to that dock to sail the ship") and applies equally to ships acquired via `give`, via XRPL marketplace purchase, or via the bank.
+
+**Display rules across the three command surfaces:**
+
+| Command | Where | Shows |
+|---|---|---|
+| `balance` | bank room | gold, resources, items, ships (under `\|wShips:\|n` with berth info) |
+| `stabled` | stable room | pets only |
+| `bank` (OOC) | account-level | everything — gold, resources, items, pets, ships |
+
+The bank room and stable room are deliberately separate gateways. A bank room hides pets (they're managed via `stable` / `retrieve` in a `RoomStable` — see the design notes in `world_anchored_nft_item.py` and the pet-specific dispatch in `NFTPetMirrorMixin`) so the player isn't misled into thinking they can retrieve a pet from a bank. The OOC `bank` command exists so a player can see their entire account state in one place before deciding what to import or export.
+
+In all three views, ships render via `ShipNFTItem.get_owned_display()`, e.g. `"  The Grey Widow (Caravel) — berthed at Saltspray Bay Docks"`, so the berth location is always visible inline.
+
 ---
 
 ## Route Map NFTs
