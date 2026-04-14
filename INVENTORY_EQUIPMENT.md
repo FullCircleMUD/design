@@ -451,7 +451,7 @@ Mirror transitions for pets: create → craft_output, stable → bank, retrieve 
 
 Extracted from `WorldAnchoredNFTItem`, provides patterns for items that live in `character.contents` but represent a world location (ships, property):
 - `db.world_location` — room where the object is in the world
-- `set_world_location(room)` — update + persist to XRPL URI
+- `set_world_location(room)` — update Evennia attribute AND patch the NFT mirror metadata so the location is visible on external marketplaces and survives chain export/import (see § NFT Metadata Persistence below)
 - `get_world_location_display()` — human-readable location
 - `at_pre_get()` / `at_pre_drop()` blocks — can't be picked up or dropped
 - `at_pre_give()` allows — ownership transfer
@@ -463,6 +463,116 @@ Extracted from `WorldAnchoredNFTItem`, provides patterns for items that live in 
 OwnedWorldObjectMixin (typeclasses/mixins/owned_world_object.py)
   └── WorldAnchoredNFTItem(OwnedWorldObjectMixin, BaseNFTItem) — ships, property
 ```
+
+### NFT Metadata Persistence
+
+Some NFT-side state is mutable in-game and needs to be visible on external XRPL marketplaces *and* survive a chain export → re-import round-trip: a ship's berthed dock, an item's current durability, a lantern's remaining fuel, a district map's survey progress. Without a persistence path, a player who exported a half-burnt lantern and re-imported it would get a fresh one — an economic gap and a broken UX.
+
+#### Reframing: the URI is a stable pointer, not storage
+
+All game NFTs are minted with an on-chain URI of the form `https://nft.fcmud.world/{game_id}`. This URI is a stable pointer to the off-chain `nft_api` HTTP endpoint (`nft_api/app/metadata.py`), which reads `NFTGameState.metadata` live from the game DB and serves it back as XLS-24d JSON. External marketplaces fetching the URI see whatever is currently in the mirror row.
+
+This eliminates three complications:
+- No on-chain `NFTokenModify` transaction is required.
+- No re-mint with `tfMutable` is required.
+- `NFTGameState` rows are keyed by `nftoken_id` and persist across export/import cycles, so anything written to `metadata` automatically survives chain round-trips.
+
+The "persist to chain URI" problem is really "patch the server-side `NFTGameState.metadata` JSON field from typeclass state, safely".
+
+#### Write path
+
+`NFTService.update_metadata(token_id, patch)` (`blockchain/xrpl/services/nft.py`) is the only code that writes the field directly. It does an atomic JSON merge under `select_for_update()`:
+- Keys in `patch` overwrite matching keys in the row's metadata.
+- Keys mapped to `None` in `patch` are deleted.
+- Empty patch is a no-op.
+- Values must be JSON-serializable (str, int, float, bool, list/dict of same). Room references must be flattened to `dbref` and/or `key` by the caller.
+
+Game code never calls `NFTService` directly (per the service encapsulation rule). Instead, `NFTMirrorMixin.persist_metadata(patch)` on `typeclasses/mixins/nft_mirror.py` wraps the call and is the single entry point used from typeclasses:
+- No-op if the instance has no `token_id` yet (e.g. during creation, before `assign_to_blank_token` has run).
+- Catches exceptions via `_log_error()` — metadata persistence is best-effort and must not crash gameplay (e.g. mid-voyage).
+
+Write from a state hook by calling `self.persist_metadata({...})` once the attribute has been updated. Example from `DurabilityMixin.reduce_durability()`:
+
+```python
+self.durability = max(0, self.durability - amount)
+self._persist_durability()  # calls self.persist_metadata({...})
+```
+
+#### Read path (export → re-import round-trip)
+
+On re-import, `NFTMirrorMixin.spawn_into(token_id, location)` materialises a fresh Evennia object from the mirror row. After the typeclass-specific attributes are applied and `move_to()` fires, the method iterates over the metadata dict and writes every key onto the new instance via `obj.attributes.add(key, value)`. That is enough to fully restore any attribute whose JSON representation matches its AttributeProperty shape:
+
+- `durability`, `max_durability` → land directly on `DurabilityMixin`'s properties.
+- `is_lit`, `fuel_remaining`, `max_fuel` → land directly on `LightSourceMixin`'s properties.
+
+For attributes that were flattened on the write path (e.g. a room reference stored as `dbref + key`, or a set stored as a sorted list), the typeclass needs a small re-hydration step. After the generic attribute copy and `move_to()`, `spawn_into()` fires an optional hook:
+
+```python
+if hasattr(obj, "at_restore_from_metadata"):
+    obj.at_restore_from_metadata(meta)
+```
+
+Typeclasses override this to convert the JSON-flat form back into live state. Current overrides:
+
+- `ShipNFTItem.at_restore_from_metadata` — resolves `world_location_dbref` to a live room via `ObjectDB.objects.get(id=...)`, assigns to `db.world_location`, and clears the stale flat keys so `set_world_location()` remains the single source of truth. Gracefully sets `None` if the dbref no longer resolves.
+- `DistrictMapNFTItem.at_restore_from_metadata` — converts `db.surveyed_points` from a list back into a set so `.add()` keeps working.
+
+The hook runs *after* `move_to()` so it doesn't get clobbered by `at_post_move` logic. Errors are logged, not raised.
+
+#### Flattening rules
+
+When a value is not natively JSON-serializable, the typeclass must flatten on write and rehydrate on read. Conventions established so far:
+
+| Python type | Flat form | Restore strategy |
+|---|---|---|
+| Room reference | `<attr>_dbref` (int) + `<attr>_name` (str) | Resolve via `ObjectDB.objects.get(id=dbref)`, fall back to `None` |
+| `set[str]` | sorted `list[str]` | `set(list)` in `at_restore_from_metadata` |
+| `int`, `float`, `str`, `bool` | direct | no override needed |
+| `None` (clear) | explicit `None` in patch | auto-handled by `update_metadata` (deletes key) |
+
+Keep the same top-level key name for the flat form only when the shape matches directly (durability, fuel). When flattening a room reference, use a distinct prefix (`world_location_dbref`) so the flat key doesn't shadow the live attribute name — that avoids the generic copy loop in `spawn_into` silently overwriting `self.db.world_location` with an integer.
+
+#### Wired call sites
+
+| Mutable attribute | Mixin / typeclass | Write site | Restore hook needed? |
+|---|---|---|---|
+| `db.world_location` (ship berth) | `OwnedWorldObjectMixin` / `ShipNFTItem` | `set_world_location(room)` via `_persist_location_metadata()` | Yes — dbref → room |
+| `durability`, `max_durability` | `DurabilityMixin` | `reduce_durability()`, `repair_to_full()` via `_persist_durability()` | No (direct attribute copy works) |
+| `is_lit`, `fuel_remaining`, `max_fuel` | `LightSourceMixin` | `light()`, `extinguish()`, `refuel()` via `_persist_light_state()` | No (direct attribute copy works) |
+| `db.surveyed_points` + derived `completion_pct` | `DistrictMapNFTItem` | `record_survey_points(keys)` | Yes — list → set |
+
+Deliberately *not* wired:
+- Per-tick `LightBurnScript` fuel decrement — would churn the mirror DB every 30 seconds per lit light source in the game. The lantern-exhaust path is routed through `extinguish()` so the final `is_lit=False, fuel=0` snapshot does land in mirror state, and consumable torches delete (which already wipes metadata via `NFTService._reset_token_identity`).
+- Container contents (`current_contents_weight`) — ephemeral / derived.
+- Consumables (potions, scrolls, recipes) — strictly delete-on-use, no mid-life state.
+- Immutable craft-time config (`base_damage`, `material`, `ship_tier`, etc.) — set at mint and never changed.
+
+#### Adding a new persistence site
+
+1. Identify an attribute that is (a) mutable in-game, (b) meaningful to a buyer looking at the NFT on a marketplace, and (c) meaningful to restore on re-import. If any of those three is false, don't persist.
+2. If the value is JSON-native and the AttributeProperty name is fine to reuse, just call `self.persist_metadata({"field": value})` from the write site.
+3. If the value needs flattening, pick a distinct flat key (e.g. `foo_dbref`) so the generic copy loop in `spawn_into` doesn't silently overwrite the live attribute. Add an `at_restore_from_metadata(metadata)` method on the typeclass to rehydrate.
+4. Guard non-NFT users of a shared mixin (e.g. doors/chests using `DurabilityMixin`) via `getattr(self, "persist_metadata", None)` — the helper is only present on typeclasses that compose `NFTMirrorMixin`.
+5. Add tests: one for the persist-on-change path (mock `NFTService.update_metadata`), one for the restore path (simulate the `spawn_into` metadata copy + call the restore hook).
+
+#### Out of scope
+
+- On-chain `NFTokenModify` — not needed while the URI remains a pointer to the HTTP API. A future phase could re-mint with `tfMutable` and have `update_metadata` also emit an `NFTokenModify` for tokens that support it, without changing any callsite.
+- A dedicated `NFTMetadataLog` audit table — metadata edits are not transfers and do not currently need a separate audit trail. Add one if operational demand appears; don't overload `NFTTransferLog`.
+
+#### Files
+
+| File | Purpose |
+|---|---|
+| `blockchain/xrpl/services/nft.py` | `NFTService.update_metadata(token_id, patch)` — atomic JSON merge |
+| `typeclasses/mixins/nft_mirror.py` | `NFTMirrorMixin.persist_metadata(patch)` write helper; `spawn_into()` fires `at_restore_from_metadata` hook |
+| `typeclasses/mixins/owned_world_object.py` | `_persist_location_metadata()` — flattens room to dbref + key |
+| `typeclasses/items/untakeables/ship_nft_item.py` | `ShipNFTItem.at_restore_from_metadata` — dbref → room |
+| `typeclasses/mixins/durability.py` | `_persist_durability()` — guards non-NFT consumers via `getattr` |
+| `typeclasses/mixins/light_source.py` | `_persist_light_state()` — called from light/extinguish/refuel |
+| `typeclasses/scripts/light_burn.py` | Lantern exhaust routed through `obj.extinguish()` for consistent final snapshot |
+| `typeclasses/items/maps/district_map_nft_item.py` | `record_survey_points()`; `at_restore_from_metadata` — list → set |
+| `nft_api/app/metadata.py` | XLS-24d builder; exposes every key in `NFTGameState.metadata` as an `attributes` entry |
 
 ### Item Subclass Hierarchy — NFT Items (Player Economy)
 
