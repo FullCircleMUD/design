@@ -264,10 +264,44 @@ obj = resolve_item_in_source(
 
 Five distinct call sites, one library, zero duplication of filter logic. `_find_container` even composes three library calls for a single command-layer task (primary lookup + two error-disambiguation fallbacks).
 
+### Item drop (shipped — cmd_override_drop)
+
+```python
+# _drop_object — inventory keyword search, exclude_worn forwarded
+# via **kwargs to FCMCharacter.search
+objs = resolve_item_in_source(
+    caller, caller, search_term,
+    nofound_string=..., multimatch_string=...,
+    stacked=self.number,
+    exclude_worn=True,
+)
+```
+
+### Item give (shipped — cmd_override_give)
+
+```python
+# Target lookup — find a player character in the room
+target = resolve_character_in_room(caller, self.rhs)
+if not target:
+    caller.msg(f"You don't see a character called '{self.rhs}' here.")
+    return
+if target == caller:
+    caller.msg("You can't give things to yourself.")
+    return
+
+# Item lookup — identical to cmd_drop, including exclude_worn
+to_give = resolve_item_in_source(
+    caller, caller, search_term,
+    nofound_string=..., multimatch_string=...,
+    stacked=self.number,
+    exclude_worn=True,
+)
+```
+
+`resolve_character_in_room` is the first consumer of the new `p_is_character` predicate — the library's entry-point for character-targeting resolvers. Scope-suffixed name (`_in_room`) distinguishes it from future scope variants (`_in_game`, `_in_zone`, `_in_district`) which will use different execution models.
+
 ### Other commands (not yet migrated)
 
-- **`cmd_override_drop._drop_object`** — keyword search in inventory with `exclude_worn=True`. Straightforward one-line swap to `resolve_item_in_source(caller, caller, ...)` pending this session.
-- **`cmd_override_give._give_object`** — two lookups (item in inventory, recipient in room). Pending.
 - **`cmd_hold`, `cmd_wear`, `cmd_remove`** — inventory keyword searches with typeclass or worn-state filters. Pending.
 - **Spell `cmd_cast`, `cmd_zap`** — currently use `resolve_actor_target` stopgap. Will migrate to `resolve_hostile_actor` etc. once those land.
 - **Combat `cmd_attack`, class skills** — mostly use `caller.search()` or `get_sides()` directly. Pending.
@@ -278,13 +312,18 @@ Five distinct call sites, one library, zero duplication of filter logic. `_find_
 | Commit | What shipped |
 |---|---|
 | `9baec37` | **Stopgap** — `resolve_actor_target` in spell_utils, wired into `cmd_cast` + `cmd_zap`. Closes the bee-tree crash immediately. |
-| `c423a15` | **Library foundation** — `utils/targeting/` package with 5 predicates (`p_not_caller`, `p_not_character`, `p_not_exit`, `p_visible_to`, `p_passes_lock`), `resolve_item_in_source` helper, and 24 unit tests. Migrates `cmd_override_get._get_object` and its multi-word probe. |
-| `33a4053` | **`walk_contents` primitive + `resolve_container`** — generalises the filter stack into a varargs primitive, introduces `BASE_ITEM_PREDICATES`, adds `p_is_container`, and ships `resolve_container` with inventory-first fallback. 11 new tests. |
-| `19c4829` | **`cmd_get` from-container migration** — wires `_find_container`, `_try_split_container`, and `_get_object_from_container` to the new helpers. All 23 existing `cmd_get` tests pass unchanged. |
+| `c423a15` | **Library foundation** — `utils/targeting/` package with 5 predicates, `resolve_item_in_source` helper, and 24 unit tests. Migrates `cmd_override_get._get_object` and its multi-word probe. |
+| `33a4053` | **`walk_contents` primitive + `resolve_container`** — generalises the filter stack into a varargs primitive, introduces `BASE_ITEM_PREDICATES`, adds `p_is_container`, and ships `resolve_container` with inventory-first fallback. |
+| `19c4829` | **`cmd_get` from-container migration** — wires `_find_container`, `_try_split_container`, and `_get_object_from_container` to the new helpers. |
+| `a8f2ed7` | **`cmd_drop._drop_object` migration** — one-line swap to `resolve_item_in_source` with `exclude_worn` forwarded via `**kwargs`. |
+| `db40670` | **Vocabulary cleanup + `resolve_character_in_room`** — renames `p_not_character` → `p_not_actor` (the predicate filters any DefaultCharacter, which is an "actor", not a "character"). Adds `p_is_character` for FCMCharacter specifically. Adds `resolve_character_in_room` helper. Deletes `p_not_caller` (YAGNI — no consumer). |
+| `7a867cb` | **`cmd_give` target + item migration** — replaces the worst footgun shape yet (bare `caller.search(self.rhs)` with no scope). Uses `resolve_character_in_room` for the target and `resolve_item_in_source` for the item. Drops the now-redundant `isinstance(target, FCMCharacter)` check. |
+| `8d5bf33` | **Direct `walk_contents` tests + predicate boundary tests** — test-coverage audit found that the core primitive had no direct tests and that `p_is_character` had no test against `DefaultCharacter` (the critical boundary). 9 `TestWalkContents` tests + 2 boundary tests added. |
+| `7dc83aa` | **cmd_give target-resolution gap-fill tests** — 3 new tests in `TestCmdGiveObject` for self-give on the object path, target-not-found, and non-character target (e.g. room scenery object). Locks the new error wording and the `p_is_character` boundary at the command level. |
 
-**Test coverage**: 149/149 green across the full `tests.utils_tests` suite. 23/23 green across `tests.command_tests.test_cmd_get`. No regressions introduced by any migration.
+**Test coverage**: 166/166 green across the full `tests.utils_tests` suite. 20/20 green in `test_cmd_give`, 23/23 in `test_cmd_get`, 15/15 in `test_cmd_drop`. No regressions introduced by any migration.
 
-**Migration discipline**: every cycle follows the same pattern — plan the scope, build the helper(s), test the helper(s), migrate the consumer, rerun the consumer's existing test suite, commit separately. No speculative additions, no resolvers written ahead of concrete consumers.
+**Migration discipline**: every cycle follows the same pattern — plan the scope, build the helper(s), test the helper(s), migrate the consumer, rerun the consumer's existing test suite, commit separately. No speculative additions, no resolvers written ahead of concrete consumers. After each consumer migration, audit the consumer's test suite for gaps the migration exposed and fill them before moving on.
 
 ## Testing Strategy
 
@@ -397,8 +436,25 @@ When a `loot` command is migrated, it will need its own helper (possibly `resolv
 
 ### `exclude_worn` as a predicate
 
-FCMCharacter.search currently handles `exclude_worn=True` as a kwarg filter inside the string-matching pass. When `cmd_override_drop._drop_object` migrates to `resolve_item_in_source`, this kwarg is forwarded through unchanged because `**kwargs` passes it straight to `caller.search`. That works but hides the semantic intent.
+FCMCharacter.search currently handles `exclude_worn=True` as a kwarg filter inside the string-matching pass. Both `cmd_override_drop._drop_object` and `cmd_override_give._give_object` forward this kwarg unchanged through `resolve_item_in_source`'s `**kwargs` to `caller.search`. It works but hides the semantic intent — a reader of either command has to know about the FCMCharacter.search extension to understand what the filter does.
 
-A future cleanup could add a `p_not_worn` predicate to the library, letting drop commands compose `*BASE_ITEM_PREDICATES, p_not_worn` explicitly at the call site. This would make the filter stack visible in the command code rather than hidden in a search kwarg. Low priority — the existing mechanism works.
+A future cleanup could add a `p_not_worn` predicate to the library, letting drop and give commands compose `*BASE_ITEM_PREDICATES, p_not_worn` explicitly at the call site. This would make the filter stack visible in the command code rather than hidden in a search kwarg. Low priority — the existing mechanism works, has two consumers, and both forward the kwarg correctly.
 
-**Revisit when**: a second consumer needs `exclude_worn` semantics OR the filter becomes complex enough that call-site visibility matters.
+**Revisit when**: the filter becomes complex enough that call-site visibility matters, or the FCMCharacter.search extension is otherwise refactored.
+
+### Broaden give to pets and mounts
+
+`cmd_give` restricts targets to player characters only via `resolve_character_in_room` + `p_is_character`, which matches `FCMCharacter` exclusively. This correctly excludes NPCs, mobs, quest NPCs, shopkeepers, and hostile creatures — you can't give a sword to a goblin or lose a quest item by handing it to the wrong NPC outside the quest flow.
+
+But this also blocks legitimate future use cases: **putting a saddle on a horse, panniers on a mule, a coat on a dog, barding on a warhorse**. Pets and mounts are `DefaultCharacter` subclasses but NOT `FCMCharacter`, so they currently fail `p_is_character` and can't receive items via give.
+
+The likely future shape: add an opt-in mechanism — probably a `can_receive_gifts` class attribute defaulting to `False`, overridden to `True` on specific pet/mount base classes, plus an optional `at_pre_receive(giver, item)` hook for item-specific refusal (e.g. a horse accepts a saddle but rejects a longsword). A new helper — perhaps `resolve_gift_recipient_in_room(caller, name)` — composes a new `p_can_receive_gifts` predicate with `p_not_actor` inversion, and `cmd_give` calls it instead of `resolve_character_in_room`. Quest NPCs explicitly stay off the opt-in so their quest commands remain the canonical turn-in path.
+
+**Revisit when**: the first pet or mount equipment system lands and needs give-command integration. Needs a game-design decision before implementation:
+
+- Which existing NPC types should default to `can_receive_gifts = True`? (Probably none initially.)
+- How do shopkeepers interact — should `give` to a shopkeeper route to `sell`, emit a hint, or reject silently?
+- How do quest NPCs communicate their acceptance rules — one-size-fits-all attribute, or per-quest-state check via `at_pre_receive`?
+- Is there a world-wide audit command worth shipping so devs can see which NPCs currently accept gifts?
+
+None of these need answering until the first real consumer forces the question.
