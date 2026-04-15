@@ -1,30 +1,34 @@
 # Unified Search and Targeting System
 
-> Technical design document for MUD-wide target resolution. Every command that takes a keyword-named target resolves that keyword through this system. For spell-specific targeting rules see [SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md). For combat targeting see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For exit/door resolution see [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md).
-
-## What This Document Is (And Isn't)
-
-This document is a **corrective**, not a new subsystem.
-
-An earlier draft of this design treated Evennia's `caller.search()` as inadequate and proposed a multi-layer custom targeting library to "fill the gaps". A careful read of [evennia/objects/objects.py](../src/venv/Lib/site-packages/evennia/objects/objects.py) revealed that most of the supposed gaps don't exist — Evennia already supports scoped searches, tag filters, typeclass filters, nick substitution, numeric disambiguation, lock filtering, dbref lookups, and special-keyword shortcuts. Our messy target-resolution code is largely a case of **not reading the signature** before writing custom helpers that reinvent Evennia's existing machinery.
-
-This document therefore has three jobs:
-
-1. **Catalog what Evennia provides natively** so every future call site uses it correctly the first time.
-2. **Name the narrow set of things Evennia genuinely cannot express** — FCM-specific semantic predicates, AoE multi-target shape, and typed-intent-at-call-site.
-3. **Specify the small library that wraps Evennia's search with FCM predicates and named resolvers**, and nothing else.
-
-It also stands as a worked example of the Evennia-first rule in [CLAUDE.md](../src/game/CLAUDE.md) § Development Approach: **before building, read what Evennia provides**. This session's earlier drafts are a cautionary tale. The final library is about 200 lines of Python plus tests — not a subsystem.
+> Technical design document for the MUD-wide target-resolution layer. Every command that takes a keyword-named target routes through this system. For spell-specific targeting rules see [SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md). For combat targeting see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For exit/door resolution see [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md).
 
 ## The Trigger
 
 A player typed `cast drain life bee-1` in a room called "Under Bee Tree". The spell command called `caller.search("bee-1")` with no `candidates=` argument. Evennia's default candidate list includes the room object itself, so the substring "bee" in "Under Bee Tree" matched the room's key. The spell received the room as its target and crashed in `take_damage()`.
 
-This is not a spell bug. It is a **naming-resolution bug** that reproduces in any command that calls `caller.search()` without thinking about scope. An emergency fix (a `resolve_actor_target` helper that builds a living-actor candidate list) landed earlier to close the crash. That fix is the production stopgap. This document defines the permanent pattern the entire MUD migrates to.
+This was not a spell bug. It was a **naming-resolution bug** that could reproduce in any command calling `caller.search()` without thinking carefully about scope. The stopgap fix — a dedicated `resolve_actor_target` helper in `spell_utils.py` — closed the immediate crash, but exposed a deeper problem: every command in FCM that takes a target keyword was implementing its own filter logic around bare `caller.search()`, and the logic drifted from command to command. Some filtered characters. Some didn't. Some respected hidden-object mixins. Some didn't. A single bug in one command hinted at a class of bugs spread across dozens.
+
+## Why a Unified System
+
+The real problem was not any single call site. It was **drift between implementations**. When every command implements its own "find a thing by name" logic, small inconsistencies become silent behavioural differences, and a fix in one command never propagates to the others. A new developer (human or AI) writing a new command starts by copying an existing call site, inheriting whatever filter semantics the donor happened to use, which may or may not be correct.
+
+A unified targeting layer solves this by centralising the question "which object did the player mean?" into a small set of named, tested helpers. Every command that takes a target calls the same library. When a filter rule changes (e.g. hidden-object visibility gets a new mixin), one change to the library propagates to every consumer automatically. Call sites express **intent** (`resolve_container`, `resolve_item_in_source`), not implementation details. A future reader can see at a glance what a command is looking for without reverse-engineering a `candidates=` list.
+
+This is not about building new search machinery. It is about making the machinery we already have **consistent** across the entire codebase.
+
+## First Principle: Evennia-First
+
+Before building anything new, check what Evennia already provides.
+
+The earliest drafts of this design proposed a multi-layer custom targeting library: a `walk_scope` primitive, `scope_*` functions for every common scope, a custom `name_match` helper, and a full resolver catalog. A careful read of [evennia/objects/objects.py](../src/venv/Lib/site-packages/evennia/objects/objects.py) revealed that most of the supposed gaps don't exist. Evennia already supports scoped searches via `location=`, typeclass and tag filters, nick substitution, numeric disambiguation, lock filtering, dbref lookups, and special-keyword shortcuts (`me`/`self`/`here`). FCM's messy target-resolution code was largely a case of **not reading the signature** before writing custom helpers that reinvented Evennia's existing machinery.
+
+This shaped the rule that every new library entry must pass: **does Evennia already do this?** If yes, call Evennia directly and don't wrap. If no, build the thinnest possible layer that adds what Evennia cannot know about — FCM-specific semantics (mixins, combat state, game rules) — and delegate everything else.
+
+The rule lives in [CLAUDE.md](../src/game/CLAUDE.md) § Development Approach as a general development discipline. This library is the first worked example of applying it.
 
 ## What Evennia Already Provides
 
-Before specifying any library, catalog the facilities Evennia's [`DefaultObject.search()`](../src/venv/Lib/site-packages/evennia/objects/objects.py#L732) exposes. Every row in this table is something we get for free by calling `caller.search()` with the right kwargs.
+Cataloging what [`DefaultObject.search()`](../src/venv/Lib/site-packages/evennia/objects/objects.py#L732) does natively before specifying any custom layer. Everything in these tables is a one-line call to `caller.search()` with the right kwarg — no new code needed.
 
 ### `caller.search()` keyword arguments
 
@@ -34,6 +38,7 @@ Before specifying any library, catalog the facilities Evennia's [`DefaultObject.
 | `location=<obj>` | Scope to `obj.contents`. Accepts a list of locations. |
 | `location=caller` | **Searches the caller's inventory.** `caller.contents` is the inventory. |
 | `location=caller.location` | **Searches the caller's current room only.** Excludes inventory AND the room object itself. |
+| `location=container` | **Searches inside a container.** Same mechanism as the caller/room cases. |
 | `typeclass=Path` or `typeclass=[...]` | Match only objects of the given typeclass(es). |
 | `tags=[("tag", "cat"), ...]` | Match only objects bearing the given tag(s). |
 | `attribute_name="foo"` | Search a specific attribute instead of key + aliases. |
@@ -49,27 +54,24 @@ Before specifying any library, catalog the facilities Evennia's [`DefaultObject.
 ### Behaviour Evennia gives you for free
 
 - **`me` / `self` / `here` keywords** resolve without touching the candidate list, handled by `get_search_direct_match` before any filtering runs.
-- **`<num>-<string>` numeric disambiguation** — a player types `goblin-2` and Evennia parses it to "the second goblin". Controlled by `settings.SEARCH_MULTIMATCH_REGEX`. No custom parser needed.
-- **Multimatch error formatting** — when the player's keyword matches several objects, Evennia formats the `goblin-1 / goblin-2 / goblin-3` disambiguation list via `at_search_result`. Override it to customise, but the default is usually fine.
+- **`<num>-<string>` numeric disambiguation** — a player types `goblin-2` and Evennia parses it to "the second goblin" via `settings.SEARCH_MULTIMATCH_REGEX`. No custom parser needed.
+- **Multimatch error formatting** — when the player's keyword matches several objects, Evennia formats the `goblin-1 / goblin-2 / goblin-3` disambiguation list automatically.
 - **Case-insensitive prefix/substring matching** against both `obj.key` and `obj.aliases.all()`.
 - **Input whitespace normalisation.**
 - **`#dbref` lookups** routed through the global DB instead of candidate filtering.
 
-### Sub-methods you can override individually
+### FCMCharacter.search extension (pre-existing)
 
-`search()` is cleanly split into overridable sub-methods. Most FCM code should never touch them, but knowing they exist is important for the rare case where a different hook is the cleanest fix:
+[FCMCharacter.search](../src/game/typeclasses/actors/character.py#L495) extends Evennia's search with a **substring fallback** (matches anywhere in the key, not just prefix), and two custom kwargs:
 
-| Sub-method | Role |
-|---|---|
-| `get_search_query_replacement` | Preprocess the search string (e.g. custom nick substitution). |
-| `get_search_candidates` | Build the default candidate list when none is passed. |
-| `get_search_direct_match` | Handle `me`, `self`, `here` keywords. |
-| `get_search_result` | Run the DB query. |
-| `at_search_result` | Format multimatch / not-found messages. |
+- `exclude_worn=True` — filters equipped items out of results. Used by drop/give/deposit.
+- `only_worn=True` — restricts to equipped items. Used by remove.
+
+This override predates the targeting library and is still the right place for those behaviours — they are extensions to the STRING MATCHING layer, not the semantic filter layer. The library's helpers delegate to `caller.search()` and therefore inherit the FCMCharacter extension automatically.
 
 ### Evennia helpers for predicate bodies
 
-When the library writes predicates, it should lean on existing Evennia primitives rather than reinvent them:
+When the library writes predicates, it leans on existing Evennia primitives rather than reinventing them:
 
 | Question | Evennia primitive |
 |---|---|
@@ -80,553 +82,209 @@ When the library writes predicates, it should lean on existing Evennia primitive
 | Is a script attached? | `obj.scripts.get("key")` |
 | What exits does this room have? | `room.exits` (Evennia provides a filtered view) |
 | What is in a container? | `obj.contents` |
-| What is at a location? | `location.contents` |
-
-## Correct Evennia Idioms for Common Scopes
-
-Almost every target lookup in the MUD fits one of these patterns. Each row is a correct one-line Evennia call. No library required.
-
-| Intent | Idiomatic call |
-|---|---|
-| Anything the caller can normally reach (room + inventory, room included as target for `look here`) | `caller.search(target)` |
-| Inventory only | `caller.search(target, location=caller)` |
-| Current room only, room object excluded | `caller.search(target, location=caller.location)` |
-| Room + inventory, **room object excluded** | Two calls — see below |
-| Global | `caller.search(target, global_search=True)` |
-| Only CombatMobs | `caller.search(target, typeclass="typeclasses.actors.mob.CombatMob")` |
-| Only exits | `caller.search(target, candidates=list(caller.location.exits))` |
-| Only objects with a tag | `caller.search(target, tags=[("peaceful", "npc")])` |
-| Accept stacks of identical items | `caller.search(target, stacked=5)` |
-| Let the caller handle errors | `caller.search(target, quiet=True)` |
-
-**The "room + inventory without the room object" case**:
-
-```python
-room_matches = caller.search(target, location=caller.location, quiet=True) or []
-inv_matches  = caller.search(target, location=caller, quiet=True) or []
-matches = (room_matches if isinstance(room_matches, list) else [room_matches]) + \
-          (inv_matches  if isinstance(inv_matches,  list) else [inv_matches])
-```
-
-This is the only common scope that takes more than one Evennia call to express correctly, and it's still plain Evennia — no custom primitive needed. A thin helper in the library codifies this pattern so callers don't repeat the idiom.
 
 ## What Evennia Does Not Provide
 
-After the honest catalog above, the gaps shrink to three:
+With the native catalog laid out, the honest gap list is small:
 
-### Gap 1 — FCM-specific semantic predicates
+1. **FCM-specific semantic predicates** — runtime-state filters Evennia cannot know about. Examples: `hp > 0`, `at this height`, `in this combat side`, `in this follow-chain group`, `visible via HiddenObjectMixin`, `is a ContainerMixin subclass`. Every one of these can be expressed as a tiny `(obj, caller) -> bool` function. None exist in Evennia because they are all FCM rules.
 
-Evennia's `search()` can filter by typeclass, tag, lock, or attribute name — but these are all *structural* filters. They can't express conditions that depend on **runtime state** or **FCM-specific mixins**. Every one of the following needs a custom predicate:
+2. **Typed intent at call sites** — Evennia's `search()` always returns `Object | None | list[Object]`. From the call site you cannot tell whether the caller wanted a hostile actor, a held item, a lockable door, or an NPC. Type errors surface as runtime `AttributeError` downstream — which is exactly how the bee tree crash manifested. Named resolver functions close this gap at the architecture level.
 
-- **`p_living`** — `hp > 0`. Excludes corpses, dead mobs, fixtures, items, and the room itself.
-- **`p_not_caster`** — `obj is not caller`. A pure identity compare, trivially cheap.
-- **`p_at_height(h)`** — `obj.room_vertical_position == h`. FCM's vertical combat system.
-- **`p_at_caster_height`** — same, but bound to the caller's height at call time.
-- **`p_is_enemy`** — member of the caller's current combat side (via `combat.combat_utils.get_sides`). Depends on runtime combat state.
-- **`p_in_group`** — member of the caller's follow-chain group.
-- **`p_pvp_safe`** — in non-PvP rooms, excludes player characters not in the caller's group. Wraps `room.allow_pvp` + `p_in_group`.
-- **`p_visible_to`** — respects `HiddenObjectMixin` and `InvisibleObjectMixin` via their existing `is_visible_to()` methods. Evennia's `use_locks` partially overlaps here but does not cover the stealth/invisibility mixins we defined.
-- **`p_is_mob`** — `isinstance(obj, CombatMob)`. Distinguishes mobs from PCs and NPCs, used by `beastlore`.
+3. **AoE multi-target shape (deferred)** — spells like Fireball and weapon moves like cleave need "a primary target plus a list of secondary affected objects" shaped by FCM rules (height, combat sides, PvP, friendly fire). Evennia's `search` is fundamentally single-target. This was in the original gap list; it is still a gap, but this cycle deferred it until the first AoE consumer justifies the shape. See Future Considerations.
 
-All of these are **pure `(obj, caster) -> bool` functions** and each one is 3–5 lines. None of them exist in Evennia because none of them can exist in Evennia — they are all about FCM rules that Evennia cannot know about.
-
-These predicates are applied by pre-filtering the candidate list and passing it to `caller.search(candidates=...)`. Evennia does the string matching; the predicates provide the FCM-specific semantics.
-
-### Gap 2 — AoE multi-target shape
-
-`caller.search()` is fundamentally single-target: it returns one object (or `None`, or a multimatch list of identically-named candidates). Spells like Fireball, weapons like greatsword cleave, and group buffs like Mass Heal need **"a primary target plus a list of secondary affected objects"**. The shape of that list depends on FCM rules: height of the primary, PvP flag of the room, caster's combat side, caster's group membership.
-
-This is not a string-resolution problem and Evennia has no opinion on it. It's a spatial/combat calculation that takes a primary (already resolved via a normal single-target search) and walks the room to compute who else is affected. It lives in the library but is architecturally distinct from the string-matching helpers.
-
-### Gap 3 — Typed intent at call sites
-
-Every `caller.search()` call returns `Object | None | list[Object]`. From the call site, you cannot tell whether the caller wanted a hostile actor, a held item, a lockable door, or an NPC to talk to. Type errors surface as runtime `AttributeError` downstream — which is exactly how the bee tree crash manifested.
-
-This is not a gap in Evennia. It's a software-engineering gap in **how we use** Evennia. The fix is discipline: every target lookup in the MUD goes through a **named resolver function** whose name describes the intent and whose return value is exactly the promised type. Resolvers are trivial wrappers — the FCM logic that makes them valuable is the predicate stack they apply before calling `caller.search(candidates=...)`.
-
-## The Library
-
-The library is small, focused, and pure-Python on top of Evennia's existing search machinery.
+## The Library We Built
 
 ### Module layout
 
 ```
 src/game/utils/targeting/
-    __init__.py            # re-exports the public resolver API
-    predicates.py          # FCM-specific (obj, caster) -> bool predicates
-    resolvers.py           # named resolver functions (the call-site API)
-    aoe.py                 # multi-target (primary + secondaries) computation
-    _sets.py               # precomputed set helpers (enemy set, group set, etc.)
+    __init__.py          — empty exports (no API surface at the package level)
+    predicates.py        — (obj, caller) -> bool filters
+    helpers.py           — walk_contents + resolvers
 ```
-
-No `walk_scope` primitive — `caller.search()` with a filtered `candidates` list is the primitive. No `scope_*` functions — Evennia's `location=` handles most cases, and the one union case is a single helper in `resolvers.py`. No `name_match` helper — `caller.search(candidates=..., quiet=True)` is it. No override of Evennia's `search()` — legacy bare calls are a migration item, not something to defend.
 
 ### Predicate library
 
-Each predicate is a pure `(obj, caster) -> bool` function. They compose via plain boolean expressions. No decorator magic, no registration, no framework.
+Six predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines long, with its own unit test.
+
+| Predicate | Purpose |
+|---|---|
+| `p_not_caller` | `obj is not caller` — identity compare. Kept despite being redundant with `p_not_character` in every current use, because future character-filter consumers will want "actors in the room, but not me" without also excluding all characters. |
+| `p_not_character` | `not isinstance(obj, DefaultCharacter)` — excludes PCs, NPCs, mobs, and (as a side effect) the caller. |
+| `p_not_exit` | `not isinstance(obj, DefaultExit)` — excludes exits from item candidates. |
+| `p_visible_to` | Delegates to `obj.is_hidden_visible_to(caller)` when the `HiddenObjectMixin` method exists; returns True otherwise. Non-hidden objects always pass. |
+| `p_passes_lock(lock_type)` | **Factory** returning a predicate that wraps `obj.access(caller, lock_type)`. Used by `_get_all` today (via future migration); reusable for any Evennia access lock. |
+| `p_is_container` | `getattr(obj, "is_container", False)` — matches anything inheriting `ContainerMixin`. Corpses are explicitly NOT containers and are not matched. |
+
+Each predicate has a docstring explaining what Evennia handles natively instead (e.g. `p_not_character` notes that positive typeclass filtering uses `caller.search(typeclass=...)`). [predicates.py](../src/game/utils/targeting/predicates.py) also opens with a detailed comment block listing the dozen-plus filters a developer might want but should implement with a native Evennia kwarg instead of adding a predicate.
+
+### The walk primitive
 
 ```python
-# utils/targeting/predicates.py
-
-def p_living(obj, caster):
-    hp = getattr(obj, "hp", None)
-    if hp is None:
-        return False
-    try:
-        return int(hp) > 0
-    except (TypeError, ValueError):
-        return False
-
-def p_not_caster(obj, caster):
-    return obj is not caster
-
-def p_at_height(height):
-    def _pred(obj, caster):
-        return getattr(obj, "room_vertical_position", 0) == height
-    return _pred
-
-def p_at_caster_height(obj, caster):
-    return (
-        getattr(obj, "room_vertical_position", 0)
-        == getattr(caster, "room_vertical_position", 0)
-    )
-
-def p_visible_to(obj, caster):
-    if hasattr(obj, "is_visible_to"):
-        return obj.is_visible_to(caster)
-    return True
-
-def p_is_mob(obj, caster):
-    from typeclasses.actors.mob import CombatMob
-    return isinstance(obj, CombatMob)
-
-# ... p_is_enemy, p_in_group, p_pvp_safe — see Set Helpers below
-```
-
-**Test surface**: one unit test per predicate, using lightweight `SimpleNamespace` stand-ins. No Evennia DB, no fixtures, no room setup. The tests exist to catch regressions in the predicate logic itself; they do not exercise search or combat integration.
-
-### Set helpers (precomputed once per resolver call)
-
-Some predicates depend on expensive-to-compute sets — enemies from the combat handler, the caller's follow-chain group. These are computed **once per resolver call** via helpers in `_sets.py` and captured in closure predicates so the inner loop does O(1) set membership checks.
-
-```python
-# utils/targeting/_sets.py
-
-def caster_enemy_set(caster):
-    """Frozenset of enemies on the caster's current combat side.
-    Returns an empty frozenset if the caster is not in combat.
-    """
-    from combat.combat_utils import get_sides
-    allies, enemies = get_sides(caster)
-    return frozenset(enemies)
-
-def caster_ally_set(caster):
-    """Frozenset of allies on the caster's combat side, or (out of
-    combat) the caster's follow-chain group. Excludes the caster.
-    """
-    from combat.combat_utils import get_sides
-    allies, enemies = get_sides(caster)
-    if allies or enemies:
-        return frozenset(a for a in allies if a is not caster)
-    return caster_group_set(caster) - {caster}
-
-def caster_group_set(caster):
-    """Frozenset of the caster's follow-chain members currently in the
-    caster's location. Uses the existing FCMCharacter follow helpers.
-    """
-    # implementation reads FCMCharacter.get_followers / leader walk
-    ...
-```
-
-`get_sides()` is authoritative for combat sides today. When the combat-get_sides cleanup lands (a separate future task), these helpers become the only call sites that need updating.
-
-### Typed resolvers
-
-Resolvers are the public API. Each one is a 5–15 line function that composes Evennia's `caller.search()` with FCM predicates and returns exactly the type its name promises. No mode flags, no branching on target-type strings, no shared monolithic helper.
-
-The general pattern:
-
-1. Handle empty `target_str` per resolver's contract (return `None`, `caller`, or `[]`).
-2. Choose the Evennia scope (`location=caller.location`, `location=caller`, or a candidate union).
-3. Pre-filter candidates through predicates.
-4. Hand the filtered list to `caller.search(candidates=..., quiet=True)` for string matching.
-5. Normalise the return to a single object or `None`.
-6. **Never send messages** — caller owns all error wording.
-
-```python
-# utils/targeting/resolvers.py
-
-def _apply(candidates, predicates, caster):
-    """Run a candidate list through a sequence of predicates."""
-    return [o for o in candidates if all(p(o, caster) for p in predicates)]
-
-def _first_match(caller, target_str, candidates, use_nicks=True):
-    """Delegate string matching to Evennia's caller.search."""
-    if not candidates or not target_str:
-        return None
-    result = caller.search(
-        target_str,
-        candidates=candidates,
-        quiet=True,
-        use_nicks=use_nicks,
-    )
-    if isinstance(result, list):
-        return result[0] if result else None
-    return result
-
-# ── Actor resolvers ─────────────────────────────────────────────────
-
-def resolve_hostile_actor(caller, target_str):
-    """A living enemy of the caller in the current room.
-
-    Excludes: the caller themselves, dead actors, non-actors, bystander
-    PCs in non-PvP rooms.
-
-    Fast path: if caller.ndb.combat_target is set, in the room, and
-    matches the keyword, return it without filtering.
-    """
-    current = _combat_target_if_valid(caller)
-    if current is not None:
-        if not target_str:
-            return current
-        if _name_hits(current, target_str):
-            return current
-
-    if not target_str:
-        return None
-
-    group = caster_group_set(caller)
-    room = caller.location
-    pvp = getattr(room, "allow_pvp", False) if room else False
-
-    def p_pvp_safe(obj, _c):
-        if pvp or not getattr(obj, "account", None):
-            return True
-        return obj in group
-
-    room_candidates = list(room.contents) if room else []
-    candidates = _apply(
-        room_candidates,
-        [p_living, p_not_caster, p_pvp_safe],
-        caller,
-    )
-    return _first_match(caller, target_str, candidates)
-
-
-def resolve_allied_actor(caller, target_str):
-    """A living ally in the room (caller themselves OK)."""
-    if not target_str:
-        return caller
-    room_candidates = list(caller.location.contents) if caller.location else []
-    candidates = _apply(room_candidates, [p_living], caller)
-    return _first_match(caller, target_str, candidates)
-
-
-def resolve_any_actor(caller, target_str):
-    """Any living actor in the room. For spells with target_type 'any'."""
-    if not target_str:
-        return None
-    room_candidates = list(caller.location.contents) if caller.location else []
-    candidates = _apply(room_candidates, [p_living], caller)
-    return _first_match(caller, target_str, candidates)
-
-# ── Item resolvers ──────────────────────────────────────────────────
-
-def resolve_inventory_item(caller, target_str):
-    if not target_str:
-        return None
-    return caller.search(target_str, location=caller, quiet=True) or None
-
-def resolve_held_item(caller, target_str=None):
-    held = caller.get_slot(HumanoidWearSlot.HOLD)
-    if held is None:
-        return None
-    if not target_str:
-        return held
-    return held if _name_hits(held, target_str) else None
-
-def resolve_room_item(caller, target_str):
-    """Any item in the room (excludes the room object)."""
-    if not target_str:
-        return None
-    return caller.search(target_str, location=caller.location, quiet=True) or None
-
-def resolve_gettable_room_item(caller, target_str):
-    """A room item the caller has permission to pick up."""
-    if not target_str:
-        return None
-    room_candidates = list(caller.location.contents) if caller.location else []
-    candidates = [
-        o for o in room_candidates
-        if o is not caller
-        and p_visible_to(o, caller)
-        and o.access(caller, "get")
-    ]
-    return _first_match(caller, target_str, candidates)
-
-# ── Exit resolvers ──────────────────────────────────────────────────
-
-def resolve_exit(caller, target_str):
-    if not target_str or not caller.location:
-        return None
-    candidates = [e for e in caller.location.exits if p_visible_to(e, caller)]
-    return _first_match(caller, target_str, candidates)
-
-def resolve_unlockable_exit(caller, target_str):
-    from typeclasses.mixins.lockable_mixin import LockableMixin
-    if not target_str or not caller.location:
-        return None
-    candidates = [
-        e for e in caller.location.exits
-        if p_visible_to(e, caller) and isinstance(e, LockableMixin)
-    ]
-    return _first_match(caller, target_str, candidates)
-
-# ── NPC resolvers ───────────────────────────────────────────────────
-
-def resolve_npc_speaker(caller, target_str):
-    """An NPC in the room the caller can talk to."""
-    if not target_str:
-        return None
-    return caller.search(
-        target_str,
-        location=caller.location,
-        typeclass="typeclasses.actors.npc.BaseNPC",
-        quiet=True,
-    ) or None
-
-def resolve_trade_partner(caller, target_str):
-    """A PC in the room (for give / trade)."""
-    if not target_str:
-        return None
-    room_candidates = list(caller.location.contents) if caller.location else []
-    candidates = [
-        o for o in room_candidates
-        if o is not caller
-        and p_living(o, caller)
-        and getattr(o, "account", None)
-    ]
-    return _first_match(caller, target_str, candidates)
-```
-
-Notice what's missing compared to the earlier draft:
-
-- **No `walk_scope` primitive.** Inline list comprehensions with `_apply` are plenty. Evennia's `search()` is the real iteration primitive when `candidates=` is passed.
-- **No `scope_*` functions.** `location=caller`, `location=caller.location`, and a couple of inlined room-content lists handle every case.
-- **No custom `name_match`.** `caller.search(candidates=..., quiet=True)` is it.
-- **No `get_search_candidates` override.** Not needed — resolvers always pass explicit candidates or a `location=` scope.
-
-What stays, because each of these is a genuine FCM addition:
-
-- **Predicates** for runtime state (`p_living`, `p_at_height`, `p_is_enemy`, `p_in_group`, `p_pvp_safe`, `p_is_mob`, `p_visible_to`) and the set helpers they compose with.
-- **Named resolvers** expressing typed intent at call sites.
-- **AoE multi-target** (next section).
-
-### AoE: primary + secondaries
-
-AoE is the one genuine multi-target case. The library exposes it as a separate module because it's architecturally distinct — given a primary (resolved via a normal single-target resolver), compute the secondaries.
-
-```python
-# utils/targeting/aoe.py
-
-def resolve_hostile_aoe_safe(caller, target_str):
-    """Primary + other enemies at the primary's height.
-    No friendly fire. For safe AoE spells.
-    """
-    primary = resolve_hostile_actor(caller, target_str)
-    if primary is None:
+def walk_contents(caller, source, *predicates):
+    """Walk source.contents once and return objects passing every predicate."""
+    if source is None:
         return []
-
-    enemy_set = caster_enemy_set(caller)
-    height = getattr(primary, "room_vertical_position", 0)
-
-    secondaries = [
-        o for o in (caller.location.contents if caller.location else [])
-        if p_living(o, caller)
-        and o is not caller
-        and o in enemy_set
-        and getattr(o, "room_vertical_position", 0) == height
-        and o is not primary
-    ]
-    return [primary] + secondaries
-
-
-def resolve_hostile_aoe_unsafe(caller, target_str):
-    """Primary + enemies + allies at the primary's height.
-    Bystanders in non-PvP rooms are excluded (they're not in either set).
-    For unsafe AoE spells (Fireball).
-    """
-    primary = resolve_hostile_actor(caller, target_str)
-    if primary is None:
+    contents = getattr(source, "contents", None)
+    if not contents:
         return []
-
-    enemy_set = caster_enemy_set(caller)
-    ally_set = caster_ally_set(caller)
-    affected = enemy_set | ally_set
-    height = getattr(primary, "room_vertical_position", 0)
-
-    secondaries = [
-        o for o in (caller.location.contents if caller.location else [])
-        if p_living(o, caller)
-        and o is not caller
-        and o in affected
-        and getattr(o, "room_vertical_position", 0) == height
-        and o is not primary
-    ]
-    return [primary] + secondaries
-
-
-def resolve_allied_aoe(caller):
-    """All allies at the caller's height. Used by group heal, mass bless."""
-    ally_set = caster_ally_set(caller) | {caller}
-    caller_height = getattr(caller, "room_vertical_position", 0)
     return [
-        o for o in (caller.location.contents if caller.location else [])
-        if p_living(o, caller)
-        and o in ally_set
-        and getattr(o, "room_vertical_position", 0) == caller_height
+        obj for obj in contents
+        if all(p(obj, caller) for p in predicates)
     ]
 ```
 
-**Cost profile**: every AoE resolver does at most two walks of `room.contents` — one by the single-target resolver (fast-path to zero walks if the caster is already fighting the primary) and one for the secondary filter. Precomputed sets make the filter O(1) per object. For a 15-actor room, the full cost is a handful of microseconds.
+Universal targeting primitive. Short-circuits per-object via Python's `all()` so the first failing predicate stops evaluation for that object. Returns an empty list if `source` is `None` or has no `.contents`, so callers can iterate unconditionally.
 
-**Two walks is the floor for fresh-target AoE**, not a smell. The secondary filter depends on the primary's runtime height, which is only known after the primary is resolved.
+**Predicate order matters**: cheap predicates (identity/attribute checks) should come before expensive ones (method calls, lock checks) so short-circuit eval pays off.
+
+### `BASE_ITEM_PREDICATES` constant
+
+```python
+BASE_ITEM_PREDICATES = (p_not_character, p_not_exit, p_visible_to)
+```
+
+Documents the universal "item-like" filter stack. Any lookup that wants "things in source.contents that could be items the caller might act on" combines this tuple with additional filters via `*BASE_ITEM_PREDICATES`. The constant has two real consumers today and documents the shared intent so future additions don't diverge.
+
+### `resolve_item_in_source`
+
+```python
+def resolve_item_in_source(caller, source, search_term, **kwargs):
+    """Find an item keyword inside a source object's contents."""
+    candidates = walk_contents(caller, source, *BASE_ITEM_PREDICATES)
+    if not candidates:
+        return None
+    return caller.search(search_term, candidates=candidates, **kwargs)
+```
+
+The primary item-identification helper. Source-agnostic — works for any object with `.contents` (room, container, caller's inventory, corpse, or any future source). Delegates string matching to `caller.search(candidates=..., **kwargs)`, inheriting all of Evennia's nick/dbref/multimatch/stacked/lock handling for free.
+
+**Does NOT check `get` access lock**. That stays in the calling command so it can emit custom per-item error messages (`obj.db.get_err_msg`) instead of a generic "you don't see that". Same principle applies to any command-specific state gate: the library identifies; the command decides.
+
+### `resolve_container`
+
+```python
+def resolve_container(caller, name):
+    """Find a container by name — inventory first, then room."""
+    for source in (caller, caller.location):
+        if source is None:
+            continue
+        candidates = walk_contents(
+            caller, source, *BASE_ITEM_PREDICATES, p_is_container,
+        )
+        if not candidates:
+            continue
+        result = caller.search(name, candidates=candidates, quiet=True)
+        if result:
+            if isinstance(result, list):
+                result = result[0] if result else None
+            if result is not None:
+                return result
+    return None
+```
+
+Container identification with a two-step source fallback: inventory first (the common case — "get sword from pack"), then the caller's current room (chests, trap chests, open world containers). Composes `BASE_ITEM_PREDICATES` with `p_is_container` to produce the full filter stack in one line.
+
+**Does NOT check open/closed state.** `is_open` is a command-layer policy decision that varies per consumer:
+
+- `get from chest` — needs the chest to be open
+- `picklock chest` — thief is picking the lock; chest is closed by definition
+- `smash chest` — barbarian; state irrelevant
+- `look in chest` — maybe open, maybe not
+
+Same identification-only principle as `resolve_item_in_source`'s `get` lock decision. Commands that need `is_open` check it themselves after calling the helper.
+
+### Design decisions worth documenting
+
+1. **Identification-only, not action-gating.** The library answers "which object did the player mean?" and stops. Every gate that depends on command intent (open/closed, access locks, hooks, weight checks) stays in the command layer. This keeps the helpers pure, testable, and reusable across commands with different action semantics.
+
+2. **Delegate string parsing to `caller.search()`.** The library never reimplements nick substitution, dbref lookup, `<num>-<string>` disambiguation, `me`/`self`/`here` shortcuts, `stacked`, or `use_locks`. All of these come for free via `caller.search(candidates=..., **kwargs)`.
+
+3. **`**kwargs` passthrough.** Helpers accept `**kwargs` and forward them to `caller.search`. Callers pass whatever Evennia kwargs they need (`stacked`, `quiet`, `nofound_string`, `multimatch_string`, `exclude_worn`, etc.) without the library needing to know about them.
+
+4. **Fail-soft on missing source.** `None` source or missing `.contents` returns `None` / `[]`, never raises. Lets callers try multiple sources speculatively.
+
+5. **No override of Evennia's `search()`.** An earlier draft proposed overriding `get_search_candidates` to strip the room from the default candidate list (closing the bee-tree footgun at the source). We rejected that approach: the typed resolvers make the footgun structurally impossible for every migrated call site, migration discipline is auditable via grep, and overriding `get_search_candidates` fights Evennia's intentional behaviour (`look here` needs the room in candidates).
+
+6. **Predicate extraction is demand-driven.** Every predicate in the library was added when a concrete consumer needed it, not because it might be useful one day. The predicates.py docstring calls this out explicitly so future sessions maintain the discipline.
+
+## Targeting vs Filtering
+
+An important boundary the library intentionally does not cross:
+
+- **Targeting** answers "which specific object did the player mean?" — returns ONE thing (or a small disambiguation set). Every resolver in this library does this.
+- **Filtering** answers "which objects in this collection match some criterion?" — returns ALL matches; the caller acts on each in a loop.
+
+Bulk-action patterns like `get all`, `drop all`, and `loot all` are filter-and-act loops, not targeting. They happen to share predicates with the targeting library (a `get all` wants the same living/non-exit/visible/gettable filter as `get sword`), but their loop structure is different. Forcing them into the resolver pattern would:
+
+- Add a second pass (filter-then-act instead of filter-and-act-in-one)
+- Blur the line between "identify a target" and "apply an action to everything matching"
+- Fragment the library by adding "bulk" variants of every resolver
+
+For now, bulk-action commands keep their inline filter loops. Predicates from this library are available for reuse if a command wants to compose the same filter stack, but the loop structure stays with the command. If a future second bulk-filter consumer appears with the same shape, the pattern gets extracted — probably into a sibling `utils/targeting/bulk.py` module to keep the target/filter boundary clear.
+
+See **Future Considerations** at the end of this document for the specific deferred cases (`_get_all`, `_get_by_token_id`).
 
 ## Usage Catalog
 
-Concrete examples of how commands across the MUD use the system. These double as the **contract tests** for the resolver API — if any of them feels contorted, the resolver catalog is wrong.
+Concrete call sites across the codebase today and their resolver mapping. This is the current reality, not an aspirational catalog — every row is either shipped or in flight.
 
-### Spell targeting (`cmd_cast`)
+### Spell targeting (pre-library stopgap)
 
-```python
-# dispatching on spell.target_type
-if spell.target_type == "hostile":
-    target = resolve_hostile_actor(caller, target_str)
-elif spell.target_type == "friendly":
-    target = resolve_allied_actor(caller, target_str)
-elif spell.target_type == "any":
-    target = resolve_any_actor(caller, target_str)
-elif spell.target_type == "self":
-    target = caller
-elif spell.target_type == "none":
-    target = None
-elif spell.target_type == "inventory_item":
-    target = resolve_inventory_item(caller, target_str)
-elif spell.target_type == "world_item":
-    target = resolve_room_item(caller, target_str)
+Spell targeting still uses the `resolve_actor_target` stopgap in [world/spells/spell_utils.py](../src/game/world/spells/spell_utils.py), wired into `cmd_cast` and `cmd_zap`. This closed the bee-tree crash. It will be retired when `resolve_hostile_actor` / `resolve_allied_actor` / `resolve_any_actor` land as part of the spell migration cycle.
 
-if target is None and spell.target_type not in ("none", "self"):
-    caller.msg(f"Cast {spell.name} at whom?")
-    return
-```
-
-### AoE spells (Fireball)
+### Item pickup (shipped — cmd_override_get)
 
 ```python
-targets = resolve_hostile_aoe_unsafe(caller, target_str)
-if not targets:
-    caller.msg("You don't see a valid target for Fireball here.")
-    return False, None
-primary, *secondaries = targets
-# apply damage
+# _get_object — standard NFT pickup by keyword
+objs = resolve_item_in_source(
+    caller, caller.location, search_term, stacked=self.number
+)
+
+# Multi-word probe — detect "is this an item name or a container split?"
+obj = resolve_item_in_source(
+    caller, caller.location, self.args.strip(), quiet=True
+)
+
+# _find_container — identify a container by name, handles error messages
+container = resolve_container(caller, name)
+# ... command-layer is_open check and fallback disambiguation ...
+
+# _try_split_container — silent probe for the container-split parse path
+container = resolve_container(caller, container_word)
+# ... command-layer is_open check ...
+
+# _get_object_from_container — find an item inside a resolved container
+obj = resolve_item_in_source(
+    caller, container, search_term,
+    nofound_string=f"{container.key} doesn't contain '{search_term}'.",
+)
 ```
 
-### Combat (`cmd_attack`, class skills)
+Five distinct call sites, one library, zero duplication of filter logic. `_find_container` even composes three library calls for a single command-layer task (primary lookup + two error-disambiguation fallbacks).
 
-```python
-target = resolve_hostile_actor(caller, target_str)
-if target is None:
-    caller.msg("Attack whom?")
-    return
-```
+### Other commands (not yet migrated)
 
-### Item manipulation
+- **`cmd_override_drop._drop_object`** — keyword search in inventory with `exclude_worn=True`. Straightforward one-line swap to `resolve_item_in_source(caller, caller, ...)` pending this session.
+- **`cmd_override_give._give_object`** — two lookups (item in inventory, recipient in room). Pending.
+- **`cmd_hold`, `cmd_wear`, `cmd_remove`** — inventory keyword searches with typeclass or worn-state filters. Pending.
+- **Spell `cmd_cast`, `cmd_zap`** — currently use `resolve_actor_target` stopgap. Will migrate to `resolve_hostile_actor` etc. once those land.
+- **Combat `cmd_attack`, class skills** — mostly use `caller.search()` or `get_sides()` directly. Pending.
+- **Exits and doors** — `cmd_unlock`, `cmd_open`, `cmd_close`, `cmd_smash` have their own path via `utils/find_exit_target.py`. That helper is a migration candidate for a future `resolve_exit` / `resolve_unlockable_exit`.
 
-```python
-# cmd_get
-item = resolve_gettable_room_item(caller, target_str)
+## Migration Progress
 
-# cmd_drop / cmd_wear / cmd_hold
-item = resolve_inventory_item(caller, target_str)
+| Commit | What shipped |
+|---|---|
+| `9baec37` | **Stopgap** — `resolve_actor_target` in spell_utils, wired into `cmd_cast` + `cmd_zap`. Closes the bee-tree crash immediately. |
+| `c423a15` | **Library foundation** — `utils/targeting/` package with 5 predicates (`p_not_caller`, `p_not_character`, `p_not_exit`, `p_visible_to`, `p_passes_lock`), `resolve_item_in_source` helper, and 24 unit tests. Migrates `cmd_override_get._get_object` and its multi-word probe. |
+| `33a4053` | **`walk_contents` primitive + `resolve_container`** — generalises the filter stack into a varargs primitive, introduces `BASE_ITEM_PREDICATES`, adds `p_is_container`, and ships `resolve_container` with inventory-first fallback. 11 new tests. |
+| `19c4829` | **`cmd_get` from-container migration** — wires `_find_container`, `_try_split_container`, and `_get_object_from_container` to the new helpers. All 23 existing `cmd_get` tests pass unchanged. |
 
-# cmd_remove
-item = resolve_worn_item(caller, target_str)
-```
+**Test coverage**: 149/149 green across the full `tests.utils_tests` suite. 23/23 green across `tests.command_tests.test_cmd_get`. No regressions introduced by any migration.
 
-### Giving
-
-```python
-item = resolve_inventory_item(caller, item_str)
-recipient = resolve_trade_partner(caller, recipient_str)
-```
-
-### NPC dialogue / shops / quests
-
-```python
-npc = resolve_npc_speaker(caller, npc_str)
-```
-
-### Movement / exits
-
-```python
-# cmd_unlock / cmd_open / cmd_close
-exit_ = resolve_unlockable_exit(caller, target_str)
-```
-
-### Skills
-
-```python
-# cmd_beastlore — mobs only
-target = resolve_mob(caller, target_str)
-
-# cmd_appraise — inventory items only
-item = resolve_inventory_item(caller, target_str)
-
-# cmd_picklock
-target = resolve_unlockable_exit(caller, target_str)
-```
-
-### Look / examine
-
-```python
-# cmd_look — keep Evennia default, room IS a valid target
-target = caller.search(target_str)
-```
-
-**Note**: `look` and `examine` are the one class of commands where passing the target_str straight to `caller.search()` (with no `location=`) is correct. The room object is a legitimate match for `look here`, and the `here` / `me` / `self` keywords are handled by Evennia before any filtering. No resolver needed.
-
-## Migration Strategy
-
-### Phase 1 — land the library
-
-1. Implement `predicates.py`, `_sets.py`, `resolvers.py`, `aoe.py`.
-2. Unit tests for every predicate (lightweight mock objects, no DB).
-3. Integration tests for every resolver using a deliberate fixture room (see Testing).
-4. Contract tests for every call site in the Usage Catalog above — the tests exist even though the call sites haven't been migrated yet.
-5. Land as one PR. Production code unchanged. Zero runtime risk.
-
-### Phase 2 — migrate consumers
-
-Each PR handles one command category, runs its existing test suite, and replaces bare `caller.search()` with a named resolver.
-
-- **PR 2a**: spells — `cmd_cast`, `cmd_zap`, AoE spells (Fireball first)
-- **PR 2b**: combat — `cmd_attack`, `cmd_bash`, `cmd_taunt`, other class skills
-- **PR 2c**: movement and exits — `cmd_unlock`, `cmd_open`, `cmd_close`, `cmd_smash`
-- **PR 2d**: items — `cmd_get`, `cmd_drop`, `cmd_give`, `cmd_hold`, `cmd_wear`, `cmd_remove`
-- **PR 2e**: NPC interaction — `cmd_say_to`, `cmd_ask`, `cmd_buy`, `cmd_sell`, quest turn-ins
-- **PR 2f**: skills — `cmd_beastlore`, `cmd_appraise`, `cmd_picklock`, `cmd_pickpocket`
-
-`cmd_look` and `cmd_examine` are **not migrated** — they correctly use bare `caller.search()` because they legitimately want the room as a target.
-
-### Phase 3 — retire legacy helpers
-
-- Delete `utils/find_exit_target.py`, `world/spells/spell_utils.py::resolve_actor_target` / `resolve_item_target`, `get_room_enemies`, `get_room_all`, `get_room_enemies_at_height`, `get_room_all_at_height`.
-- Grep for remaining bare `caller.search(` calls in game code. Every remaining call must justify why it isn't a resolver — the `look`/`examine` pair are the only expected survivors.
-- Add a CI grep check or ruff rule that flags new bare `caller.search(` calls in `commands/`, `world/spells/`, `combat/`, and `typeclasses/` outside a small allowlist. This is cheap prevention against future regressions.
-
-### Phase 4 — unify combat side detection
-
-`combat.combat_utils.get_sides()` is the authoritative source for combat sides and is called in 27+ places. Once the targeting library is proven in Phases 1–3, the targeting predicates and set helpers can replace `get_sides`'s internal walk — both systems converge on one iteration pattern. Task for a separate future plan; not part of this work.
+**Migration discipline**: every cycle follows the same pattern — plan the scope, build the helper(s), test the helper(s), migrate the consumer, rerun the consumer's existing test suite, commit separately. No speculative additions, no resolvers written ahead of concrete consumers.
 
 ## Testing Strategy
 
@@ -634,79 +292,113 @@ Three tiers, each answering one question.
 
 ### Tier 1 — predicate unit tests
 
-One test per predicate. Each test uses a `SimpleNamespace` with only the attributes the predicate reads. No Evennia DB, no fixtures. Example:
+One test class per predicate. Each test uses a `SimpleNamespace` or `MagicMock(spec=...)` fake — no Evennia DB, no fixtures beyond the `EvenniaTest` base class (needed for the `isinstance` check against `DefaultCharacter` / `DefaultExit`). Typically 2–3 assertions per predicate covering true case, false case, and one edge case (missing attribute, None, etc.).
 
-```python
-def test_p_living_rejects_hp_none():
-    obj = SimpleNamespace(hp=None)
-    assert p_living(obj, caster=None) is False
+[tests/utils_tests/test_targeting_predicates.py](../src/game/tests/utils_tests/test_targeting_predicates.py) — 13 tests across the 6 predicates.
 
-def test_p_living_accepts_positive_hp():
-    obj = SimpleNamespace(hp=10)
-    assert p_living(obj, caster=None) is True
+### Tier 2 — helper unit tests
 
-def test_p_living_rejects_zero_hp():
-    obj = SimpleNamespace(hp=0)
-    assert p_living(obj, caster=None) is False
-```
+One test class per resolver. Tests cover:
 
-Fast, exhaustive, no setup cost. Every predicate gets the true case, the false case, and one or two edge cases (missing attribute, wrong type).
+- Happy path (matching item in source → returned)
+- None sources (missing contents, empty contents, None source → None)
+- Each predicate filter (caller, character, exit, hidden → excluded)
+- Each source variant (container, inventory, room)
+- Kwarg forwarding (`stacked`, `quiet`, `nofound_string`)
+- Source fallback precedence (for `resolve_container`: inventory wins over room)
+- Non-gating behaviour (for `resolve_container`: closed containers still returned)
 
-### Tier 2 — resolver integration tests
+[tests/utils_tests/test_targeting_helpers.py](../src/game/tests/utils_tests/test_targeting_helpers.py) — 22 tests across `resolve_item_in_source` and `resolve_container`.
 
-Each resolver gets tested against a deliberate fixture room. The fixture is the single most important test artefact in the library because it forces every edge case into the same scenario:
+### Tier 3 — consumer regression tests
 
-**Fixture room** (`key="Under Goblin Tree"` — deliberate ambiguous-room-name to catch the bee tree class of bugs):
-
-- Caster (PC, mage)
-- Follower (PC, in caster's group)
-- Bystander (PC, not in group)
-- 3 ground-level goblins (enemies)
-- 1 dead goblin (`hp=0`)
-- 1 flying goblin (`room_vertical_position=2`)
-- Bartender NPC (peaceful)
-- Rabbit (unaggroed mob)
-- Iron chest (lockable, not gettable — scenery)
-- Glowing wand (in caster's inventory)
-- Iron door exit (lockable, visible)
-- Open archway exit (non-lockable, visible)
-
-Per-resolver test cases:
-
-- Normal match (named target exists and is valid)
-- Ambiguous-room-name case (the keyword substring-matches the room's key) — **the bee tree regression test**
-- Dead-target case (excluded by `p_living`)
-- Wrong-type case (item keyword when an actor was expected)
-- PvP-bystander case (non-PvP room, bystander excluded from hostile)
-- Height case (flying target excluded from ground-level AoE secondaries)
-- Multi-match case (3 goblins → first or `combat_target` wins)
-- `<num>-string` disambiguation (`2-goblin` picks the second — Evennia handles this for free; the test just verifies the library doesn't break it)
-- Empty-string case (resolver-specific default)
-- No-match case (returns `None` / `[]`)
-- Nick substitution case (caller has nick `g -> goblin`; `resolve_hostile_actor(caller, "g")` resolves)
-
-### Tier 3 — contract tests
-
-One test per call site listed in the Usage Catalog, even though those call sites haven't been migrated yet. Each test wires the fixture room, invokes the resolver, and asserts the return shape and content match what the future migration PR will need. If any contract test feels contorted, the resolver API is wrong and the library is revised before shipping.
-
-## Open Questions
-
-**1. Resolver error messaging**: resolvers return `None`/`[]` silently and never message. The caller owns all wording. This is deliberate — different commands want different error text ("Cast at whom?" vs "Who do you want to target?" vs "You don't see that here"). If the pattern feels wrong after a few migration PRs, optional `error_msg` kwargs can be added without breaking the API.
-
-**2. `resolve_anything_visible` for `look` / `examine`**: do we wrap these at all, or leave them on bare `caller.search()`? Lean: leave bare. Evennia's default is correct for this exact use case, and wrapping adds no value.
-
-**3. Future combat-sides unification**: when Phase 4 lands, `get_sides()` becomes the one place that reads from `caller.ndb._combat_handler` and the targeting library becomes the one place that walks rooms with predicates. The two converge. Not in scope for this document.
+Every command migration runs the command's existing test suite as the regression gate. If the migration changes observable behaviour, an existing test fails and we debug. If every test stays green, the migration preserved player-facing semantics. [tests/command_tests/test_cmd_get.py](../src/game/tests/command_tests/test_cmd_get.py) — 23 tests covering all migrated code paths in `cmd_override_get.py`.
 
 ## Relationship to Other Systems
 
-- **[SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md)** — spell `target_type` values map 1:1 onto resolvers. `cmd_cast` becomes a thin dispatcher.
-- **[COMBAT_SYSTEM.md](COMBAT_SYSTEM.md)** — `get_sides()` stays authoritative for combat sides until Phase 4. The library reads it via `caster_enemy_set` / `caster_ally_set`.
-- **[EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md)** — `utils/find_exit_target.py` is retired by `resolve_exit` / `resolve_unlockable_exit` in Phase 3.
-- **[INVENTORY_EQUIPMENT.md](INVENTORY_EQUIPMENT.md)** — `resolve_held_item` / `resolve_worn_item` delegate to existing wearslot helpers on `BaseActor`.
-- **[VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md)** — height predicates enforce the vertical-position rules defined there without requiring every caller to re-check.
+- **[SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md)** — spell target types will eventually map 1:1 onto named resolvers (`resolve_hostile_actor`, `resolve_allied_actor`, `resolve_any_actor`). Currently served by the `resolve_actor_target` stopgap.
+- **[COMBAT_SYSTEM.md](COMBAT_SYSTEM.md)** — `combat.combat_utils.get_sides()` is the authoritative source for "who is on whose side" today. Eventual rebuild on top of `walk_contents` is listed in Future Considerations.
+- **[EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md)** — `utils/find_exit_target.py` is a migration candidate for a future `resolve_exit` / `resolve_unlockable_exit`.
+- **[INVENTORY_EQUIPMENT.md](INVENTORY_EQUIPMENT.md)** — wearslot-aware resolvers (`resolve_held_item`, `resolve_worn_item`) are deferred until first concrete consumer.
+- **[VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md)** — height predicates will enforce the vertical-position rules defined there when AoE multi-target lands.
 
-## Summary
+---
 
-This system is a **thin FCM-specific layer over Evennia's existing `caller.search()`**. It adds what Evennia cannot know about (FCM semantic predicates, AoE multi-target shape) and codifies typed intent at every call site. It is not a custom search engine, not a replacement for `search`, not an override of any Evennia sub-method. The library is small enough to read in one sitting.
+## Future Considerations
 
-The deeper lesson — and the reason this document exists in its corrected form — is that the messy targeting code we set out to fix was **not a case of Evennia being inadequate**. It was a case of not reading Evennia's API before writing around it. The Evennia-first rule in [CLAUDE.md](../src/game/CLAUDE.md) exists to prevent the next session from making the same mistake.
+This section captures deferred work known to the current design. Each item was considered during the current migration cycle and consciously not built yet, with a note explaining why. These are candidates for future sessions to revisit when a concrete consumer justifies the work.
+
+### `_get_all` and bulk-filter patterns
+
+[cmd_override_get.py:_get_all](../src/game/commands/all_char_cmds/cmd_override_get.py) walks `room.contents` with an inline filter stack (not caller, not exit, not character, visible, has get access, passes `at_pre_get`, passes weight check) and moves each passing object into the caller's inventory. The first four filters are exactly `BASE_ITEM_PREDICATES + p_passes_lock("get")`, so the migration would look clean on paper.
+
+It was deferred this cycle because **this is filtering, not targeting**. The Targeting vs Filtering section above explains the distinction: `get all` does not identify a target; it applies an action to every object matching a criterion. Forcing it through a targeting resolver would add a second pass (filter-then-act instead of filter-and-act-in-one), blur the library's boundary, and not meaningfully improve reuse because the only similar consumers today (`_drop_all`, `_get_all_from_container`) need different filter stacks.
+
+**Revisit when**: a second bulk-filter consumer appears with the same shape (likely `_drop_all` if its `exclude_worn` logic can be unified with the predicate stack). At that point a sibling `utils/targeting/bulk.py` module with a `filter_contents` function (or similar) might earn its place. Until then, `_get_all`'s inline loop is fine where it is.
+
+### `_get_by_token_id` and exact-identifier lookups
+
+[cmd_override_get.py:_get_by_token_id](../src/game/commands/all_char_cmds/cmd_override_get.py) (and its container sibling `_get_by_token_id_from_container`) walks `source.contents` looking for an NFT with a specific integer ID. Currently inline, ~8 lines in two places.
+
+This is a different shape from keyword search: there is no string to match, no disambiguation, no fuzzy matching. A dedicated helper might look like:
+
+```python
+def resolve_by_id(caller, source, item_id, typeclass=None):
+    for obj in source.contents:
+        if isinstance(obj, typeclass or BaseNFTItem) and obj.id == item_id:
+            return obj
+    return None
+```
+
+Or, more in line with the library's style:
+
+```python
+def p_has_id(item_id):
+    def _pred(obj, caller):
+        return getattr(obj, "id", None) == item_id
+    return _pred
+
+# Consumer:
+matches = walk_contents(caller, source, p_is_typeclass(BaseNFTItem), p_has_id(42))
+obj = matches[0] if matches else None
+```
+
+**Open questions before migrating**:
+
+1. **Should visibility filtering apply?** Currently `_get_by_token_id` does NOT check hidden-mixin visibility — if you know the id you can get it. Is that intentional (you saw the id via some inspection command, so you know it exists) or an oversight? Adding `p_visible_to` to a future `resolve_by_id` would be a behaviour change that needs a design call, not just a refactor.
+
+2. **Does exact-id lookup even belong in a string-matching-adjacent library?** The current library's identity is "unified keyword → object resolution". Exact-ID lookup is a different problem and might belong in its own tiny module. Or it might be fine as a `walk_contents` user with a custom predicate. Deferred pending a conversation.
+
+**Revisit when**: either the visibility question is answered (ideally via a game design decision, not a refactor), or a third exact-id call site appears and forces the pattern into existence.
+
+### AoE multi-target (primary + secondaries)
+
+Spells like Fireball and weapon moves like cleave need a primary target plus a list of secondary affected objects, shaped by FCM rules around height, combat sides, PvP, and friendly fire. Evennia's `search` is single-target and has no opinion on this.
+
+This was in the original gap list and remains a real gap. It was not built this cycle because **no consumer has migrated that would use it yet**. Fireball and the other AoE spells still run on the legacy `get_room_all` / `get_room_enemies` helpers. When the first AoE spell migrates (Fireball is the canonical case because it is also the biggest grief vector), the helper shape will get designed with that concrete consumer in mind — probably as a separate `aoe.py` module in the targeting package or a set of `resolve_*_aoe` helpers.
+
+**Revisit when**: the first AoE spell migration starts. Design the helper with real rules in hand, not speculative ones.
+
+### `get_sides` rebuild
+
+[combat.combat_utils.get_sides(combatant) → (allies, enemies)](../src/game/combat/combat_utils.py) is called from 27+ places in the combat and spell code. It performs its own room walk filtering for living actors with combat handlers, then buckets them by side. Every room walk it does is a walk the targeting library could do equivalently via `walk_contents` + a `p_in_combat` predicate.
+
+A rebuild would not change the signature (callers still get `(allies, enemies)` tuples), so no consumer updates are needed — just the internal implementation. The win is **architectural unification**: combat and targeting would converge on the same iteration primitive, test surface, and filter vocabulary. There is NO performance win — the current `get_sides` is already microseconds-fast for room-sized candidate lists, and a rebuild would be the same cost.
+
+**Revisit when**: either a second combat consumer wants to reuse a `p_in_combat` predicate independently of `get_sides`, or the architectural unification becomes valuable enough to pay the rebuild-and-test cost. Not urgent.
+
+### Corpse looting
+
+Corpses are NOT containers in FCM — [Corpse](../src/game/typeclasses/world_objects/corpse.py) uses `FungibleInventoryMixin` and its own `can_loot()` access gate, not `ContainerMixin` / `is_open`. The `resolve_container` helper deliberately excludes them.
+
+When a `loot` command is migrated, it will need its own helper (possibly `resolve_lootable`) that understands the corpse-specific gate. The `walk_contents` primitive and `BASE_ITEM_PREDICATES` stack can both be reused — only a new predicate (`p_can_loot`?) and a new resolver are needed.
+
+**Revisit when**: the first corpse-looting command is touched.
+
+### `exclude_worn` as a predicate
+
+FCMCharacter.search currently handles `exclude_worn=True` as a kwarg filter inside the string-matching pass. When `cmd_override_drop._drop_object` migrates to `resolve_item_in_source`, this kwarg is forwarded through unchanged because `**kwargs` passes it straight to `caller.search`. That works but hides the semantic intent.
+
+A future cleanup could add a `p_not_worn` predicate to the library, letting drop commands compose `*BASE_ITEM_PREDICATES, p_not_worn` explicitly at the call site. This would make the filter stack visible in the command code rather than hidden in a search kwarg. Low priority — the existing mechanism works.
+
+**Revisit when**: a second consumer needs `exclude_worn` semantics OR the filter becomes complex enough that call-site visibility matters.
