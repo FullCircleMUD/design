@@ -106,18 +106,23 @@ src/game/utils/targeting/
 
 ### Predicate library
 
-Six predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines long, with its own unit test.
+Twelve predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines long, with its own unit test. Factory predicates return a closure bound to caller-specific state at creation time.
 
 | Predicate | Purpose |
 |---|---|
-| `p_not_caller` | `obj is not caller` — identity compare. Kept despite being redundant with `p_not_character` in every current use, because future character-filter consumers will want "actors in the room, but not me" without also excluding all characters. |
-| `p_not_character` | `not isinstance(obj, DefaultCharacter)` — excludes PCs, NPCs, mobs, and (as a side effect) the caller. |
+| `p_not_caller` | `obj is not caller` — identity compare. |
+| `p_not_actor` | `not isinstance(obj, DefaultCharacter)` — excludes all actors (PCs, NPCs, mobs, pets, mounts). Vocabulary: "actor" = any DefaultCharacter subclass. |
+| `p_is_character` | `isinstance(obj, FCMCharacter)` — matches player characters only, not NPCs/mobs/pets. |
 | `p_not_exit` | `not isinstance(obj, DefaultExit)` — excludes exits from item candidates. |
-| `p_visible_to` | Delegates to `obj.is_hidden_visible_to(caller)` when the `HiddenObjectMixin` method exists; returns True otherwise. Non-hidden objects always pass. |
-| `p_passes_lock(lock_type)` | **Factory** returning a predicate that wraps `obj.access(caller, lock_type)`. Used by `_get_all` today (via future migration); reusable for any Evennia access lock. |
-| `p_is_container` | `getattr(obj, "is_container", False)` — matches anything inheriting `ContainerMixin`. Corpses are explicitly NOT containers and are not matched. |
+| `p_visible_to` | Delegates to `obj.is_hidden_visible_to(caller)` when the `HiddenObjectMixin` method exists; returns True otherwise. |
+| `p_living` | `hp > 0` — excludes items (hp=None), corpses (hp=0), dead mobs. Defensive on type. |
+| `p_in_combat` | Has a `combat_handler` script attached. Combat-specific runtime-state filter. |
+| `p_is_container` | `getattr(obj, "is_container", False)` — matches `ContainerMixin`. Corpses are NOT containers. |
+| `p_passes_lock(lock_type)` | **Factory** returning a predicate wrapping `obj.access(caller, lock_type)`. |
+| `p_same_height(caller)` | **Factory** returning a predicate matching actors at the caller's `room_vertical_position`. Used by melee-range spells so the resolver only considers actors the caster can physically reach. |
+| `p_different_height(caller)` | **Factory** — inverse of `p_same_height`. For future `ranged_only` spells that can only target actors at a different height. |
 
-Each predicate has a docstring explaining what Evennia handles natively instead (e.g. `p_not_character` notes that positive typeclass filtering uses `caller.search(typeclass=...)`). [predicates.py](../src/game/utils/targeting/predicates.py) also opens with a detailed comment block listing the dozen-plus filters a developer might want but should implement with a native Evennia kwarg instead of adding a predicate.
+Each predicate has a docstring explaining what Evennia handles natively instead. [predicates.py](../src/game/utils/targeting/predicates.py) also opens with a detailed comment block listing the dozen-plus filters a developer should implement with a native Evennia kwarg instead of adding a predicate.
 
 ### The walk primitive
 
@@ -230,9 +235,72 @@ See **Future Considerations** at the end of this document for the specific defer
 
 Concrete call sites across the codebase today and their resolver mapping. This is the current reality, not an aspirational catalog — every row is either shipped or in flight.
 
-### Spell targeting (pre-library stopgap)
+### Priority-bucketed actor resolvers (shipped)
 
-Spell targeting still uses the `resolve_actor_target` stopgap in [world/spells/spell_utils.py](../src/game/world/spells/spell_utils.py), wired into `cmd_cast` and `cmd_zap`. This closed the bee-tree crash. It will be retired when `resolve_hostile_actor` / `resolve_allied_actor` / `resolve_any_actor` land as part of the spell migration cycle.
+The targeting library provides priority-bucketed resolvers for actor targeting. Each resolver uses the same classifier (buckets actors by relationship to the caller) with a parameterised priority order. The `order` kwarg defaults to hostile priority; friendly wrappers pass a reversed tuple.
+
+**In-combat** — classifier reads `combat_side` from `obj.scripts.get("combat_handler")[0]`:
+
+| Resolver | Order (first wins) | Consumers |
+|---|---|---|
+| `resolve_attack_target_in_combat` | enemy > bystander > ally > self | cmd_attack, cmd_bash, cmd_pummel, hostile/any_actor spells |
+| `resolve_friendly_target_in_combat` | self > ally > bystander > enemy | friendly spells |
+
+**Out-of-combat** — classifier reads group membership via `get_group_leader()`:
+
+| Resolver | Order (first wins) | Consumers |
+|---|---|---|
+| `resolve_attack_target_out_of_combat` | stranger > groupmate > self | same as above |
+| `resolve_friendly_target_out_of_combat` | self > groupmate > stranger | same as above |
+
+Both resolver pairs accept `extra_predicates=()` — additional predicates appended to the `walk_contents` predicate stack. Used by `resolve_spell_target` to add height filtering based on `spell_range` (see below).
+
+The `self` bucket is intentionally last-priority for hostile and first-priority for friendly. The `_is_self_keyword` helper intercepts `"me"` / `"self"` keywords at the top of each resolver to bypass an Evennia direct-match quirk that corrupts `searchdata` when the caller is not in the candidate list.
+
+### Spell targeting (consolidated — shipped)
+
+All spell target resolution routes through a single entry point:
+
+```python
+resolve_spell_target(caster, target_str, target_type, spell_range="ranged")
+```
+
+Called by `cmd_cast` and `cmd_zap`. Routes to the appropriate targeting primitive based on `target_type`. Returns the resolved target or `None` (error message already sent).
+
+**Target types — actors** (`actor_` prefix):
+
+| Type | Resolution | Self policy |
+|---|---|---|
+| `actor_hostile` | Attack-priority resolvers | Rejected |
+| `actor_any` | Same as hostile | Rejected |
+| `actor_friendly` | Friendly-priority resolvers | Allowed (empty target defaults to self) |
+
+**Target types — items** (`items_` prefix, composable naming):
+
+| Type | Resolution | Consumers |
+|---|---|---|
+| `items_inventory` | Inventory only | Create Water |
+| `items_all_room_then_inventory` | Room (objects + exits) first, inventory fallback | Knock |
+| `items_inventory_then_all_room` | Inventory first (exclude worn), room (objects + exits) fallback | Identify, Holy Insight |
+
+**Convention-defined, not yet implemented** (raise `NotImplementedError`): `items_all_room`, `items_gettable_room`, `items_fixed_room`, `items_gettable_room_then_inventory`, `items_inventory_then_gettable_room`.
+
+**Meta types**: `self` (returns caster), `none` (returns None — AoE spells handle their own multi-target collection internally).
+
+### Height integration via `spell_range` (shipped)
+
+The `spell_range` parameter on `resolve_spell_target` controls vertical-position filtering for actor target_types:
+
+| spell_range | Height filter | Current consumers |
+|---|---|---|
+| `"melee"` | `p_same_height` — same height only | cure_wounds, restore_vigour, vampiric_touch |
+| `"ranged"` | none — any height | everything else (default) |
+| `"ranged_only"` | `p_different_height` — different height only | no current consumer (built for future use) |
+| `"self"` | N/A — no target resolution | self-buff spells |
+
+Height filtering is enforced at resolution time via `extra_predicates` on the priority resolvers, not as a post-resolution check. This means a melee spell with two same-named targets at different heights picks the one at the caster's height instead of picking the wrong one and then failing with "out of melee range."
+
+Item target_types ignore `spell_range` — items don't have `room_vertical_position`.
 
 ### Item pickup (shipped — cmd_override_get)
 
@@ -410,21 +478,26 @@ obj = matches[0] if matches else None
 
 **Revisit when**: either the visibility question is answered (ideally via a game design decision, not a refactor), or a third exact-id call site appears and forces the pattern into existence.
 
-### AoE multi-target (primary + secondaries)
+### AoE multi-target (next cycle)
 
-Spells like Fireball and weapon moves like cleave need a primary target plus a list of secondary affected objects, shaped by FCM rules around height, combat sides, PvP, and friendly fire. Evennia's `search` is single-target and has no opinion on this.
+AoE spells currently use `target_type = "none"` and call `get_room_all()` / `get_room_enemies()` directly inside `_execute`. These legacy helpers predate the targeting library and have several known issues:
 
-This was in the original gap list and remains a real gap. It was not built this cycle because **no consumer has migrated that would use it yet**. Fireball and the other AoE spells still run on the legacy `get_room_all` / `get_room_enemies` helpers. When the first AoE spell migrates (Fireball is the canonical case because it is also the biggest grief vector), the helper shape will get designed with that concrete consumer in mind — probably as a separate `aoe.py` module in the targeting package or a set of `resolve_*_aoe` helpers.
+1. **"Enemy" definition broken out of combat** — `get_room_enemies` uses `not isinstance(obj, FCMCharacter)` as a proxy for hostility, which means pets, quest NPCs, and shopkeepers count as "enemies."
+2. **Height filtering inconsistently applied** — `get_room_all_at_height` / `get_room_enemies_at_height` exist but most AoE spells call the non-height-filtered versions despite operating at a specific height level.
+3. **Caster inclusion/exclusion is ad-hoc** — Fireball includes caster (truly unsafe), Soul Harvest inline-filters `!= caster`, Cone of Cold excludes via enemies-only. No shared flag or parameter.
+4. **Diminishing accuracy duplicated** — Cone of Cold and Flame Burst both implement the same 100/80/60/40/20 hit-chance table independently.
 
-**Revisit when**: the first AoE spell migration starts. Design the helper with real rules in hand, not speculative ones.
+The height predicates (`p_same_height`, `p_different_height`) and `extra_predicates` parameter shipped in this cycle provide the infrastructure needed for AoE height filtering. The next cycle will:
 
-### `get_sides` rebuild
+- Migrate `get_room_all` / `get_room_enemies` internals to use `walk_contents(caster, room, p_living, ...)` with appropriate predicates including height
+- Fix the out-of-combat enemy heuristic to use group membership (matching the priority resolvers) instead of typeclass proxy
+- Decide whether AoE targeting should route through `resolve_spell_target` with new `aoe_*` flags, or stay as `_execute`-level helpers that the targeting library provides. Current lean: stay as helpers since AoE per-target logic (saves, diminishing accuracy, damage) is tightly coupled to the target list.
 
-[combat.combat_utils.get_sides(combatant) → (allies, enemies)](../src/game/combat/combat_utils.py) is called from 27+ places in the combat and spell code. It performs its own room walk filtering for living actors with combat handlers, then buckets them by side. Every room walk it does is a walk the targeting library could do equivalently via `walk_contents` + a `p_in_combat` predicate.
+**Revisit when**: this cycle starts. The infrastructure is in place; the design question is about the helper shape and the `target_type` vs `_execute`-level decision.
 
-A rebuild would not change the signature (callers still get `(allies, enemies)` tuples), so no consumer updates are needed — just the internal implementation. The win is **architectural unification**: combat and targeting would converge on the same iteration primitive, test surface, and filter vocabulary. There is NO performance win — the current `get_sides` is already microseconds-fast for room-sized candidate lists, and a rebuild would be the same cost.
+### `get_sides` rebuild (shipped)
 
-**Revisit when**: either a second combat consumer wants to reuse a `p_in_combat` predicate independently of `get_sides`, or the architectural unification becomes valuable enough to pay the rebuild-and-test cost. Not urgent.
+`combat.combat_utils.get_sides(combatant)` was rebuilt to use `bucket_contents` with a classify closure that reads `combat_side` from each actor's combat handler. Single-loop implementation: R + C script-handler lookups (down from R + 3C in the original 3-loop version). Signature unchanged — 27+ consumers still get `(allies, enemies)` tuples with zero code changes.
 
 ### Corpse looting
 
