@@ -214,6 +214,22 @@ Same identification-only principle as `resolve_item_in_source`'s `get` lock deci
 
 6. **Predicate extraction is demand-driven.** Every predicate in the library was added when a concrete consumer needed it, not because it might be useful one day. The predicates.py docstring calls this out explicitly so future sessions maintain the discipline.
 
+7. **Base targeting vs filtered targeting — choose per command.** The targeting system provides two levels of resolution:
+
+   - **Base targeting** — "find the visible thing the player named." Uses broad target_types or primitives that don't filter by object type. Every command needs at least this. The player named something, targeting finds it, the command decides what to do with it.
+   - **Filtered targeting** — "find the visible thing the player named that's ALSO a container / gettable / an enemy / at this height." Uses narrow target_types or type-specific helpers like `resolve_container`. Commands use this when "not found" is the right answer for a type mismatch.
+
+   The choice is **per command, per code path**, based on what error messaging serves the player best:
+
+   - `cmd_put ... in backpack` → **filtered** (`resolve_container`). If backpack isn't a container, "not found" is fine — the player's mental model is wrong about what containers exist.
+   - `look in sword` → **broad** (find the item, then check `is_container`). The player can see the sword. "Not a container" is more helpful than "not here."
+   - `cmd_get sword` → **filtered** (`items_gettable_room`). If the sword is an exit or an actor, "not found" is correct.
+   - `cmd_attack shopkeeper` → **broad** (`actor_hostile` finds the shopkeeper regardless of combat rules). Command then checks room combat permission and says "combat not allowed here."
+
+   **The principle**: targeting should find what the player NAMED. Filters are useful extras that narrow the candidate pool when the command doesn't need to distinguish "wrong type" from "not here." When the command DOES need to distinguish — because a type-specific error message is better UX — use broad targeting and check the type post-resolution at the command layer.
+
+   This is the same principle as rule #1 (identification-only, not action-gating) applied to type filtering: type-specific predicates like `p_is_container` are tools in the toolbox, not mandatory for every lookup. The command picks the right level of filtering based on what serves the player.
+
 ## Targeting vs Filtering
 
 An important boundary the library intentionally does not cross:
