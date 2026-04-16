@@ -257,50 +257,86 @@ Both resolver pairs accept `extra_predicates=()` — additional predicates appen
 
 The `self` bucket is intentionally last-priority for hostile and first-priority for friendly. The `_is_self_keyword` helper intercepts `"me"` / `"self"` keywords at the top of each resolver to bypass an Evennia direct-match quirk that corrupts `searchdata` when the caller is not in the candidate list.
 
-### Spell targeting (consolidated — shipped)
+### Universal target resolver — `resolve_target` (shipped)
 
-All spell target resolution routes through a single entry point:
+All targeting in the game routes through a single universal entry point:
 
 ```python
-resolve_spell_target(caster, target_str, target_type, spell_range="ranged")
+resolve_target(caller, target_str, target_type, range="ranged", aoe=None)
 ```
 
-Called by `cmd_cast` and `cmd_zap`. Routes to the appropriate targeting primitive based on `target_type`. Returns the resolved target or `None` (error message already sent).
+Lives in `utils/targeting/helpers.py`. Returns `(target, secondaries)` — a tuple of the primary target and a list of AoE secondary targets. For non-AoE callers, `secondaries` is always `[]`. On failure, returns `(None, [])` with an error message already sent to the caller.
+
+**Consumers**: `cmd_cast`, `cmd_zap` (all spells), `cmd_attack` (combat POC), `cmd_get` (item pickup POC). Any future consumer — weapon abilities, mob AI, non-spell commands — can use the same function with the same flags.
 
 **Target types — actors** (`actor_` prefix):
 
-| Type | Resolution | Self policy |
-|---|---|---|
-| `actor_hostile` | Attack-priority resolvers | Rejected |
-| `actor_any` | Same as hostile | Rejected |
-| `actor_friendly` | Friendly-priority resolvers | Allowed (empty target defaults to self) |
+| Type | Resolution | Self policy | Consumers |
+|---|---|---|---|
+| `actor_hostile` | Attack-priority resolvers (enemy > bystander > ally > self) | Returned — command decides | cmd_attack, cmd_bash, cmd_pummel, hostile/any_actor spells |
+| `actor_any` | Same as hostile | Returned — command decides | augur, divine_scrutiny |
+| `actor_friendly` | Friendly-priority resolvers (self > ally > bystander > enemy) | Allowed (empty target defaults to self) | friendly spells |
+
+Self-rejection is NOT done in `resolve_target` — the caller is returned via the self-bucket fallback so each command can emit its own context-specific error ("You can't attack yourself" vs "You can't target yourself with that spell").
 
 **Target types — items** (`items_` prefix, composable naming):
 
 | Type | Resolution | Consumers |
 |---|---|---|
 | `items_inventory` | Inventory only | Create Water |
-| `items_all_room_then_inventory` | Room (objects + exits) first, inventory fallback | Knock |
+| `items_gettable_room` | Room items (BASE_ITEM_PREDICATES — excludes actors, exits, hidden) with height filtering | cmd_get |
+| `items_all_room_then_inventory` | Room (all visible objects + exits) first, inventory fallback | Knock |
 | `items_inventory_then_all_room` | Inventory first (exclude worn), room (objects + exits) fallback | Identify, Holy Insight |
 
-**Convention-defined, not yet implemented** (raise `NotImplementedError`): `items_all_room`, `items_gettable_room`, `items_fixed_room`, `items_gettable_room_then_inventory`, `items_inventory_then_gettable_room`.
+**Convention-defined, not yet implemented** (raise `NotImplementedError`): `items_all_room`, `items_fixed_room`, `items_gettable_room_then_inventory`, `items_inventory_then_gettable_room`.
 
-**Meta types**: `self` (returns caster), `none` (returns None — AoE spells handle their own multi-target collection internally).
+**Meta types**: `self` (returns caller), `none` (returns None — used by targetless spells like teleport, summons).
 
-### Height integration via `spell_range` (shipped)
+### Height integration via `range` parameter (shipped)
 
-The `spell_range` parameter on `resolve_spell_target` controls vertical-position filtering for actor target_types:
+The `range` parameter on `resolve_target` controls vertical-position filtering for both actor AND item target_types:
 
-| spell_range | Height filter | Current consumers |
+| range | Height filter | Current consumers |
 |---|---|---|
-| `"melee"` | `p_same_height` — same height only | cure_wounds, restore_vigour, vampiric_touch |
-| `"ranged"` | none — any height | everything else (default) |
+| `"melee"` | `p_same_height` — same height only | melee spells (cure_wounds, vampiric_touch), cmd_get (items), cmd_attack (melee weapons) |
+| `"ranged"` | none — any height | ranged spells (default), cmd_attack (ranged weapons) |
 | `"ranged_only"` | `p_different_height` — different height only | no current consumer (built for future use) |
 | `"self"` | N/A — no target resolution | self-buff spells |
 
-Height filtering is enforced at resolution time via `extra_predicates` on the priority resolvers, not as a post-resolution check. This means a melee spell with two same-named targets at different heights picks the one at the caster's height instead of picking the wrong one and then failing with "out of melee range."
+Height filtering is enforced at resolution time via `extra_predicates` on the priority resolvers AND on item resolution branches. A melee spell or melee weapon attack with two same-named targets at different heights picks the one at the caller's height. A player on the ground can't pick up items at flying height.
 
-Item target_types ignore `spell_range` — items don't have `room_vertical_position`.
+For combat commands, weapon range is mapped at the call site: `weapon_type == "missile"` → `"ranged"`, everything else → `"melee"`. TODO: when weapons gain a universal `range` attribute (matching spells), this mapping goes away.
+
+### AoE secondaries system (shipped)
+
+The `aoe` parameter on `resolve_target` drives AoE secondary target collection from the primary target's height:
+
+| aoe | Secondaries | Consumers |
+|---|---|---|
+| `None` | `[]` — no cascade (default) | all single-target spells, combat commands, item commands |
+| `"unsafe"` | Everyone at target's height, including caster | Fireball |
+| `"unsafe_all_heights"` | Everyone in room regardless of height, including caster | Call Lightning |
+| `"unsafe_self"` | Everyone at target's height except caster | Soul Harvest |
+| `"safe"` | Enemies only at target's height (get_sides in combat, group membership out of combat) | Cone of Cold, Flame Burst |
+| `"allies"` | Allies only at target's height, caster included | future Mass Heal |
+
+The primary target is always excluded from secondaries (they're already the primary). AoE spells receive `(target, secondaries)` and iterate the list with spell-specific logic (saves, diminishing accuracy, damage application, condition effects).
+
+The enemy detection for "safe" AoE out of combat uses group membership (same as the priority resolvers) — NOT the broken `not isinstance(FCMCharacter)` typeclass proxy. Mobs casting safe AoE spells against player characters use the exact same targeting path.
+
+### Spell base class attributes (shipped)
+
+Every spell declares four targeting-relevant attributes:
+
+```python
+class Spell:
+    target_type = "actor_hostile"   # which resolve_target branch
+    range = "ranged"                # height filtering
+    aoe = None                      # AoE cascade type
+    medium = "air"                  # environment restriction (not yet enforced)
+```
+
+`medium` is declared but not enforced — defaults to `"air"` so nothing accidentally works underwater before the underwater system is designed. Cast-time validation will live in `base_spell.cast()`, not in `resolve_target` (medium gates whether the spell fires at all, not who the target is).
 
 ### Item pickup (shipped — cmd_override_get)
 
@@ -368,12 +404,28 @@ to_give = resolve_item_in_source(
 
 `resolve_character_in_room` is the first consumer of the new `p_is_character` predicate — the library's entry-point for character-targeting resolvers. Scope-suffixed name (`_in_room`) distinguishes it from future scope variants (`_in_game`, `_in_zone`, `_in_district`) which will use different execution models.
 
-### Other commands (not yet migrated)
+### Commands migrated to `resolve_target`
 
-- **`cmd_hold`, `cmd_wear`, `cmd_remove`** — inventory keyword searches with typeclass or worn-state filters. Pending.
-- **Spell `cmd_cast`, `cmd_zap`** — currently use `resolve_actor_target` stopgap. Will migrate to `resolve_hostile_actor` etc. once those land.
-- **Combat `cmd_attack`, class skills** — mostly use `caller.search()` or `get_sides()` directly. Pending.
-- **Exits and doors** — `cmd_unlock`, `cmd_open`, `cmd_close`, `cmd_smash` have their own path via `utils/find_exit_target.py`. That helper is a migration candidate for a future `resolve_exit` / `resolve_unlockable_exit`.
+| Command | target_type | range | aoe | Notes |
+|---|---|---|---|---|
+| cmd_cast (all spells) | per spell | per spell | per spell | Full migration — every spell routes through resolve_target |
+| cmd_zap (wand spells) | per spell | per spell | per spell | Same path as cmd_cast |
+| cmd_attack | `actor_hostile` | weapon-dependent | `None` | POC — weapon range mapped at call site |
+| cmd_bash | `actor_hostile` (via direct resolvers) | N/A | N/A | Uses priority resolvers directly, pending resolve_target migration |
+| cmd_pummel | `actor_hostile` (via direct resolvers) | N/A | N/A | Same as cmd_bash |
+| cmd_get | `items_gettable_room` | `melee` | `None` | POC — height filtering on item pickup |
+
+### Commands using targeting primitives directly (not yet via resolve_target)
+
+- **cmd_bash, cmd_pummel** — call `resolve_attack_target_in/out_of_combat` directly. Will migrate to `resolve_target` when weapon range attributes land on weapon classes.
+- **cmd_hold, cmd_wear, cmd_remove** — call `resolve_item_in_source` directly with `exclude_worn` / `only_worn` kwargs.
+- **cmd_drop** — calls `resolve_item_in_source` directly.
+- **cmd_give** — calls `resolve_character_in_room` + `resolve_item_in_source` directly.
+- **cmd_put** — calls `resolve_container` + `resolve_item_in_source` directly.
+
+### Commands on legacy paths (not yet using targeting library)
+
+- **Exits and doors** — `cmd_unlock`, `cmd_open`, `cmd_close`, `cmd_smash`, `cmd_picklock`, `cmd_disarm_trap` use `utils/find_exit_target.py`. Migration candidate for a future exit-resolution primitive with directional parsing.
 
 ## Migration Progress
 
@@ -423,11 +475,11 @@ Every command migration runs the command's existing test suite as the regression
 
 ## Relationship to Other Systems
 
-- **[SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md)** — spell target types will eventually map 1:1 onto named resolvers (`resolve_hostile_actor`, `resolve_allied_actor`, `resolve_any_actor`). Currently served by the `resolve_actor_target` stopgap.
-- **[COMBAT_SYSTEM.md](COMBAT_SYSTEM.md)** — `combat.combat_utils.get_sides()` is the authoritative source for "who is on whose side" today. Eventual rebuild on top of `walk_contents` is listed in Future Considerations.
-- **[EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md)** — `utils/find_exit_target.py` is a migration candidate for a future `resolve_exit` / `resolve_unlockable_exit`.
+- **[SPELL_SKILL_DESIGN.md](SPELL_SKILL_DESIGN.md)** — all spell target types now route through `resolve_target` with `actor_*` / `items_*` flags. The old `resolve_actor_target` stopgap is retired.
+- **[COMBAT_SYSTEM.md](COMBAT_SYSTEM.md)** — `combat.combat_utils.get_sides()` was rebuilt on `bucket_contents` and is used by `_resolve_aoe_secondaries` for in-combat safe/allies AoE. `cmd_attack` routes through `resolve_target`.
+- **[EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md)** — `utils/find_exit_target.py` is still used by the `items_all_room_then_inventory` branch (Knock) via `_resolve_world_item`. Migration candidate for a future exit-resolution primitive.
 - **[INVENTORY_EQUIPMENT.md](INVENTORY_EQUIPMENT.md)** — wearslot-aware resolvers (`resolve_held_item`, `resolve_worn_item`) are deferred until first concrete consumer.
-- **[VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md)** — height predicates will enforce the vertical-position rules defined there when AoE multi-target lands.
+- **[VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md)** — height predicates (`p_same_height`, `p_different_height`, `p_same_height_value`) enforce the vertical-position rules. Height filtering is structural for both actor targeting (spells + combat) and item targeting (cmd_get).
 
 ---
 
@@ -478,22 +530,21 @@ obj = matches[0] if matches else None
 
 **Revisit when**: either the visibility question is answered (ideally via a game design decision, not a refactor), or a third exact-id call site appears and forces the pattern into existence.
 
-### AoE multi-target (next cycle)
+### AoE multi-target (shipped)
 
-AoE spells currently use `target_type = "none"` and call `get_room_all()` / `get_room_enemies()` directly inside `_execute`. These legacy helpers predate the targeting library and have several known issues:
+All five implemented AoE spells now route through `resolve_target` with a primary target + `_resolve_aoe_secondaries` for the cascade:
 
-1. **"Enemy" definition broken out of combat** — `get_room_enemies` uses `not isinstance(obj, FCMCharacter)` as a proxy for hostility, which means pets, quest NPCs, and shopkeepers count as "enemies."
-2. **Height filtering inconsistently applied** — `get_room_all_at_height` / `get_room_enemies_at_height` exist but most AoE spells call the non-height-filtered versions despite operating at a specific height level.
-3. **Caster inclusion/exclusion is ad-hoc** — Fireball includes caster (truly unsafe), Soul Harvest inline-filters `!= caster`, Cone of Cold excludes via enemies-only. No shared flag or parameter.
-4. **Diminishing accuracy duplicated** — Cone of Cold and Flame Burst both implement the same 100/80/60/40/20 hit-chance table independently.
+| Spell | aoe type | Behavior |
+|---|---|---|
+| Fireball | `"unsafe"` | Everyone at target's height, caster included. DEX save for half. |
+| Call Lightning | `"unsafe_all_heights"` | Everyone in room regardless of height. DEX save for half. |
+| Soul Harvest | `"unsafe_self"` | Everyone at target's height except caster. CON save for no damage. Undead filtered in _execute. Caster heals for total damage. |
+| Cone of Cold | `"safe"` | Enemies only at target's height. Primary guaranteed hit, secondaries have diminishing accuracy (80/60/40/20%). SLOWED condition. |
+| Flame Burst | `"safe"` | Same pattern as Cone of Cold but fire damage, no condition. |
 
-The height predicates (`p_same_height`, `p_different_height`) and `extra_predicates` parameter shipped in this cycle provide the infrastructure needed for AoE height filtering. The next cycle will:
+The legacy `get_room_all` / `get_room_enemies` helpers are no longer called by any migrated spell. They remain in `spell_utils.py` referenced by stub comments (Mass Confusion, Dimensional Lock, Antimagic Field) and can be deleted when those stubs are implemented against the AoE framework.
 
-- Migrate `get_room_all` / `get_room_enemies` internals to use `walk_contents(caster, room, p_living, ...)` with appropriate predicates including height
-- Fix the out-of-combat enemy heuristic to use group membership (matching the priority resolvers) instead of typeclass proxy
-- Decide whether AoE targeting should route through `resolve_spell_target` with new `aoe_*` flags, or stay as `_execute`-level helpers that the targeting library provides. Current lean: stay as helpers since AoE per-target logic (saves, diminishing accuracy, damage) is tightly coupled to the target list.
-
-**Revisit when**: this cycle starts. The infrastructure is in place; the design question is about the helper shape and the `target_type` vs `_execute`-level decision.
+The broken out-of-combat enemy heuristic (`not isinstance(FCMCharacter)`) is fixed for AoE: `_resolve_aoe_secondaries` uses group membership for safe AoE out of combat, matching the priority resolvers. Mobs casting safe AoE against player characters use the exact same code path.
 
 ### `get_sides` rebuild (shipped)
 
