@@ -91,7 +91,7 @@ With the native catalog laid out, the honest gap list is small:
 
 2. **Typed intent at call sites** — Evennia's `search()` always returns `Object | None | list[Object]`. From the call site you cannot tell whether the caller wanted a hostile actor, a held item, a lockable door, or an NPC. Type errors surface as runtime `AttributeError` downstream — which is exactly how the bee tree crash manifested. Named resolver functions close this gap at the architecture level.
 
-3. **AoE multi-target shape (deferred)** — spells like Fireball and weapon moves like cleave need "a primary target plus a list of secondary affected objects" shaped by FCM rules (height, combat sides, PvP, friendly fire). Evennia's `search` is fundamentally single-target. This was in the original gap list; it is still a gap, but this cycle deferred it until the first AoE consumer justifies the shape. See Future Considerations.
+3. **AoE multi-target shape (shipped)** — `resolve_target` returns `(target, secondaries)` where the secondaries list is built by `_resolve_aoe_secondaries` from the primary target's height, filtered by `aoe` type (unsafe/safe/allies/etc). All five AoE spells migrated. See the AoE section in the Usage Catalog.
 
 ## The Library We Built
 
