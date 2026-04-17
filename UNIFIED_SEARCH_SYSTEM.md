@@ -106,7 +106,7 @@ src/game/utils/targeting/
 
 ### Predicate library
 
-Twelve predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines long, with its own unit test. Factory predicates return a closure bound to caller-specific state at creation time.
+Fourteen predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines long, with its own unit test. Factory predicates return a closure bound to caller-specific state at creation time.
 
 | Predicate | Purpose |
 |---|---|
@@ -114,7 +114,9 @@ Twelve predicates. Each is a pure `(obj, caller) -> bool` function, 3–8 lines 
 | `p_not_actor` | `not isinstance(obj, DefaultCharacter)` — excludes all actors (PCs, NPCs, mobs, pets, mounts). Vocabulary: "actor" = any DefaultCharacter subclass. |
 | `p_is_character` | `isinstance(obj, FCMCharacter)` — matches player characters only, not NPCs/mobs/pets. |
 | `p_not_exit` | `not isinstance(obj, DefaultExit)` — excludes exits from item candidates. |
-| `p_visible_to` | Delegates to `obj.is_hidden_visible_to(caller)` when the `HiddenObjectMixin` method exists; returns True otherwise. |
+| `p_visible_to` | **Stealth gate.** Delegates to `obj.is_hidden_visible_to(caller)` when the `HiddenObjectMixin` method exists; returns True otherwise. Used by targeting resolvers where height is handled separately via range predicates. |
+| `p_height_visible_to` | **Spatial gate.** Delegates to `obj.is_height_visible_to(caller)` when the `HeightAwareMixin` method exists; returns True otherwise. Objects with `visible_min_height` / `visible_max_height` are only visible to observers at the right vertical position. Used by room display and scan, which have their own detailed stealth logic. |
+| `p_can_see` | **Composite gate.** `p_visible_to AND p_height_visible_to`. Use for display/perception paths (look, scan) where "can the player perceive this?" is the whole question. Extensible — future visibility gates (ethereal, fog-of-war) get added here and propagate to all consumers. |
 | `p_living` | `hp > 0` — excludes items (hp=None), corpses (hp=0), dead mobs. Defensive on type. |
 | `p_in_combat` | Has a `combat_handler` script attached. Combat-specific runtime-state filter. |
 | `p_is_container` | `getattr(obj, "is_container", False)` — matches `ContainerMixin`. Corpses are NOT containers. |
@@ -229,6 +231,14 @@ Same identification-only principle as `resolve_item_in_source`'s `get` lock deci
    **The principle**: targeting should find what the player NAMED. Filters are useful extras that narrow the candidate pool when the command doesn't need to distinguish "wrong type" from "not here." When the command DOES need to distinguish — because a type-specific error message is better UX — use broad targeting and check the type post-resolution at the command layer.
 
    This is the same principle as rule #1 (identification-only, not action-gating) applied to type filtering: type-specific predicates like `p_is_container` are tools in the toolbox, not mandatory for every lookup. The command picks the right level of filtering based on what serves the player.
+
+8. **Predicates are vocabulary, not just filters.** Predicates define *what a concept means* — "visible," "at this height," "is a container." Where a predicate gets evaluated is a separate decision. The same predicate function serves three roles:
+
+   - **Automatic filter** inside `walk_contents` / `bucket_contents` — the resolver never sees objects that fail the predicate. Used when the command doesn't need to distinguish failure reasons.
+   - **Explicit check** in a command's `if` branch — the command calls the predicate directly on an already-resolved object to make a bespoke decision (e.g. `p_is_container(obj, caller)` to emit "not a container" vs "not here").
+   - **Display filter** in room appearance / look / scan — the predicate post-filters a contents list for perception purposes.
+
+   The key insight: even when a command uses broad (unfiltered) targeting, the predicates are still useful — as the consistent, single-source-of-truth way to ask questions about the resolved object. A command that needs to know "can this player see that mob?" calls `p_can_see(obj, caller)` whether or not the targeting resolver already filtered for it. This keeps the concept definition in one place and makes the system extensible — adding a new visibility gate to `p_can_see` propagates to every consumer, whether it's a resolver filter or an inline command check.
 
 ## Targeting vs Filtering
 
