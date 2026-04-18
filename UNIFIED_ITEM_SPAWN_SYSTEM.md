@@ -198,7 +198,7 @@ budget = max(0, eligible_players - known_by - unlearned_copies)
 | Component | Source | Definition |
 |-----------|--------|-----------|
 | `eligible_players` | Hourly `SaturationSnapshot` | Players with the requisite skill/school mastery to learn this scroll/recipe. Mastery-filtered — a GM evocation scroll only counts GM evokers |
-| `known_by` | Hourly `SaturationSnapshot` | Players who have already learned this spell/recipe (permanent knowledge) |
+| `known_by` | Hourly `SaturationSnapshot` | Players who have already learned this spell/recipe **and** currently have the mastery to use it (mastery-filtered — a remorted warrior with fireball in their spellbook is not counted) |
 | `unlearned_copies` | Hourly `SaturationSnapshot` | Scroll/recipe NFTs in CHARACTER or ACCOUNT locations (in player hands but not yet consumed) |
 
 **Per-item budgets, not per-category.** Each individual scroll type (Magic Missile, Fireball, etc.) gets its own budget from the calculator. The distributor places each type independently onto tagged mobs.
@@ -239,7 +239,7 @@ The saturation service runs **hourly** (60 seconds after the telemetry snapshot)
 The `NFTSaturationScript` calculates for every tracked scroll and recipe:
 
 1. Determine `eligible_players` — characters with the requisite skill/school mastery
-2. Count `known_by` from `db.spellbook` / `db.recipe_book` across active characters
+2. Count `known_by` from `db.spellbook` / `db.recipe_book` across active characters, **filtered by mastery** — only characters who currently have the requisite school/skill mastery are counted. This prevents remorted characters (e.g. a mage who remorted to warrior but retains spells in their spellbook) from inflating `known_by` and suppressing spawn budgets for players who genuinely need scrolls. When a remorted character returns to a caster class and regains mastery, they re-enter both `eligible_players` and `known_by` simultaneously — net zero impact on the gap
 3. Count `unlearned_copies` from `NFTGameState` in CHARACTER + ACCOUNT locations
 4. Write `SaturationSnapshot` row with gap components and saturation ratio
 
