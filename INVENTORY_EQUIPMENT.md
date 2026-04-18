@@ -420,7 +420,7 @@ The mixin provides:
 - `_handle_creation()`, `_execute_transition()` — transition dispatch
 - `_cascade_container_transition()` — container content cascade
 - `assign_to_blank_token()`, `spawn_into()` — factory methods
-- `_get_wallet()`, `_get_character_key()`, `_log_error()` — utility helpers
+- `_get_owner_wallet()`, `_get_character_key()`, `_log_error()` — utility helpers
 
 `BaseNFTItem` composes this mixin with item-specific concerns (HeightAwareMixin, HiddenObjectMixin, ItemRestrictionMixin, DefaultObject).
 
@@ -438,7 +438,7 @@ Overrides: `at_post_move()`, `at_object_delete()`, `_handle_creation()`, `_execu
 
 Adds: `owner_key`, `transfer_ownership()`, `spawn_pet()`, `_get_owner_character()`, `_get_owner_wallet()`, `_classify_location()`, `at_pre_move` guard (blocks character.contents), `at_pre_get` guard.
 
-Inherits unchanged: `token_id`, `chain_id`, `contract_address`, `_get_wallet()`, `_get_character_key()`, `assign_to_blank_token()`, `_load_from_mirror()`, `get_nft_mirror()`, `_log_error()`.
+Inherits unchanged: `token_id`, `chain_id`, `contract_address`, `_get_owner_wallet()`, `_get_character_key()`, `assign_to_blank_token()`, `_load_from_mirror()`, `get_nft_mirror()`, `_log_error()`.
 
 ```
 NFTPetMirrorMixin(NFTMirrorMixin) (typeclasses/mixins/nft_pet_mirror.py)
