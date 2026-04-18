@@ -120,7 +120,13 @@ Wallet setup guide: install Xaman, create wallet, link to game account. No finan
 | Templates | `docs.html`, `docs_gameplay.html`, `docs_blockchain.html`, `docs_client_api.html` |
 | Status | Built, compliant |
 
-Blockchain mechanics (XRPL ownership, wallets, import/export, AMM pricing, trustlines). No financial product language.
+Docs hub with sub-pages:
+
+- **Gameplay** (`docs_gameplay.html`) — getting started, races, classes, ability scores, levels, combat, weapons, armour, magic, skills, crafting, resources, economy, hunger/thirst/survival, death/respawn, dungeons, quests, groups.
+- **Blockchain** (`docs_blockchain.html`) — XRPL ownership, wallets, import/export, AMM pricing, trustlines.
+- **Client API** (`docs_client_api.html`) — WebSocket protocol, message format, auth flows.
+
+No financial product language.
 
 ### Markets
 
@@ -141,6 +147,16 @@ Live AMM price dashboard from ResourceSnapshot data.
 
 Home, Vision, About, Costs, Markets, Docs, Discord. No geo-variant conditional links.
 
+## Google Analytics
+
+Environment-gated via the `GOOGLE_ANALYTICS_ID` environment variable:
+
+- **Context processor**: `web/middleware/analytics.py` injects `google_analytics_id` into all templates.
+- **Website**: `base.html` conditionally renders the gtag.js snippet inside `{% if google_analytics_id %}`.
+- **Webclient**: Local override of Evennia's `webclient/base.html` with the same conditional snippet.
+- **Localhost / dev**: Variable unset → no GA script rendered → zero tracking.
+- **Staging / Production**: Set `GOOGLE_ANALYTICS_ID` to different GA Measurement IDs (e.g. `G-XXXXXXX` for staging, `G-YYYYYYY` for production) to track environments separately.
+
 ## Pages Not Built (No Longer Required)
 
 The following pages were planned under the previous compliance model and are no longer needed:
@@ -154,6 +170,7 @@ The following pages were planned under the previous compliance model and are no 
 | Purpose | Path |
 |---|---|
 | Geo middleware | `web/middleware/geo.py` |
+| Analytics context processor | `web/middleware/analytics.py` |
 | URL routing | `web/website/urls.py` |
 | Views | `web/website/views/` |
 | Base template | `web/templates/website/base.html` |
@@ -172,3 +189,4 @@ The following pages were planned under the previous compliance model and are no 
 | Docs (blockchain) | `web/templates/website/docs_blockchain.html` |
 | Docs (client API) | `web/templates/website/docs_client_api.html` |
 | Markets | `web/templates/website/markets.html` |
+| Webclient base (local override) | `web/templates/webclient/base.html` |
