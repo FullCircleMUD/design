@@ -286,12 +286,12 @@ self.wear(weapon)
 
 ### Animal vs Humanoid Mobs
 
-| Mob Type | Damage Source | Equipment |
-|---|---|---|
-| **Animal** (wolf, rabbit, crow) | `damage_dice` attribute, raw dice roll | None — no wearslots |
-| **Humanoid** (kobold, gnoll, bandit) | Equipped `MobWeapon` via `get_weapon()` | Full wearslots, weapon mastery hooks |
+| Mob Type | Damage Source | Hit Messages | Equipment |
+|---|---|---|---|
+| **Animal** (wolf, rat, crow) | `damage_dice` attribute, raw dice roll | `damage_type` + `get_descriptor()` — severity-scaled verbs | None — no wearslots |
+| **Humanoid** (kobold, gnoll, bandit) | Equipped `MobWeapon` via `get_weapon()` | Weapon's `damage_type` + `get_descriptor()` | Full wearslots, weapon mastery hooks |
 
-Animal mobs continue to use the existing `damage_dice` string. Humanoid mobs with `HumanoidWearslotsMixin` equip `MobWeapon` instances and gain the full weapon combat pipeline — mastery hooks, parries, cleave, crit modifiers, and everything else defined by the weapon identity mixin.
+Both animal and humanoid mobs use the same damage descriptor system for hit messages — `get_descriptor(damage_type, damage_dealt, target_hp_max)` selects a verb whose capitalization conveys severity (lowercase → Title Case → ALL CAPS). Animal mobs set `damage_type` on the class (e.g. wolf → PIERCING, jagular → SLASHING); humanoid mobs inherit it from their equipped weapon. Miss messages use the mob's `attack_message` attribute instead (e.g. "bites at you but misses").
 
 ---
 
@@ -414,7 +414,8 @@ class CombatMob(CombatMixin, StateMachineAIMixin, FungibleInventoryMixin, Follow
 
 Adds mob-specific attributes on top of CombatMixin's combat capability and StateMachineAIMixin's AI:
 - `damage_dice` — innate damage for non-humanoid mobs (e.g. `"1d4"`, `"2d6"`)
-- `attack_message` — flavor text (e.g. "bites", "claws")
+- `damage_type` — `DamageType` enum (default `BLUDGEONING`). Used by `get_descriptor()` to select severity-scaled hit verbs and by `calculate_damage()` for resistance checks.
+- `attack_message` — used for miss messages only (e.g. "bites at you but misses"). Hit messages use the damage descriptor system.
 - `initiate_attack(target)` — inherited from CombatMixin (`mob_attack` kept as compat alias)
 - `_roll_damage()`, `_create_corpse()`
 - Loot: `loot_resources`, `loot_gold_max`, `spawn_scrolls_max`, `spawn_recipes_max`
@@ -891,7 +892,7 @@ FightableCityGuard(AggressiveMixin, CombatMixin, HumanoidWearslotsMixin, LLMRole
 
 ```
 TavernDrunk(CombatMixin, LLMRoleplayNPC)
-  Level: 1  |  HP: 15  |  damage_dice: "1d3"  |  attack_message: "throws a sloppy punch at"
+  Level: 1  |  HP: 15  |  damage_dice: "1d3"  |  damage_type: BLUDGEONING
 
   Behavior:
   - LLM drives bar conversation — mostly harmless
@@ -913,7 +914,7 @@ TavernDrunk(CombatMixin, LLMRoleplayNPC)
 ### Crow — Flying Pack Predator
 ```
 Crow(FlyingMixin, PackCourageMixin, AggressiveMob)
-  Level: 1  |  HP: 4  |  damage_dice: "1d2"  |  attack_message: "pecks at"
+  Level: 1  |  HP: 4  |  damage_dice: "1d2"  |  damage_type: PIERCING
   size: "tiny"  |  AC: 13  |  STR: 3  |  DEX: 15  |  CON: 4
   preferred_height: 1  |  min_allies_to_attack: 2 (needs 3 total)
   loot: none  |  respawn: 30s  |  ai_tick: 5s
@@ -925,7 +926,7 @@ Crow(FlyingMixin, PackCourageMixin, AggressiveMob)
 ### Shark — Aggressive Swimming Animal
 ```
 Shark(AggressiveMixin, SwimmingMixin, StateMachineAIMixin, CombatMob)
-  Level: 4  |  HP: 35  |  damage_dice: "2d6"  |  attack_message: "bites"
+  Level: 4  |  HP: 35  |  damage_dice: "2d6"  |  damage_type: PIERCING
   preferred_depth: -2
   Behavior: patrols at depth -2, surfaces to attack swimmers, can't pursue flyers
 ```
@@ -941,8 +942,8 @@ GnollArcher(AggressiveMixin, HumanoidWearslotsMixin, StateMachineAIMixin, Combat
 ### Dragon — Aggressive Flying Boss with Innate Ranged
 ```
 Dragon(AggressiveMixin, FlyingMixin, InnateRangedMixin, AdaptiveLLMAIMixin, CombatMob)
-  Level: 10  |  HP: 200  |  damage_dice: "3d8"
-  attack_message: "breathes fire at"  |  preferred_height: 3
+  Level: 10  |  HP: 200  |  damage_dice: "3d8"  |  damage_type: FIRE
+  preferred_height: 3
   InnateRangedMixin: mob_weapon_type = "missile" — attacks from the air without descending
   Behavior: LLM-driven, remembers past encounters, adapts tactics
 ```

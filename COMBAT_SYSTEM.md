@@ -79,7 +79,8 @@ BEFORE DAMAGE CALCULATION (new):
     Both weapons lose 1 durability on parry.
 
 ON HIT:
-5.  Roll damage dice (weapon.get_damage_roll() or innate mob damage_dice)
+5.  Roll damage dice (weapon.get_damage_roll() or innate mob damage_dice).
+    Resolve damage_type from weapon or attacker's damage_type attribute.
 6.  weapon.at_hit(attacker, target, damage, dmg_type)    → modify damage, trigger effects
 7.  weapon.at_crit(attacker, target, damage, dmg_type)   → crit bonus (if natural ≥ crit_threshold)
 8.  defender_weapon.at_wielder_receive_crit(...)          → defender crit reaction (CRIT_IMMUNE)

@@ -231,7 +231,7 @@ Every pet with HP can fight. When the owner enters combat:
 ### Combat Companions (CombatCompanionMixin)
 
 Pets with this mixin have enhanced combat abilities:
-- Custom `damage_dice`, `attack_message`, `attacks_per_round`
+- Custom `damage_dice`, `damage_type`, `attack_message` (miss flavour), `attacks_per_round`
 - May have weapon mastery (via `WeaponMasteryMixin`)
 - Can use mob combat abilities (dodge, bash, etc.)
 - AI state machine for combat decisions (via `StateMachineAIMixin`)
