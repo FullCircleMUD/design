@@ -675,8 +675,8 @@ combat/
 
 commands/
 ├── all_char_cmds/
-│   ├── cmd_attack.py     ← CmdAttack (attack/kill/att/k)
-│   ├── cmd_flee.py        ← CmdFlee (flee/run/escape)
+│   ├── cmd_attack.py     ← CmdAttack (attack/kill)
+│   ├── cmd_flee.py        ← CmdFlee (flee)
 │   └── cmd_assist.py      ← CmdAssist (assist)
 ├── general_skill_cmds/
 │   ├── cmdset_general_skills.py  ← CmdDodge

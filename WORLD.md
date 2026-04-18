@@ -130,7 +130,7 @@ This is the creative bible for FullCircleMUD. Everything that shapes the *world 
 |---|---|---|---|
 | Quests | Registry | 4 guild initiations + 3 templates (collect, visit, multi-step) | Add quest .py + `@register_quest`. Step-based, any trigger conditions. |
 | Sea routes | Registry | 1 test route (town dock ↔ beach dock) | Place RoomGateway docks, define routes with food_cost + boat_level. 5 ship tiers already exist. |
-| Tutorial zones | Registry | 1 (Survival Basics, 11 rooms) | Hub has placeholder exits for tutorials 2 and 3. Per-player instanced, item-stripped on exit. LLM guide NPC walks player through (see [New Player Onboarding](#new-player-onboarding)). |
+| Tutorial zones | Registry | 3 (Survival Basics 10 rooms, Economic Loop 6 rooms, Growth & Social 8 rooms) | Per-player instanced from hub, item-stripped on exit. LLM guide NPC (Pip) walks player through each chunk. |
 | Death/respawn | Engine | Corpse, purgatory timer, cemetery bind, XP penalty | Fixed — place RoomCemetery for new bind points. |
 | Follow/Group | Engine | Chain-following, auto-follow on exits | Fixed — underpins group combat, strategy skills, dungeon entry. |
 | Communication | Engine | say/whisper/shout, language-aware, garble | Fixed — new languages just work. |

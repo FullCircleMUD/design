@@ -373,7 +373,7 @@ sea routes.
 | BASIC | Mage Armor | Workhorse | +3/+3/+4/+4/+5 AC, 1–3 hours per tier. Shares ARMORED effect with Divine Armor. Anti-stack with mana refund on recast. |
 | BASIC | Shield | Reactive | **Reactive only — cannot be cast manually.** Auto-triggers when hit via weapon hook. +4/+4/+5/+5/+6 AC for 1/2/2/3/3 rounds. Mana cost 3/5/7/9/12 per trigger. Toggle via `toggle shield`. |
 | BASIC | Feather Fall | Utility | Negates fall damage. 10 min–4 hours per tier. Checked in `_check_fall()`. Mana refund on recast while active. |
-| SKILLED | Resist Elements | Utility buff | 20–60% resistance to one element (fire/cold/lightning/acid/poison) for 30s. Uses `has_spell_arg` for element choice (`cast resist fire`). Stacks with racial/gear up to 75% cap. |
+| SKILLED | Resist Elements | Utility buff | 20–60% resistance to one element (fire/cold/lightning/acid/poison) for 30s. Uses `has_spell_arg` for element choice (`cast 'resist' fire`). Stacks with racial/gear up to 75% cap. |
 | SKILLED | Shadowcloak | Group stealth | +4 to +10 stealth on caster and same-room group members for 4–10 minutes per tier. Mana refund if all targets already affected. |
 | EXPERT | Antimagic Field | **Fireball eq.** *(stub)* | Unsafe AoE — dispels all spell/potion effects in room, suppresses casting 1–3 rounds. Permanent item enchantments unaffected. |
 | MASTER | Group Resist | Party buff *(stub)* | Resist Elements applied to all party members. Uses spell argument for element. |
@@ -532,7 +532,7 @@ def register_spell(cls):
 @register_spell
 class MagicMissile(Spell):
     key = "magic_missile"
-    aliases = ["mm"]
+    aliases = []
     name = "Magic Missile"
     school = skills.EVOCATION          # skills enum member
     min_mastery = MasteryLevel.BASIC
@@ -556,7 +556,7 @@ class MagicMissile(Spell):
 
 **Class attributes:**
 - `key` — unique registry key (e.g. `"magic_missile"`)
-- `aliases` — shorthand names (e.g. `["mm"]`), default `[]`
+- `aliases` — alternative names, default `[]` (most spells have none; players create their own shortcuts via `alias`)
 - `name` — display name (e.g. `"Magic Missile"`)
 - `school` — `skills` enum member (e.g. `skills.EVOCATION`). Use `spell.school_key` property for string lookups against `class_skill_mastery_levels` dict.
 - `min_mastery` — `MasteryLevel` enum (BASIC=1 through GRANDMASTER=5)
@@ -662,10 +662,10 @@ Mixed into `FCMCharacter`. Provides `learn_spell()`, `knows_spell()`, `memorise_
 Some spells take a free-text argument that selects a sub-mode or chooses among several effects. Set `has_spell_arg = True` on the Spell subclass and parse the argument inside `_execute()`.
 
 Examples:
-- **Resist Elements** — `cast resist fire` selects which element to resist
-- **Command** — `cast command halt` / `grovel` / `drop` / `flee` selects which compulsion word
-- **Locate Object** — `cast locate <object name>` selects what to find
-- **Disguise Self** — `cast disguise self <name>` selects the disguise identity
+- **Resist Elements** — `cast 'resist' fire` selects which element to resist
+- **Command** — `cast 'command' halt` / `grovel` / `drop` / `flee` selects which compulsion word
+- **Locate Object** — `cast 'locate' <object name>` selects what to find
+- **Disguise Self** — `cast 'disguise self' <name>` selects the disguise identity
 
 The base `Spell.cast()` flow strips the argument before doing target resolution and passes it through to `_execute()` for the spell to interpret.
 

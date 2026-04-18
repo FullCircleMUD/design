@@ -67,7 +67,7 @@ Enchanting is a **mage-only** crafting skill (`skills.ENCHANTING`) that transfor
 
 **Room type:** `RoomCraftingType.WIZARDS_WORKSHOP` — enchanting-specific crafting rooms.
 
-**Command aliases:** `enchant`/`enc`/`ench`/`en` (active — added to `cmd_craft.py` aliases and verb/gerund maps).
+**Command alias:** `enchant` (full-word alias on `cmd_craft.py`; abbreviations stripped — players create their own shortcuts via `alias`).
 
 ---
 
