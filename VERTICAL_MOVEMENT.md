@@ -27,10 +27,6 @@ All objects that exist within a room's vertical space share a single mixin: `Hei
 class HeightAwareMixin:
     room_vertical_position = AttributeProperty(0)
 
-    # Opt-in height-gated visibility. None = visible at all heights.
-    visible_min_height = AttributeProperty(None, autocreate=False)
-    visible_max_height = AttributeProperty(None, autocreate=False)
-
     def is_height_visible_to(self, looker):
         ...
 ```
@@ -41,15 +37,23 @@ class HeightAwareMixin:
 
 `room_vertical_position` is the single source of truth for an object's vertical position. All height checks (combat reachability, exit gating, room display filtering) read this attribute.
 
-### Height-Gated Visibility
+### Height-Gated Visibility (Room Barrier System)
 
-`visible_min_height` and `visible_max_height` are **opt-in** visibility filters. Most objects leave them as `None` and are visible to a looker at any height. Setting either (or both) restricts the object to lookers whose own `room_vertical_position` falls within the range, via `is_height_visible_to(looker)`.
+Height-gated visibility uses a **room + object** model:
 
-Used by `RoomBase.get_display_characters()` and `get_display_things()` to filter who and what appears in the room display:
-- A shipwreck at the bottom of the bay can set `visible_max_height = -1` so it only appears to divers (surface swimmers and boats pass over it without seeing it).
-- A tutorial prop at ground level can set both to `0` so it's only visible to ground-level characters and disappears when the player flies up.
+- **Rooms** define visibility barriers: `visibility_up_barrier` and `visibility_down_barrier`, each a tuple of `(barrier_height, max_concealed_size)` or None.
+- **Objects** define their `size` attribute (from the `Size` enum in `enums/size.py`).
 
-This is a building block for height-specific content — builders opt in per-object when they want something hidden from the wrong elevation.
+`is_height_visible_to(looker)` checks whether a barrier lies between the observer and the object, and whether the object is small enough to be concealed. Same-height objects are always visible regardless of barriers.
+
+Used by `p_height_visible_to` predicate (wraps `is_height_visible_to`) and the composite `p_can_see` predicate (stealth + height). Room display methods (`get_display_characters`, `get_display_things`) and `cmd_scan` use `p_height_visible_to` for filtering.
+
+Examples:
+- A forest canopy room sets `visibility_up_barrier = (1, "small")` — tiny/small creatures in the canopy are hidden from ground-level observers.
+- A deep water room sets `visibility_down_barrier = (-1, "small")` — small objects at depth are hidden from surface observers.
+- A gargantuan dragon at height 1 is NOT concealed by a canopy barrier hiding "small" — too large.
+
+Item sizes: `BaseNFTItem`/`WorldItem` default to `"tiny"`, `WorldFixture` defaults to `"medium"`. Mobs have explicit sizes (bee=tiny, kobold=small, wolf=large).
 
 ### Death-Height Behavior
 
@@ -298,7 +302,7 @@ Global character command: `climb up [target]` / `climb down [target]`
 
 - ~~**Height-dependent mob AI**~~ — **Done.** See `design/COMBAT_SYSTEM.md` § Height Combat and `design/NPC_MOB_ARCHITECTURE.md` for mob height-matching, retargeting, and flee behavior.
 - ~~**Climbing**~~ — **Done.** ClimbableMixin + CmdClimb. See above.
-- ~~**Height-gated object visibility**~~ — **Done.** `visible_min_height` / `visible_max_height` on `HeightAwareMixin`, enforced in `RoomBase.get_display_characters()` / `get_display_things()`. See § Height-Gated Visibility above.
+- ~~**Height-gated object visibility**~~ — **Done.** Room barrier system (`visibility_up_barrier` / `visibility_down_barrier` on `RoomBase`) + object `size` attribute. Enforced via `p_height_visible_to` / `p_can_see` predicates. See § Height-Gated Visibility above.
 - **`look up` / `look down` commands** — explicit commands to inspect what's above or below the character's current height (would use the same `is_height_visible_to` filter but display other heights, not just the current one)
 - **Vertical fog of war** — atmospheric/distance effects when looking at things several heights away
 - **Get/drop/loot height gating** — items at different heights, fishing from surface, etc.
