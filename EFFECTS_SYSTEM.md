@@ -108,6 +108,10 @@ target.break_effect(NamedEffect.SANCTUARY)  # or break_sanctuary() alias
 - `tick_combat_round()` → decrements all `combat_rounds` effects by 1, auto-removes expired. Called by combat handler each tick.
 - `clear_combat_effects()` → removes ALL `combat_rounds` effects. Called on combat end by `stop_combat()`.
 
+### Size Effects
+
+Actor size follows the same base/active pattern as ability scores: `base_size` (permanent racial/creature size) and `size` (active, rebuilt by `_recalculate_stats()`). Enlarge/shrink spells modify `size` during effect accumulation; on expiry the recalculate resets it to `base_size`. Size changes have gameplay consequences beyond stats — exit `max_size` gating blocks actors that are too large for a passage (see [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md) § Size gating).
+
 ### Named Effect Record
 
 Persisted in `active_effects` AttributeProperty dict:

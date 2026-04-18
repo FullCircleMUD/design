@@ -280,7 +280,7 @@ Pure Python singleton (`typeclasses/items/weapons/unarmed_weapon.py`) — NOT an
 
 **Multi-round skip:** `skip_actions` counter on combat handler replaces `skip_next_action` for stun/prone. Decrements each tick; condition cleared when counter reaches 0 via `_clear_stun_prone()`.
 
-**Mob size:** `CombatMob.size` AttributeProperty (stored as string, e.g. `"medium"`, `"large"`). Default `"medium"`. DireWolf overrides to `"large"`. `_get_actor_size()` helper converts to `ActorSize` enum for comparison.
+**Actor size:** All actors (PCs, mobs, pets) have `base_size` and `size` AttributeProperty on `BaseActor` (stored as `Size.X.value` strings for Evennia serialization). `base_size` is the permanent racial/creature size; `size` is the active value rebuilt from `base_size` by `_recalculate_stats()`. PCs get both set from `race.size` during chargen/remort. Mobs/pets override via their own `AttributeProperty(Size.X.value)`. `get_actor_size(actor)` in `combat/combat_utils.py` converts the string to a `Size` enum for comparison. Size enum: `enums/size.py` — TINY, SMALL, MEDIUM, LARGE, HUGE, GARGANTUAN (numeric values 1–6 via `size_value()`). Enlarge/shrink effects modify `size` during `_accumulate_effect()`; when the effect expires, `_recalculate_stats()` resets `size` back to `base_size`.
 
 ### Reaction System Architecture (Planned)
 

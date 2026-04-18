@@ -71,6 +71,12 @@ The standard exit for the game world. Provides two systems:
 - Depth: blocks movement if character is too deep for destination room
 - All checks run before `super().at_traverse()` — failed checks cancel movement silently
 
+**Size gating:**
+- `max_size` AttributeProperty — largest actor size that can pass. Defaults to `Size.GARGANTUAN.value` (unrestricted). Set to a smaller `Size.X.value` to restrict passage (e.g. `Size.TINY.value` for a mousehole, `Size.SMALL.value` for a halfling tunnel).
+- Checked in `at_traverse()` after height gating: `size_value(actor.size) > size_value(self.max_size)` → "You are too large to fit through there."
+- **Unlike height-gated exits, size-gated exits remain visible** in the exit list — the player should see the passage exists so they know a shrink spell is needed.
+- Door helpers default `max_size` to `Size.MEDIUM.value` (standard human-sized door). Stable doors, castle gates, etc. override to `Size.LARGE.value` or higher.
+
 **When to use:** Most world exits. Created via `connect_bidirectional_exit()` helper.
 
 ### ExitDoor
@@ -239,16 +245,16 @@ All bidirectional helpers use the `OPPOSITES` dict to auto-derive the reverse di
 
 | Helper | Exit Type | Purpose |
 |---|---|---|
-| `connect_bidirectional_exit(room_a, room_b, direction)` | ExitVerticalAware | Standard passage. Optional `desc_ab`/`desc_ba` for custom exit names. Returns `(exit_ab, exit_ba)`. |
-| `connect_bidirectional_door_exit(room_a, room_b, direction, key, ...)` | ExitDoor | Door pair with reciprocal open/close/lock sync via `link_door_pair()`. Accepts per-side open/closed descriptions, lock settings. Returns `(door_ab, door_ba)`. |
-| `connect_bidirectional_trapped_door_exit(room_a, room_b, direction, ...)` | TrapDoor + ExitDoor | Door pair with a trap on ONE side (`trap_side="ab"` or `"ba"`). Trap is directional — only fires when opened from the trapped side. Accepts all door params plus trap config (find_dc, disarm_dc, damage, effects). Returns `(door_ab, door_ba)`. |
-| `connect_bidirectional_tripwire_exit(room_a, room_b, direction, ...)` | TripwireExit + ExitVerticalAware | Passage pair with a tripwire on ONE side. Trap fires on traverse if undetected; safe step-over if detected. Accepts trap config. Returns `(exit_ab, exit_ba)`. |
+| `connect_bidirectional_exit(room_a, room_b, direction)` | ExitVerticalAware | Standard passage. Optional `desc_ab`/`desc_ba` for custom exit names. `max_size` defaults to GARGANTUAN (unrestricted). Returns `(exit_ab, exit_ba)`. |
+| `connect_bidirectional_door_exit(room_a, room_b, direction, key, ...)` | ExitDoor | Door pair with reciprocal open/close/lock sync via `link_door_pair()`. Accepts per-side open/closed descriptions, lock settings. `max_size` defaults to MEDIUM (standard door). Returns `(door_ab, door_ba)`. |
+| `connect_bidirectional_trapped_door_exit(room_a, room_b, direction, ...)` | TrapDoor + ExitDoor | Door pair with a trap on ONE side (`trap_side="ab"` or `"ba"`). Trap is directional — only fires when opened from the trapped side. Accepts all door params plus trap config. `max_size` defaults to MEDIUM. Returns `(door_ab, door_ba)`. |
+| `connect_bidirectional_tripwire_exit(room_a, room_b, direction, ...)` | TripwireExit + ExitVerticalAware | Passage pair with a tripwire on ONE side. Trap fires on traverse if undetected; safe step-over if detected. Accepts trap config. `max_size` defaults to GARGANTUAN. Returns `(exit_ab, exit_ba)`. |
 
 ### One-Way Exits (create a SINGLE exit)
 
 | Helper | Exit Type | Purpose |
 |---|---|---|
-| `connect_oneway_loopback_exit(room, direction, key=None, destination=None)` | ExitVerticalAware | Boundary illusion — exit loops back to the same room by default, or to `destination` if supplied. Used for forest edges, deep water, lake shores. Returns the exit object. |
+| `connect_oneway_loopback_exit(room, direction, key=None, destination=None)` | ExitVerticalAware | Boundary illusion — exit loops back to the same room by default, or to `destination` if supplied. `max_size` defaults to GARGANTUAN. Returns the exit object. |
 
 ## Mixins Used by Exits
 

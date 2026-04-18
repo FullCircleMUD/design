@@ -280,7 +280,7 @@ When a pet or mount can't enter a room, **the owner is blocked** — no auto-dis
 - Following wyvern too large: "Your wyvern is too large to go there."
 - The player must explicitly dismount (`pet.horse dismount`) or tell the pet to stay (`pet.wyvern stay`) before proceeding on foot
 
-Stable rooms are explicitly tagged to accept large animals regardless of room size.
+Stable rooms are explicitly tagged to accept large animals regardless of room size. Stable door exits use `max_size=Size.LARGE.value` so horses can pass through; standard doors default to `Size.MEDIUM.value` (see [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md) § Size gating).
 
 ### Pet Hunger
 
