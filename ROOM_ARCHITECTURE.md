@@ -64,6 +64,19 @@ room.set_terrain("urban")           # category="terrain"
 
 Each category holds one tag at a time — setting a new value replaces the old one.
 
+**Sleep policy** (`category="sleep_policy"`): controls whether characters can sleep in a room and at what regen rate.
+
+| Tag value | Effect |
+|---|---|
+| *(no tag)* | Normal sleep — 3x regen |
+| `none` | Sleep command blocked ("You can't sleep here.") |
+| `super` | Enhanced sleep — 5x regen (inns, safe havens) |
+
+```python
+room.set_sleep_policy("super")   # inn room — 5x sleeping regen
+room.set_sleep_policy("none")    # town street — no sleeping allowed
+```
+
 **Terrain types** (from `enums/terrain_type.py`): URBAN, RURAL, FOREST, MOUNTAIN, DESERT, SWAMP, COASTAL, UNDERGROUND, DUNGEON, WATER, ARCTIC, PLAINS.
 
 Terrain drives three derived properties:
@@ -227,7 +240,7 @@ Wilderness resource gathering. Tracks `resource_count` (current) and `max_resour
 
 **File:** `typeclasses/terrain/rooms/room_inn.py`
 
-Safe zone. Injects `CmdSetInn` for stew, ale, menu commands. Quest-integrated: heals defeated rat cellar quest players on arrival (Rowan the bartender narrative).
+Safe zone. Injects `CmdSetInn` for stew, ale, menu commands. Quest-integrated: heals defeated rat cellar quest players on arrival (Rowan the bartender narrative). Should be tagged `sleep_policy: super` for 5x sleeping regen.
 
 ### RoomCemetery
 

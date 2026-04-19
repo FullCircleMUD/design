@@ -118,7 +118,7 @@ Both have `tracking_token` proxy tokens (`PCanteen`, `PCask`) registered in the 
 
 `typeclasses/scripts/regeneration_service.py` — the global script that runs every 20s and combines hunger + thirst into a single regen/degen/bleed decision.
 
-- **Both meters must permit regen** for healing to fire. If hunger says PECKISH-or-better AND thirst says AWARE-or-better, regen runs normally (HP/MP/MV recover at base rate × position multiplier).
+- **Both meters must permit regen** for healing to fire. If hunger says PECKISH-or-better AND thirst says AWARE-or-better, regen runs normally (HP/MP/MV recover at base rate × position multiplier). Sleeping in a `sleep_policy: super` room (e.g., an inn) grants 5x regen instead of the standard 3x.
 - **Either meter triggering degen** is enough to bleed. If hunger is FAMISHED-or-worse OR thirst is PARCHED-or-worse, the degen path runs once per minute (every 3rd 20s tick).
 - **Worst-meter wins** for the bleed rate and death cause. Each meter contributes a `(cycles_to_death, death_cause)` candidate; the smallest cycles_to_death (i.e., fastest death) is used. Hunger wins ties, so "starved while also parched at the same lethal rate" is recorded as starvation.
 - **Per-meter cycles_to_death:**
@@ -176,7 +176,7 @@ Bleed amounts: `max(1, round(stat_max / cycles_to_death))` per minute on each of
 
 ## Future Work
 
-- **Sleep / fatigue meter** — third survival meter. Same `SurvivalService` loop, same shape, different penalty curve (probably no death, just regen halts). Likely tied to inn rooms (rest at an inn to clear it).
+- **Sleep / fatigue meter** — third survival meter. Same `SurvivalService` loop, same shape, different penalty curve (probably no death, just regen halts). Likely tied to inn rooms (rest at an inn to clear it). The `sleep_policy` room tag is already in place — `super` rooms (inns) grant 5x sleeping regen and `none` rooms (town streets) block sleep entirely. Future guard/urchin/gaol mechanics can layer on top.
 - **Climate-driven thirst rate** — desert zones tick thirst faster than temperate. Implementation: per-tick rate multiplier read from the room's terrain/climate before applying the decrement. Out of scope until desert content exists.
 - **Natural water sources** — rivers, springs, the spring-fed pool tile in southern woods, and wells should all set `is_water_source = True` so the `refill` command picks them up. Trivial to add in zone builders; deferred until the second town is built.
 - ~~**Find Water survival skill**~~ — landed as part of `forage` itself (not a separate skill). Forage now produces both hunger restoration and drinks-into-the-forager's-containers in one cast. See Thirst → Sources of water above.
