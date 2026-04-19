@@ -599,7 +599,7 @@ BaseNFTItem (typeclasses/items/base_nft_item.py)
 │   └── HoldableNFTItem      — shields/torches/orbs (at_hold)
 ├── ConsumableNFTItem        — single-use items (consume → delete → RESERVE)
 │   ├── CraftingRecipeNFTItem — teaches recipe on consume
-│   ├── PotionNFTItem         — mastery-scaled effects, anti-stacking
+│   ├── PotionNFTItem         — mastery-scaled effects, anti-stacking, quality-tiered names (mastery_tier attr)
 │   └── SpellScrollNFTItem    — transcribe command
 ├── ContainerNFTItem         — backpack/panniers (nested inventory)
 └── ComponentNFTItem         — non-weapon crafting inputs

@@ -262,9 +262,37 @@ immediately.
 | BASIC | Warrior's Wraps | Hand slot |
 | BASIC | N95 Mask | Face slot |
 
-### Alchemy (Apothecary) — 9 recipes
+### Alchemy (Apothecary) — 19 recipes (9 BASIC + 5 SKILLED + 5 EXPERT)
 
-All potions are BASIC entry. Effect **scales with crafter mastery** at brew time:
+#### Quality Tiers
+
+Every potion receives a **quality prefix** based on the brewer's mastery (`PotionQuality` enum). Each tier is a separate `NFTItemType` row with its own prototype — effects are baked into the prototype and `default_metadata`, no post-spawn scaling code. Recipes use `mastery_tiered: True` and `cmd_craft.py` routes to the correct `NFTItemType` name via the enum.
+
+| Mastery | Quality Prefix | Example |
+|---------|---------------|---------|
+| BASIC | Watery | Watery Potion of the Bull |
+| SKILLED | Weak | Weak Potion of the Bull |
+| EXPERT | Standard | Standard Potion of the Bull |
+| MASTER | Potent | Potent Potion of the Bull |
+| GM | Ascendant | Ascendant Potion of the Bull |
+
+A recipe only produces tiers at or above its minimum mastery: BASIC recipes produce all 5 tiers, SKILLED recipes produce 4 (Weak–Ascendant), EXPERT produces 3 (Standard–Ascendant).
+
+#### Shop Tradeability
+
+Only BASIC and SKILLED recipes have shop-tradeable tiers (proxy tokens on Watery/Weak tiers). EXPERT+ potions are player-crafted and player-traded only. Each shopkeeper lists whichever tier-specific names suit their area (e.g. beginner shops stock Watery only). Adding proxy tokens to new tiers later is a data-only change.
+
+#### Ingredient Progression
+
+| Tier | Base | Pattern |
+|------|------|---------|
+| BASIC | 1 Moonpetal Essence | + 2× one thematic ingredient |
+| SKILLED | 2 Moonpetal Essence | + 1× each of two thematic ingredients |
+| EXPERT | 1 Starbloom Nectar + 1 Moonpetal Essence | + 2× thematic (or 1+1 for Stoneskin) |
+
+Recipe access (via scroll drops) is the primary gate, not ingredient availability. Ingredients are reused across tiers in new combinations. Starbloom Nectar (resource 44) is the EXPERT+ base — a rare resource found in high-altitude and magically charged zones.
+
+#### BASIC Recipes (9) — stat buffs and restores
 
 | Stat Buff | BASIC | SKILLED | EXPERT | MASTER | GM |
 |-----------|-------|---------|--------|--------|-----|
@@ -275,20 +303,69 @@ All potions are BASIC entry. Effect **scales with crafter mastery** at brew time
 |--------------|-------|---------|--------|--------|-----|
 | Heal | 2d4+1 | 4d4+2 | 6d4+3 | 8d4+4 | 10d4+5 |
 
-| Recipe | Effect | Scaling |
-|--------|--------|---------|
-| Potion of Life's Essence | HP restore | Heal formula above |
-| Potion of the Wellspring | Mana restore | Heal formula above |
-| Potion of the Bull | +STR | Buff table above |
-| Potion of the Zephyr | +DEX | Buff table above |
-| Potion of Cat's Grace | +DEX (variant) | Buff table above |
-| Potion of the Bear | +CON | Buff table above |
-| Potion of Fox's Cunning | +INT | Buff table above |
-| Potion of Owl's Insight | +WIS | Buff table above |
-| Potion of Silver Tongue | +CHA | Buff table above |
+| Recipe | Effect | Ingredients |
+|--------|--------|-------------|
+| Potion of Life's Essence | HP restore | 1 Moonpetal Essence + 2 Bloodmoss |
+| Potion of the Wellspring | Mana restore | 1 Moonpetal Essence + 2 Arcane Dust |
+| Potion of the Zephyr | Move restore | 1 Moonpetal Essence + 2 Windroot |
+| Potion of the Bull | +STR | 1 Moonpetal Essence + 2 Ogre's Cap |
+| Potion of Cat's Grace | +DEX | 1 Moonpetal Essence + 2 Vipervine |
+| Potion of the Bear | +CON | 1 Moonpetal Essence + 2 Ironbark |
+| Potion of Fox's Cunning | +INT | 1 Moonpetal Essence + 2 Mindcap |
+| Potion of Owl's Insight | +WIS | 1 Moonpetal Essence + 2 Sage Leaf |
+| Potion of Silver Tongue | +CHA | 1 Moonpetal Essence + 2 Siren Petal |
 
-Anti-stacking: named effect keys prevent doubling (e.g. can't stack two STR
-potions).
+#### SKILLED Recipes (5) — conditions and utility (exploration durations: 10/30/60/120 min)
+
+| Recipe | Effect | Named Effect | Ingredients |
+|--------|--------|-------------|-------------|
+| Potion of Feather Fall | Negate fall damage | `feather_fall` | 2 Moonpetal Essence + 1 Windroot + 1 Bloodmoss |
+| Potion of Barkskin | +AC bonus (2/3/4/5) | `barkskin` | 2 Moonpetal Essence + 1 Ironbark + 1 Vipervine |
+| Potion of Invisibility | Invisible condition | `invisible` | 2 Moonpetal Essence + 1 Arcane Dust + 1 Siren Petal |
+| Potion of Detection | Detect invisible | `detect_invis` | 2 Moonpetal Essence + 1 Mindcap + 1 Ogre's Cap |
+| Potion of Darkvision | See in darkness | `darkvision_buff` | 2 Moonpetal Essence + 1 Sage Leaf + 1 Mindcap |
+
+Barkskin scales both AC bonus (+2/+3/+4/+5) and duration. All others scale duration only (condition is binary). Proxy tokens exist for Weak tier only.
+
+#### EXPERT Recipes (5) — combat effects and advanced conditions
+
+| Recipe | Effect | Named Effect | Scaling | Ingredients |
+|--------|--------|-------------|---------|-------------|
+| Potion of Haste | +1 attack/round | `hasted` | 30s / 60s / 120s | 1 Starbloom Nectar + 1 Moonpetal Essence + 2 Vipervine |
+| Potion of Flight | Fly condition | `fly_buff` | 15min / 30min / 60min | 1 Starbloom Nectar + 1 Moonpetal Essence + 2 Windroot |
+| Potion of Water Breathing | Water breathing | `water_breathing_buff` | 15min / 30min / 60min | 1 Starbloom Nectar + 1 Moonpetal Essence + 2 Bloodmoss |
+| Potion of Comprehension | Comprehend languages | `comprehend_languages_buff` | 15min / 30min / 60min | 1 Starbloom Nectar + 1 Moonpetal Essence + 2 Mindcap |
+| Potion of Stoneskin | Resist bludgeoning/slashing/piercing | `stoneskin` | 20%/60s, 35%/90s, 50%/120s | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Ogre's Cap + 1 Ironbark |
+
+No proxy tokens. Haste and Stoneskin use combat durations; Flight, Water Breathing, and Comprehension use exploration durations.
+
+#### MASTER Recipes (future — not yet implemented)
+
+Planned potions requiring new effect mechanics (HP/mana trickle, damage multiplier):
+
+| Recipe | Effect | Ingredients |
+|--------|--------|-------------|
+| Potion of Regeneration | HP trickle over duration | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Arcane Dust + 2 Bloodmoss |
+| Potion of Arcane Renewal | Mana trickle over duration | 1 Starbloom Nectar + 1 Moonpetal Essence + 3 Arcane Dust |
+| Potion of Fire Resistance | Resist fire damage | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Arcane Dust + 2 Ogre's Cap |
+| Potion of Lightning Resistance | Resist lightning damage | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Arcane Dust + 2 Ironbark |
+| Potion of Cold Resistance | Resist cold damage | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Arcane Dust + 2 Sage Leaf |
+| Potion of Enhanced Damage | 1.2× weapon damage (30s Potent, 60s Ascendant) | 1 Starbloom Nectar + 1 Moonpetal Essence + 1 Arcane Dust + 2 Siren Petal |
+| Potion of Greater Invisibility | Invisible, doesn't break on attack | TBD |
+
+Elemental resistance potions can use the existing `damage_resistance` effect type (same as Stoneskin). Regeneration, Arcane Renewal, and Enhanced Damage require new effect mechanics (trickle scripts, damage multiplier hook). Greater Invisibility requires a new `greater_invisible` condition.
+
+#### GM Recipes (future — not yet implemented)
+
+| Recipe | Effect | Notes |
+|--------|--------|-------|
+| Potion of Invulnerability | Stoneskin + all elemental resistances + AC bonus | Combined defensive — the "boss fight prep" potion. 30–60s duration. |
+| Potion of Enhanced Damage (GM) | 1.3–1.4× weapon damage, 60s | GM scaling of the MASTER recipe |
+| Potion of the Phoenix | Latent, untimed — on death: consume, heal to 25% HP, stay in fight | Unique mechanic — death processor checks for `phoenix` condition. Requires a phoenix feather ingredient (extremely rare drop). |
+
+#### Anti-stacking
+
+Named effect keys prevent doubling. Potions share named effect keys with their spell equivalents (e.g. both Potion of Invisibility and the Invisibility spell use `"invisible"`), so a player cannot stack a potion and spell of the same effect. Effects with stat bonuses (Barkskin, stat potions) MUST anti-stack. Condition-only effects (Darkvision, Feather Fall) use named effects for lifecycle/timer management; conditions are ref-counted so multiple sources are safe redundancy.
 
 ### Jewellery (Jeweller) — 8 recipes
 

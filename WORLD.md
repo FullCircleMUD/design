@@ -77,7 +77,7 @@ This is the creative bible for FullCircleMUD. Everything that shapes the *world 
 | Recipes | Registry | 52+ across all skills | Add a .py recipe file. Defines ingredients, skill, mastery tier, output prototype, craft time. |
 | Resource types | Registry | 36 (grains, ores, ingots, alloys, herbs, gems, hides, cloth, coal) | Add via DB seed migration. New zones can introduce zone-specific resources. |
 | Item prototypes | Registry | Weapons, wearables, holdables, components, consumables, containers | Add a .py prototype file. Data-driven effects, restrictions, durability, weight. NFTs on-chain. |
-| Potions | Registry | 9 (stat boost + restore for each ability) | Add recipe + prototype. Mastery-scaled at brew time, named effects for timed buffs. |
+| Potions | Registry | 19 recipes across 3 tiers (9 BASIC stat/restore + 5 SKILLED condition/utility + 5 EXPERT combat/advanced). MASTER/GM planned. | Add recipe + per-tier prototype files. Effects baked into prototypes, `mastery_tiered` flag on recipe. See SPELL_SKILL_DESIGN.md § Alchemy. |
 | Processing rooms | Engine | Smelter, windmill, sawmill | Place a RoomProcessing with recipe list. Multi-recipe support (one smelter does all ore→ingot). |
 | Harvesting rooms | Engine | Wheat fields built | Place a RoomHarvesting with resource_id. Any zone can have gathering nodes. |
 | AMM shops | Engine | On-chain XRPL liquidity pools | Place a ShopkeeperNPC — pool prices drive buy/sell. Real supply/demand. |

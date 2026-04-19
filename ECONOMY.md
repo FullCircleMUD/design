@@ -227,7 +227,7 @@ Common NFT items (iron swords, leather armor, mage robes) are functionally fungi
 
 ### The Solution
 
-Issue "proxy tokens" — one XRPL issued currency per common NFT item type, prefixed `P` for proxy (e.g., `PTrainDagger`, `PBronzeSpear`, `PLeatherArmor`). Set up real XRPL AMM pools: proxy token vs **PGold** (a proxy for FCMGold, pegged 1:1). Proxy tokens exist solely to enable AMM pricing formulas for in-game shops — they must never be accessible on-chain to anyone other than the game vault wallet.
+Issue "proxy tokens" — one XRPL issued currency per common NFT item type, prefixed `P` for proxy (e.g., `PTrainDagger`, `PBronzeSpear`, `PPotWatBull` for Watery Potion of the Bull). Set up real XRPL AMM pools: proxy token vs **PGold** (a proxy for FCMGold, pegged 1:1). Proxy tokens exist solely to enable AMM pricing formulas for in-game shops — they must never be accessible on-chain to anyone other than the game vault wallet.
 
 **Two distinct AMM systems.** FCM's AMM usage splits into two categories with very different visibility:
 
@@ -403,7 +403,9 @@ When a player kills a mob and finds a scroll, the scroll is there because the sp
 | Raw resources (wheat, ore, wood, etc.) | Yes — resource AMM | Resource shopkeepers | Tier 1 |
 | Processed resources (flour, ingots, timber, etc.) | Yes — resource AMM | Resource shopkeepers | Tier 1 |
 | Basic/Skilled equipment (weapons, armor) | Yes — proxy token AMM | Equipment shopkeepers | Tier 2, full durability only |
+| Watery/Weak potions (BASIC/SKILLED mastery) | Yes — proxy token AMM | Potion shopkeepers | Tier 2, per-quality-tier proxy tokens |
 | Some Expert equipment | Yes — proxy token AMM | Equipment shopkeepers | Edge of Tier 2 |
+| Standard/Potent/Ascendant potions (EXPERT+) | **No** | Player-to-player trade only | Crafted by skilled alchemists |
 | Master/GM tier equipment | **No** | Player-to-player trade only — no external market is made | Tier 3 — player-driven |
 | Enchanted weapons (gem insets) | **No** | Player-to-player trade only — no external market is made | Bespoke names, unique combos |
 | Deterministic enchanted wearables (rings, amulets) | **Yes** — own proxy token | Equipment shopkeepers | Standardised output = fungible |
@@ -552,6 +554,8 @@ None of these are gambling behaviours — every transaction is fully disclosed b
 | Expert | Some | Transition zone — common expert items are AMM, rare ones are auction |
 | Master | **No** | Prestige — player-driven prices, reputation matters |
 | Grandmaster | **No** | Ultra-prestige — name your price, limited supply |
+
+**Potions follow this model explicitly.** Each potion has 5 quality tiers (Watery/Weak/Standard/Potent/Ascendant) mapped 1:1 to mastery levels. Each tier is a separate `NFTItemType` row with its own proxy token. Currently only Watery (BASIC) and Weak (SKILLED) have proxy tokens — higher tiers are player-traded only. Adding proxy tokens to higher tiers later is a data-only change (no code changes needed). Shopkeepers list whichever tiers suit their area (e.g. beginner area stocks Watery only).
 
 ### Crafter Economics by Tier
 
