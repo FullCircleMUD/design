@@ -339,6 +339,15 @@ Barkskin scales both AC bonus (+2/+3/+4/+5) and duration. All others scale durat
 
 No proxy tokens. Haste and Stoneskin use combat durations; Flight, Water Breathing, and Comprehension use exploration durations.
 
+#### EXPERT Recipes (future — not yet implemented)
+
+| Recipe | Effect | Named Effect | Ingredients |
+|--------|--------|-------------|-------------|
+| Potion of Enlargement | Increase size by 1 category | `enlarged` | TBD |
+| Potion of Diminution | Decrease size by 1 category | `diminished` | TBD |
+
+Enlargement and Diminution interact with the size-gating system on exits (`max_size`) — a Medium character who drinks Enlargement becomes Large and can no longer fit through standard doors, but gains reach/damage advantages. Diminution lets a Large creature squeeze through tight passages. Requires new `enlarged`/`diminished` named effects that temporarily modify `actor.size`.
+
 #### MASTER Recipes (future — not yet implemented)
 
 Planned potions requiring new effect mechanics (HP/mana trickle, damage multiplier):
