@@ -96,6 +96,7 @@ A door that can be opened, closed, locked, unlocked, hidden, made invisible, and
 - Invisible doors require `DETECT_INVIS` condition to see
 - Reciprocal pairing syncs state changes between both sides
 - `door_name` attribute controls what `open door` matches — use distinct names when multiple doors exist in one room (e.g. "door" vs "stone door")
+- **Auto-close:** all doors auto-close after 5 minutes by default (`auto_close_seconds = 300`). Set to `0` to disable, or any other value for custom timing (e.g. `30` for a spring-loaded door). The timer starts when the door is opened and is cancelled if the door is manually closed. The auto-close fires `at_close()` so reciprocal pairing syncs the other side automatically.
 
 **When to use:** Any door connection. Created via `connect_bidirectional_door_exit()` helper.
 
@@ -246,8 +247,8 @@ All bidirectional helpers use the `OPPOSITES` dict to auto-derive the reverse di
 | Helper | Exit Type | Purpose |
 |---|---|---|
 | `connect_bidirectional_exit(room_a, room_b, direction)` | ExitVerticalAware | Standard passage. Optional `desc_ab`/`desc_ba` for custom exit names. `max_size` defaults to GARGANTUAN (unrestricted). Returns `(exit_ab, exit_ba)`. |
-| `connect_bidirectional_door_exit(room_a, room_b, direction, key, ...)` | ExitDoor | Door pair with reciprocal open/close/lock sync via `link_door_pair()`. Accepts per-side open/closed descriptions, lock settings. `max_size` defaults to MEDIUM (standard door). Returns `(door_ab, door_ba)`. |
-| `connect_bidirectional_trapped_door_exit(room_a, room_b, direction, ...)` | TrapDoor + ExitDoor | Door pair with a trap on ONE side (`trap_side="ab"` or `"ba"`). Trap is directional — only fires when opened from the trapped side. Accepts all door params plus trap config. `max_size` defaults to MEDIUM. Returns `(door_ab, door_ba)`. |
+| `connect_bidirectional_door_exit(room_a, room_b, direction, key, ...)` | ExitDoor | Door pair with reciprocal open/close/lock sync via `link_door_pair()`. Accepts per-side open/closed descriptions, lock settings, `auto_close_seconds` (default 300). `max_size` defaults to MEDIUM (standard door). Returns `(door_ab, door_ba)`. |
+| `connect_bidirectional_trapped_door_exit(room_a, room_b, direction, ...)` | TrapDoor + ExitDoor | Door pair with a trap on ONE side (`trap_side="ab"` or `"ba"`). Trap is directional — only fires when opened from the trapped side. Accepts all door params plus trap config and `auto_close_seconds` (default 300). `max_size` defaults to MEDIUM. Returns `(door_ab, door_ba)`. |
 | `connect_bidirectional_tripwire_exit(room_a, room_b, direction, ...)` | TripwireExit + ExitVerticalAware | Passage pair with a tripwire on ONE side. Trap fires on traverse if undetected; safe step-over if detected. Accepts trap config. `max_size` defaults to GARGANTUAN. Returns `(exit_ab, exit_ba)`. |
 
 ### One-Way Exits (create a SINGLE exit)
@@ -264,8 +265,8 @@ Exit-specific mixins:
 
 | Mixin | Provides | Used by |
 |---|---|---|
-| CloseableMixin | `is_open`, `open()`, `close()`, `can_open()` | ExitDoor |
-| LockableMixin | `is_locked`, `unlock()`, `picklock()`, `lock()` | ExitDoor |
+| CloseableMixin | `is_open`, `auto_close_seconds`, `open()`, `close()`, `can_open()` | ExitDoor |
+| LockableMixin | `is_locked`, `relock_seconds`, `unlock()`, `picklock()`, `lock()` | ExitDoor |
 | HiddenObjectMixin | `is_hidden`, `find_dc`, `discovered_by`, `discover()` | ExitDoor |
 | InvisibleObjectMixin | `is_invisible`, `is_invis_visible_to()` | ExitDoor |
 | SmashableMixin | `smash_hp`, `take_smash_damage()`, `at_smash_break()` | ExitDoor |

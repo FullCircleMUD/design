@@ -134,8 +134,8 @@ Any object with `HeightAwareMixin` can optionally set `visible_min_height` / `vi
 
 | Mixin | Provides | Used by |
 |---|---|---|
-| CloseableMixin | `is_open`, `open()`, `close()` | WorldChest, ExitDoor |
-| LockableMixin | `is_locked`, `unlock()`, `picklock()` | WorldChest, ExitDoor |
+| CloseableMixin | `is_open`, `auto_close_seconds`, `open()`, `close()` | WorldChest, ExitDoor |
+| LockableMixin | `is_locked`, `relock_seconds`, `unlock()`, `picklock()` | WorldChest, ExitDoor |
 | SmashableMixin | `smash_hp`, `take_smash_damage()` | WorldChest, ExitDoor |
 | TrapMixin | `is_trapped`, `trigger_trap()`, `disarm_trap()` | TrapChest, TrapDoor, TripwireExit, PressurePlateRoom |
 | SwitchMixin | `is_activated`, `activate()`, `deactivate()` | SwitchFixture (levers, buttons) |
