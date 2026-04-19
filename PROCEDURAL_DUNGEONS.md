@@ -67,12 +67,14 @@ Procedural corridors connecting two static world rooms. No boss — the dungeon 
 | Mode | Key format | Who enters | Isolation |
 |---|---|---|---|
 | **Solo** | `{template}_{player_id}` | One player only | Fully isolated |
-| **Group** | `{template}_{leader_id}` | Leader + followers | Group shares instance |
-| **Shared** | `{template}_shared_{entrance_id}` | Anyone at entrance | Multiple parties, one instance |
+| **Group** | `{template}_{leader_id}` | Leader + followers + pets | Group shares instance |
+| **Shared** | `{template}_shared_{entrance_id}` | Anyone at entrance + followers + pets | Multiple parties, one instance |
 
-Group mode: only the leader can initiate entry. Followers in the same room are collected automatically.
+**Solo mode:** the player must enter alone. Entry is blocked if the player has any followers (group members or pets) in the room — they must ungroup and leave pets outside first.
 
-Shared mode: if an active instance exists at this entrance, new arrivals join it. When all players leave, the instance persists for `empty_collapse_delay` seconds before collapsing (allows brief re-entry).
+**Group mode:** only the leader can initiate entry. Followers and pets in the same room are collected automatically and tagged as instance participants.
+
+**Shared mode:** if an active instance exists at this entrance, new arrivals join it. Followers and pets in the same room are collected and tagged alongside the player. When all players and pets leave, the instance persists for `empty_collapse_delay` seconds before collapsing (allows brief re-entry).
 
 ## Room Generation
 
@@ -131,14 +133,14 @@ A mixin that provides `enter_dungeon(traversing_object)` as a utility method. Ha
 **File:** `typeclasses/terrain/exits/procedural_dungeon_exit.py`
 **Inherits:** `ProceduralDungeonMixin, ExitVerticalAware`
 
-Simple dungeon entry — always enters a procedural dungeon on traversal. Used for unconditional entries.
+Simple dungeon entry — always enters a procedural dungeon on traversal. Used for unconditional entries. Pets that independently traverse this exit are stopped by an invisible barrier.
 
 ### ConditionalDungeonExit
 
 **File:** `typeclasses/terrain/exits/conditional_dungeon_exit.py`
 **Inherits:** `ProceduralDungeonMixin, ConditionalRoutingExit`
 
-Quest-gated dungeon entry with fallback room. Condition met → `enter_dungeon()`. Condition not met → normal traversal to alternate destination with full vertical checks.
+Quest-gated dungeon entry with fallback room. Condition met → `enter_dungeon()`. Condition not met → normal traversal to alternate destination with full vertical checks. Pets that independently traverse this exit are stopped by an invisible barrier.
 
 ### Compositions
 
@@ -200,23 +202,31 @@ ProceduralDungeonExit:
 
 ### Collapse Triggers
 
+**A dungeon instance never collapses while any character or pet is inside.** This is hardcoded — there is no template setting to override it. The design principle is that players should never receive overt signals that they are in a procedural area, and a forced evacuation would break that immersion.
+
 | Trigger | Condition |
 |---|---|
-| **Lifetime expired** | `elapsed >= instance_lifetime_seconds` (skipped if `persistent_until_empty=True`) |
-| **All characters left** | No tagged characters in the instance — collapses immediately, or after `empty_collapse_delay` seconds if set |
+| **All participants left** | No tagged characters or pets remain — collapses immediately, or after `empty_collapse_delay` seconds if set |
+| **Server restart** | All instances collapsed unconditionally on boot (safety cleanup) |
 
-**Note on boss kills:** Killing the boss does not directly trigger collapse. `on_boss_defeated()` sets a `boss_defeated` flag used by quest progression and the room's `not_clear` clearing logic, but the instance only ends via the two triggers above. Templates that want the player to walk out at their own pace after the boss kill set `persistent_until_empty=True` (e.g. `rat_cellar`); this disables the lifetime expiry and lets the dungeon stay alive until the last player leaves the instance, at which point the "all characters left" trigger fires.
+`instance_lifetime_seconds` exists on templates for reference but does **not** trigger forced collapse.
+
+**Note on boss kills:** Killing the boss does not trigger collapse. `on_boss_defeated()` sets a `boss_defeated` flag used by quest progression, but the instance only ends when all participants have left.
+
+**Note on pets:** Pets tagged as `dungeon_character` (group/shared modes) count as participants. A pet left behind with `pet stay` will keep the instance alive until the pet is retrieved, leaves, or starves. In solo mode, pets cannot enter — the player must leave them outside.
 
 ### Cleanup
 
 13. State set to "collapsing"
-14. All characters evacuated to entrance room (teleport)
-15. Character instance tags removed
+14. All characters and pets evacuated to entrance room (teleport)
+15. Instance tags removed from all participants
 16. All dungeon mobs deleted
 17. All dungeon exits deleted
 18. All fungibles returned to RESERVE from dungeon rooms
 19. All dungeon rooms deleted
 20. Instance script deleted
+
+The `exit dungeon` command also evacuates the caller's owned pets — any pet tagged with the same instance and `owner_key == caller.key` is untagged and teleported to the entrance alongside the player.
 
 ### Server Restart
 
@@ -235,7 +245,7 @@ Stale dungeon instances are collapsed on every server boot via `at_server_starts
 | `boss_depth` | int | 5 | Manhattan distance for termination |
 | `max_unexplored_exits` | int | 2 | Exit budget cap |
 | `max_new_exits_per_room` | int | 2 | Branching factor |
-| `instance_lifetime_seconds` | int | 7200 | Max instance lifetime (2 hours) |
+| `instance_lifetime_seconds` | int | 7200 | Reference only — does not trigger forced collapse |
 | `room_generator` | Callable | None | `func(instance, depth, coords) → DungeonRoom` |
 | `boss_generator` | Callable | None | `func(instance, room) → boss NPC` |
 | `room_typeclass` | str | DungeonRoom path | Dotted typeclass path |
@@ -243,8 +253,7 @@ Stale dungeon instances are collapsed on every server boot via `at_server_starts
 | `allow_pvp` | bool | False | PvP enabled in rooms |
 | `allow_death` | bool | False | True death or defeat mode |
 | `defeat_destination_key` | str | None | Room key for defeat respawn |
-| `persistent_until_empty` | bool | False | If True, disable lifetime expiry — instance only collapses when all players leave (used by templates where the player should set their own pace, e.g. `rat_cellar` after boss kill) |
-| `empty_collapse_delay` | int | 0 | Seconds to wait after the last player leaves before collapsing (0 = immediate). Useful for shared mode where another party may arrive shortly. |
+| `empty_collapse_delay` | int | 0 | Seconds to wait after the last participant leaves before collapsing (0 = immediate). Useful for shared mode where another party may arrive shortly. |
 | `terrain_type` | str | "dungeon" | Terrain tag for generated rooms |
 | `always_lit` | bool | False | Permanent lighting override |
 
@@ -270,12 +279,30 @@ For the Rat Cellar, the boss generator is separate from the room generator becau
 
 | Template | Type | Mode | Depth | Layout | Location |
 |---|---|---|---|---|---|
-| `rat_cellar` | instance | solo | 1 | 2 rooms (rats + boss), `persistent_until_empty` | Harvest Moon cellar |
-| `deep_woods_passage` | passage | group | 5 | Winding forest trail | Deep woods (4 routes) |
-| `lake_passage` | passage | shared | 5 | Plains terrain, low branching, 1h lifetime | Lake crossing |
-| `cave_of_trials` | instance | group | 5 | Branching cave | Test world only |
+| `rat_cellar` | instance | solo | 1 | 2 rooms (rats + boss), no pets allowed | Harvest Moon cellar |
+| `deep_woods_passage` | passage | group | 5 | Winding forest trail, pets enter with group | Deep woods (4 routes) |
+| `lake_passage` | passage | shared | 5 | Plains terrain, low branching, pets enter with owner | Lake crossing |
+| `cave_of_trials` | instance | group | 5 | Branching cave, pets enter with group | Test world only |
 
 Templates are registered at server startup via `at_server_startstop.py` which imports the template modules, triggering their module-level `register_dungeon()` calls.
+
+## Pet Handling
+
+Pets interact with dungeons differently depending on instance mode:
+
+| Mode | Pets at entrance | Behaviour |
+|---|---|---|
+| **Solo** | Blocked | Entry refused: "You can only enter here alone, ungroup and leave your pets outside." |
+| **Group** | Collected | Pets following the leader are tagged `dungeon_character` and teleported in with the group |
+| **Shared** | Collected | Pets following the player are tagged `dungeon_character` and teleported in with the player |
+
+**Pet guard on entry exits:** If a pet independently traverses a `ProceduralDungeonExit` or `ConditionalDungeonExit` (e.g. via a future `pet north` command), it is stopped: "An invisible barrier stops \<name\> from entering." This prevents pets from creating their own dungeon instances.
+
+**Pets inside dungeons:** Tagged pets are full participants — they count towards the "anyone still inside?" check that prevents collapse. A pet told to `stay` retains its `dungeon_character` tag and keeps the instance alive.
+
+**Leaving with pets:** The `exit dungeon` command evacuates the caller's owned pets (matched by `owner_key`) alongside the player. The `DungeonPassageExit` already handles follower untagging — pets that are actively following will cascade out with their owner. Pets on `stay` keep their tag and remain in the dungeon.
+
+**Collapse evacuation:** On collapse, all tagged participants (characters and pets) are teleported to the entrance. This is a safety net — under normal play, participants leave voluntarily.
 
 ## Cartography Integration
 
