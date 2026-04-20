@@ -234,7 +234,7 @@ But the spawn budget uses the raw gap, not the percentage.
 
 #### Hourly Saturation Snapshot
 
-The saturation service runs **hourly** (60 seconds after the telemetry snapshot) so the spawn system sees up-to-date knowledge gaps. A scroll spawned in hour 1 is counted as an `unlearned_copy` in the hour 2 snapshot, closing the gap and preventing further spawning.
+The saturation service runs **hourly** at HH:05 (5 minutes after the telemetry snapshot at HH:00) so the spawn system sees up-to-date knowledge gaps. A scroll spawned in hour 1 is counted as an `unlearned_copy` in the hour 2 snapshot, closing the gap and preventing further spawning.
 
 The `NFTSaturationScript` calculates for every tracked scroll and recipe:
 
@@ -249,7 +249,7 @@ The `NFTSaturationScript` calculates for every tracked scroll and recipe:
 
 1. New player gains GM evocation → gap = 1 for GM evocation scrolls
 2. Saturation snapshot (hour N) records gap = 1
-3. Spawn cycle (hour N, +120s) spawns 1 scroll onto a tagged mob
+3. Spawn cycle (hour N, at HH:10) spawns 1 scroll onto a tagged mob
 4. Saturation snapshot (hour N+1) counts the spawned scroll as unlearned → gap = 0
 5. Spawn cycle (hour N+1) → budget = 0. No more scrolls spawned.
 
@@ -773,7 +773,7 @@ Spell scrolls and recipe scrolls are fully integrated into the unified system:
 
 This replaces the previous event-driven design where drop chance was rolled at mob death. Instead, scrolls are pre-placed on living mobs by the distributor. The statistical outcome is identical — undersaturated scrolls appear on more mobs — but with one fewer system to maintain.
 
-**Saturation snapshot** is calculated hourly by `NFTSaturationScript` (60s after telemetry). The KnowledgeCalculator reads the latest snapshot to determine per-item gap-based budgets.
+**Saturation snapshot** is calculated hourly by `NFTSaturationScript` (at HH:05, 5 min after telemetry). The KnowledgeCalculator reads the latest snapshot to determine per-item gap-based budgets.
 
 ### Rare / Legendary NFTs — RareNFTCalculator + NFTDistributor
 
@@ -814,7 +814,7 @@ The enchanting *process* consumes gems, the gems may have been drops, the finish
 
 - **Commodity NFT supply** — player crafting. Not system-spawned. (Future: Tracker Token AMM for pricing.)
 - **Gold sink/reallocation** — the 90/10 SINK → RESERVE cycle via `ReallocationServiceScript` is unchanged. The gold calculator just reads the resulting RESERVE balance.
-- **Saturation snapshot** — `NFTSaturationScript` runs hourly (60s after telemetry, 60s before spawn — see [TELEMETRY.md](TELEMETRY.md) § Scheduled Scripts — Hourly Pipeline) to feed the `KnowledgeCalculator`. The unified system consumes this data, not replaces it.
+- **Saturation snapshot** — `NFTSaturationScript` runs hourly at HH:05 (5 min after telemetry, 5 min before spawn — see [TELEMETRY.md](TELEMETRY.md) § Scheduled Scripts — Hourly Pipeline) to feed the `KnowledgeCalculator`. The unified system consumes this data, not replaces it.
 
 ---
 

@@ -31,23 +31,27 @@ Hourly Saturation Pass (NFTSaturationService.take_daily_snapshot)
 
 ## Scheduled Scripts — Hourly Pipeline
 
-Three services form an hourly pipeline. All three run on the **same** 3600-second interval — the staggered offsets that establish their pipeline order are set once at cold boot by staggering the script *creation moments*, not by giving each script a different interval.
+Three services form an hourly pipeline. Each script ticks **every 60 seconds** and fires its snapshot once per hour when the wall-clock minute matches its designated slot. The 5-minute gaps between slots give each service runtime headroom before the next one reads its output.
 
-| Script | Interval | Creation offset | Service Method | Purpose |
+| Script | Tick interval | Wall-clock slot | Service Method | Purpose |
 |---|---|---|---|---|
-| TelemetryAggregatorScript | 3600s | +0s | `TelemetryService.take_snapshot()` | AMM prices, gold flows, circulation |
-| NFTSaturationScript | 3600s | +60s | `NFTSaturationService.take_daily_snapshot()` | Knowledge gaps (eligible − known − unlearned) |
-| UnifiedSpawnScript | 3600s | +120s | `SpawnService.run_hourly_cycle()` | Distribute resources, gold, and knowledge NFTs |
+| TelemetryAggregatorScript | 60s | HH:00 | `TelemetryService.take_snapshot()` | AMM prices, gold flows, circulation |
+| NFTSaturationScript | 60s | HH:05 | `NFTSaturationService.take_snapshot()` | Knowledge gaps (eligible − known − unlearned) |
+| UnifiedSpawnScript | 60s | HH:10 | `SpawnService.run_hourly_cycle()` | Distribute resources, gold, and knowledge NFTs |
 
-**Pipeline order:** Telemetry → Saturation → Spawn. The spawn calculator needs current AMM prices (from telemetry) and current knowledge gaps (from saturation). The 60-second / 120-second stagger guarantees each service has completed before the next one reads its output.
+**Pipeline order:** Telemetry → Saturation → Spawn. The spawn calculator needs current AMM prices (from telemetry) and current knowledge gaps (from saturation). Running at fixed wall-clock slots (not staggered creation offsets) guarantees predictable fire times and survives any restart pattern.
 
-**Why stagger creation, not interval?** Each Evennia script runs on its own repeating timer that fires every `interval` seconds from the moment of script creation. If the three scripts had *different* intervals (e.g. 3600 / 3660 / 3720), the gap between them would grow by the interval-difference every cycle — after a week the spawn script would have drifted hours behind the telemetry it's supposed to consume, and would eventually start running in a different wall-clock hour bucket entirely. By using **identical 3600s intervals** plus a one-time stagger at creation, the gap stays at exactly 60s/120s indefinitely with zero drift.
+**Why wall-clock slots instead of a 3600s interval?** Evennia's script timer counts down from creation, and on every process start (reload, restart, crash recovery) the countdown resets. With a 3600s interval, any restart more frequent than hourly means the tick never reaches zero. Polling at 60s and checking `now.minute == my_slot_minute` makes the tick reload-invariant: after a restart, the next poll inside the slot minute fires the snapshot. Cost is negligible — 60 datetime comparisons per hour per script.
 
-**How the stagger is established.** `_ensure_global_scripts()` (in `server/conf/at_server_startstop.py`) calls `_create_pipeline_scripts()`, which creates the telemetry script immediately and schedules the other two via `evennia.utils.delay()` with 60s and 120s offsets. From that point on, each script's first fire happens at `creation_moment + 3600s` and every fire after that is exactly 3600s later.
+**Double-fire protection.** Each script records the hour it ran on `self.db.last_run_hour` *before* deferring the snapshot work. A rapid restart mid-slot (e.g. a reload at HH:00:30) sees `last_run_hour == current_hour_bucket` on the next poll and skips, so the snapshot runs at most once per hour.
+
+**Missed hours.** If the server is down at the slot minute, that hour's snapshot is skipped — no catch-up. The spawn algorithm reads the latest snapshot regardless of hour, so a one-hour gap just means slightly stale prices. In practice, production restarts are rare (days/weeks apart) so this is a non-issue.
 
 **Threading:** All three services run their work in background threads via `deferToThread` so the Twisted reactor stays responsive during DB queries and XRPL API calls.
 
-**Resetting the pipeline.** If a script's interval is changed in code, or a script becomes wedged, a moderator can run the `reset_scripts` command to stop and recreate any global service script. The command operates on an explicit allowlist — per-actor scripts (combat handlers, dot effects, dungeon instances, tutorial instances) are unreachable, so running it during live combat or an active dungeon is safe. Pipeline scripts are recreated as a group so the staggered offsets are preserved. See the `reset_scripts` command help for usage.
+**Resetting the pipeline.** If a script's config is changed in code, or a script becomes wedged, a superuser can run `services reset all force` (or `services reset <name> force`) to stop, delete, and recreate any global service script. Pipeline scripts are reset as a group. See the `services` command help for usage.
+
+**Duplicate cleanup.** `_ensure_global_scripts()` runs `_dedupe_pipeline_scripts()` on every boot, which deletes duplicate `ScriptDB` rows for each pipeline key (keeping the lowest id). This is a no-op when there are no duplicates; it exists to clean up extras left behind by the old `evennia.utils.delay()`-based stagger scheme, which could race reload windows.
 
 All scripts are created once at server start via `_ensure_global_scripts()` and persist across restarts.
 
@@ -141,7 +145,7 @@ One row per currency per hour. Covers all CurrencyType entries — game resource
 | `spawn_placed` | Integer | Units actually placed on targets |
 | `spawn_dropped` | Integer | Surplus dropped (no targets with headroom) |
 
-**Spawn metrics** are written by the SpawnService at the end of each hourly cycle (+120s in the pipeline). The invariant `budget - quest_debt - placed - dropped = 0` holds for each row. Persistently high `spawn_dropped` for a resource signals that more tagged targets (mobs, containers, rooms) are needed.
+**Spawn metrics** are written by the SpawnService at the end of each hourly cycle (at HH:10). The invariant `budget - quest_debt - placed - dropped = 0` holds for each row. Persistently high `spawn_dropped` for a resource signals that more tagged targets (mobs, containers, rooms) are needed.
 
 **Reconciliation invariant**: `in_character + in_account + in_spawned + in_reserve + in_sink = total issued on-chain` (for any given currency_code).
 
@@ -165,7 +169,7 @@ This is necessary because proxy token AMM pools use PGold (not FCMGold) as the p
 
 ### SaturationSnapshot
 
-One row per tracked item per **day**, but the row is rewritten *every hour* with the latest state. The pipeline runs hourly (NFTSaturationScript fires every 3600s alongside the rest of the pipeline), and `update_or_create((day, item_key, category))` overwrites the day's row each cycle. Net effect: the table holds one current row per item per day, refreshed within an hour of any change.
+One row per tracked item per **day**, but the row is rewritten *every hour* with the latest state. The pipeline runs hourly (NFTSaturationScript fires at HH:05 alongside the rest of the pipeline), and `update_or_create((day, item_key, category))` overwrites the day's row each cycle. Net effect: the table holds one current row per item per day, refreshed within an hour of any change.
 
 Controls knowledge NFT spawn budgets.
 
@@ -189,7 +193,7 @@ Controls knowledge NFT spawn budgets.
 | `spawn_placed` | IntegerField | Scrolls/recipes actually placed on targets |
 | `spawn_dropped` | IntegerField | Surplus dropped (no targets with headroom) |
 
-**Spawn metrics** are written by the SpawnService at the end of each hourly cycle (+120s in the pipeline). For knowledge items, `spawn_budget` equals the gap (`eligible - known_by - unlearned_copies`).
+**Spawn metrics** are written by the SpawnService at the end of each hourly cycle (at HH:10). For knowledge items, `spawn_budget` equals the gap (`eligible - known_by - unlearned_copies`).
 
 **Saturation formula**:
 - **Spells/Recipes**: `(known_by + unlearned_copies) / eligible_players` (0.0 if no eligible)
@@ -238,7 +242,7 @@ Controls knowledge NFT spawn budgets.
                                                  │
          ┌─────────────────────────┐             │
          │  NFTSaturationService   │◄────────────┘
-         │  (hourly, +60s offset)  │
+         │  (hourly at HH:05)      │
          │                         │
          │  Reads: PlayerSession,  │
          │    ObjectDB characters, │
