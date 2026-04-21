@@ -401,6 +401,26 @@ All class combat skills are implemented:
 | `defence` | Warrior/Paladin | Group leader stance: AC bonus, small hit penalty |
 | `retreat` | Warrior/Paladin | Group withdrawal: INT+CHA roll. Success: move whole group through chosen exit |
 
+### Unified Action Economy — skills AND spells share `skill_cooldown`
+
+`CombatHandler.skill_cooldown` is a single shared counter decremented once per
+tick. It is set by:
+
+- Combat specials (bash, pummel, stab, …) — per-skill mastery-indexed value.
+- **Hostile spells** — the spell's `get_cooldown()`, default `min_mastery.value`
+  (BASIC=1 .. GM=5).
+
+While `skill_cooldown > 0` the actor cannot fire **any** special — spell or
+skill. This enforces one active combat action per round across physical and
+magical actions. Auto-attacks tick independently and are not gated.
+
+Hostile spells also enter combat by the same path as skills: a successful
+cast invokes `enter_combat(caster, target)` per affected target (primary +
+AoE secondaries), matching the bash/pummel pattern. Per-spell overrides
+control the conditional cases (e.g. Charm Person only aggros on resist). See
+[SPELL_SKILL_DESIGN.md §Combat Integration](SPELL_SKILL_DESIGN.md) for the
+full hook description and examples.
+
 ---
 
 ## Movement Cost for Combat Actions

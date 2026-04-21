@@ -9,9 +9,10 @@ progression, and spell system implementation architecture.
 
 The starting point for designing any spell school is three anchor spells:
 
-1. **Workhorse (BASIC).** Cheap, no cooldown, spammable. Defines the school's
-   identity and gives a caster something useful from day one. A mage who only
-   knows their workhorse spell should still feel functional.
+1. **Workhorse (BASIC).** Cheap, 1-round combat pacing, castable every round.
+   Defines the school's identity and gives a caster something useful from
+   day one. A mage who only knows their workhorse spell should still feel
+   functional.
 
 2. **"Fireball Equivalent" (EXPERT).** The double-edged sword — powerful but
    dangerous. An **unsafe AoE** that hits everything in the room including the
@@ -19,7 +20,7 @@ The starting point for designing any spell school is three anchor spells:
    set by caster's roll. Safe to use at range (flying vs ground, or
    cross-room).
 
-3. **"Wow Factor" (GRANDMASTER).** 100 mana, 3-round cooldown, massive single
+3. **"Wow Factor" (GRANDMASTER).** 100 mana, 5-round cooldown, massive single
    effect. The trophy spell that makes the school feel epic. Instant kills,
    total immunity, party portals, death interception — these are the spells
    people talk about.
@@ -31,8 +32,12 @@ SKILLED and MASTER tiers to round out the school's toolkit.
 
 - **Mana cost:** ~1 mana per average point of damage. Conditions, utility, and
   AoE do not add extra cost. Individual spells may deviate for balance.
-- **Cooldowns:** BASIC/SKILLED = 0, EXPERT = 1 round, MASTER = 2 rounds,
-  GM = 3 rounds. Override via `cooldown` class attribute on individual spells.
+- **Cooldowns:** default cooldown equals the spell's `min_mastery` tier value
+  (BASIC=1, SKILLED=2, EXPERT=3, MASTER=4, GM=5 rounds). Every hostile spell
+  paces at least once per round. Override via `cooldown` class attribute on
+  individual spells — set `cooldown = 0` for reactive/buff spells that must
+  never gate other actions (Smite, Shield, Mage Armor). See the **Combat
+  integration** section below for the unified action-economy detail.
 
 **Example damage scaling** (not all spells scale this way):
 - BASIC spells: +1d6 per mastery tier (e.g. Magic Missile adds a missile)
@@ -450,7 +455,7 @@ sea routes.
 | SKILLED | Flame Burst | Safe AoE | 3–6d6 fire (per tier). Diminishing accuracy per target (100/80/60/40/20%). |
 | EXPERT | Fireball | **Fireball eq.** | 8–14d6 fire (per tier), unsafe AoE, DEX save (DC = caster d20+INT+mastery) for half. Hits caster + allies. |
 | MASTER | Cone of Cold | Safe AoE + CC | 10–13d6 cold (per tier). Safe AoE diminishing accuracy. Auto-applies SLOWED (1 round at MASTER, 2 at GM — see Known Discrepancies). |
-| GM | Power Word: Death | **Wow factor** | HP ≤20 auto-kills (unless nat 1). HP >20 contested INT+8 vs CON+HD bonus; nat 20 always kills, nat 1 always fails. 100 mana, 3 round cooldown. |
+| GM | Power Word: Death | **Wow factor** | HP ≤20 auto-kills (unless nat 1). HP >20 contested INT+8 vs CON+HD bonus; nat 20 always kills, nat 1 always fails. 100 mana, 5 round cooldown. |
 
 ### Abjuration — Protection & Dispel
 
@@ -530,7 +535,7 @@ sea routes.
 | BASIC | Cure Poison | Condition removal | Removes POISONED and PoisonDoTScript. EXPERT+: also grants 25–75% poison resistance for 5–10 minutes per tier. Mana refund if no poison and no resistance applies. |
 | SKILLED | Purify | Condition removal *(stub)* | Removes a single harmful condition (poison, disease, etc.). |
 | EXPERT | Mass Heal | **Fireball eq.** *(stub)* | Heals all allies in room. Scales with tier and WIS modifier. |
-| GM | Death Ward | **Wow factor** *(stub)* | Pre-emptive buff — when target would die, they survive at 1 HP instead. Ward is consumed on trigger. 100 mana, 3 round cooldown. |
+| GM | Death Ward | **Wow factor** *(stub)* | Pre-emptive buff — when target would die, they survive at 1 HP instead. Ward is consumed on trigger. 100 mana, 5 round cooldown. |
 
 ### Divine Protection — Warding (Cleric/Paladin)
 
@@ -550,7 +555,7 @@ sea routes.
 | BASIC | Smite | Reactive | **Reactive only — cannot be cast manually.** Auto-triggers on weapon hits in combat. Adds tier × 1d6 bonus radiant damage per triggering hit. Mana cost 3/5/7/9/12 per trigger. Toggle via `smite` command. |
 | BASIC | Bravery | Self-buff | +1/+1/+2/+2/+3 AC and +5/+10/+15/+20/+25 max HP for 5–15 minutes per tier. Heals by the bonus HP amount on cast. HP clamped on expiry. Anti-stack. |
 | EXPERT | Holy Fire | **Fireball eq.** *(stub)* | Safe AoE radiant (8–14d6 per tier) with diminishing hit accuracy (100/80/60/40/20%). Enemies only. |
-| GM | Wrath of God | **Wow factor** *(stub)* | Massive unsafe AoE radiant damage + BLINDED/STUNNED condition to all in room. Hits caster and allies. 100 mana, 3 round cooldown. |
+| GM | Wrath of God | **Wow factor** *(stub)* | Massive unsafe AoE radiant damage + BLINDED/STUNNED condition to all in room. Hits caster and allies. 100 mana, 5 round cooldown. |
 
 ### Divine Revelation — Divine Knowledge (Cleric/Paladin)
 
@@ -572,7 +577,7 @@ All spells in this school are fully implemented.
 | BASIC | Blindness | CC | Inflicts BLINDED for 3–8 rounds per tier. Contested WIS (caster) vs CON (target). Save-each-round to break early. Grants advantage to enemies. HUGE+ immune. |
 | BASIC | Calm | CC *(stub)* | Ends all combat in room. Applies CALM effect preventing re-engagement for 10–30 seconds per tier. Contested WIS vs WIS for each target. HUGE+ immune. Caster must be in combat to cast. |
 | EXPERT | Hold | Single-target CC | Binds target in divine chains (PARALYSED) for 3–5 rounds. Contested WIS+mastery sets DC; target rolls d20+WIS each round to escape. Size-gated: EXPERT can hold up to MEDIUM, MASTER up to LARGE, GM up to HUGE. GARGANTUAN always immune. |
-| GM | Word of God | **Wow factor** *(stub)* | Mass STUNNED on all enemies in room. No save first round; contested WIS each subsequent round to break. 100 mana, 3 round cooldown. |
+| GM | Word of God | **Wow factor** *(stub)* | Mass STUNNED on all enemies in room. No save first round; contested WIS each subsequent round to break. 100 mana, 5 round cooldown. |
 
 ---
 
@@ -587,7 +592,7 @@ All spells in this school are fully implemented.
 | BASIC | Water Breathing | Utility | Grants WATER_BREATHING condition for 10 min–4 hours per tier. Cancels active breath timer. Can target self or ally. Mana refund on recast. |
 | BASIC | Speak with Animals | Utility *(stub)* | Communicate with animal mobs. Calm aggression at SKILLED+, animals share info at EXPERT+, brief allies at MASTER+. |
 | EXPERT | Call Lightning | **Fireball eq.** | 6–12d6 lightning (per tier) unsafe AoE. DEX save (DC = caster d20+WIS+mastery) for half. Uses WIS modifier (not INT). Lower mana than Fireball — nature design choice. |
-| GM | Earthquake | **Wow factor** *(stub)* | Massive unsafe AoE bludgeoning damage + STUNNED/knockdown to all in room. Hits caster and allies. 100 mana, 3 round cooldown. |
+| GM | Earthquake | **Wow factor** *(stub)* | Massive unsafe AoE bludgeoning damage + STUNNED/knockdown to all in room. Hits caster and allies. 100 mana, 5 round cooldown. |
 
 ---
 
@@ -638,7 +643,7 @@ class MagicMissile(Spell):
         })
 ```
 
-**Base `Spell` class** (`world/spells/base_spell.py`) handles: mastery check, cooldown check, mana deduction, dispatch to `_execute()`. Subclass per spell implements `_execute(caster, target)` which returns `(bool, dict)` with first/second/third person messages. Validation failures return `(False, str)`. Each spell also has `description` (short flavour text) and `mechanics` (multi-line rules/scaling text) for the future `spellinfo` command.
+**Base `Spell` class** (`world/spells/base_spell.py`) handles: mastery check, cooldown check (via shared `CombatHandler.skill_cooldown`), mana deduction, dispatch to `_execute()`, combat entry on hostile casts (via `should_enter_combat` per affected target), and cooldown application on success. Subclass per spell implements `_execute(caster, target)` which returns `(bool, dict)` with first/second/third person messages. Validation failures return `(False, str)`. Each spell also has `description` (short flavour text) and `mechanics` (multi-line rules/scaling text) for the future `spellinfo` command.
 
 **Class attributes:**
 - `key` — unique registry key (e.g. `"magic_missile"`)
@@ -657,11 +662,11 @@ class MagicMissile(Spell):
 
 | Value | Meaning |
 |---|---|
-| `"hostile"` | An enemy in the room. Target required. |
-| `"friendly"` | An ally in the room. Defaults to self if blank. |
-| `"self"` | The caster, always. |
-| `"none"` | No target. |
-| `"any"` | Any actor in the room. |
+| `"actor_hostile"` | An enemy in the room. Target required. Default triggers combat entry on the target. |
+| `"actor_friendly"` | An ally in the room. Defaults to self if blank. No combat entry. |
+| `"self"` | The caster, always. No combat entry. |
+| `"none"` | No target. No combat entry. |
+| `"actor_any"` | Any actor in the room. No combat entry by default — override `should_enter_combat` if a hostile-intent variant is needed. |
 
 **Item targets** (resolved via `world.spells.spell_utils.resolve_item_target`):
 
@@ -714,9 +719,76 @@ Mixed into `FCMCharacter`. Provides `learn_spell()`, `knows_spell()`, `memorise_
 - Scrolls can also be cast directly (one-time use, no transcription, lower/no level requirement) — deferred
 - Every mage spell has a corresponding scroll prototype in `world/prototypes/consumables/scrolls/`. Cleric spells are auto-learned on skill-up (no scrolls needed).
 
+### Combat Integration
+
+Hostile spells are full participants in the combat round system, not a
+parallel track. Two hooks make this declarative and overridable per spell.
+
+**1. Combat entry on successful cast.** `BaseSpell.cast()` invokes
+`should_enter_combat(caster, target, result)` once per affected target
+(primary + AoE secondaries) after `_execute()` succeeds. If it returns True,
+`enter_combat(caster, target)` fires — the same entry point used by bash,
+pummel, and the `attack` command. The target is pulled into a handler, sides
+are assigned, initiative rolls, and the weapon ticker starts.
+
+Default rule:
+
+```python
+def should_enter_combat(self, caster, target, result):
+    return self.target_type == "actor_hostile"
+```
+
+Overrides handle conditional cases. The canonical example is Charm Person:
+
+```python
+def should_enter_combat(self, caster, target, result):
+    # Successful charm = target controlled, no fight. Resist = target
+    # knows you tried to dominate them and responds hostilely.
+    return result.get("resisted", False)
+```
+
+Spells with non-hostile `target_type` (`actor_friendly`, `self`, `none`) never
+aggro by default. Reactive spells that bypass `cast()` entirely (Smite, Shield)
+are unaffected.
+
+**2. Shared pacing counter.** Every cast sets
+`handler.skill_cooldown = spell.get_cooldown()`. That counter is decremented
+once per tick by the existing combat handler logic, and blocks any
+subsequent spell cast **or** skill-special (bash, pummel, stab) while > 0.
+Auto-attacks continue to tick independently — a caster still swings their
+weapon every 4s while paced by the counter.
+
+**Result payload keys** (optional, populated by spells that need conditional
+overrides):
+
+| Key | Meaning |
+|---|---|
+| `landed` | Did the effect apply (damage dealt, condition applied) |
+| `resisted` | Did the target pass a save / win a contested check |
+| `damage` | Aggregate damage dealt |
+| `affected_targets` | Which secondaries were hit (AoE) |
+
+Existing spells that don't populate these keep working — the default
+`should_enter_combat` only needs `target_type` to decide.
+
 ### Spell Implementation Patterns
 
-**Cooldown tracking:** Spell-specific cooldowns tracked in `caster.db.spell_cooldowns`. Override default via `cooldown` class attribute on individual spells.
+**Cooldown tracking:** A successful cast writes its cooldown to
+`CombatHandler.skill_cooldown` — the same shared counter used by bash, pummel,
+stab, and other combat specials. While it's non-zero the caster cannot cast
+another spell **or** fire another skill-special; auto-attacks tick
+independently. This enforces a unified one-special-action-per-round economy
+across physical and magical actions.
+
+Default cooldown is `min_mastery.value` (BASIC=1 .. GM=5) with a floor of 1 so
+a default-configured hostile spell always paces. Per-spell override:
+`cooldown = N` on the class (explicit 0 bypasses pacing — used by reactive
+spells like Smite, Shield, Mage Armor).
+
+Out of combat there is no handler, so `is_on_cooldown()` returns `(False, 0)`
+and utility spells cast freely between fights. The first hostile cast calls
+`enter_combat()` to create the handler, then the cooldown applies. See the
+**Combat integration** section below for the end-to-end flow.
 
 **Duration storage convention:** `_DURATION` dicts store values in their **natural human-readable unit**, then convert to the effect system's unit in `_execute()`:
 - **Seconds-based effects** (`duration_type="seconds"`): store in **minutes** (e.g. `{1: 1, 2: 2, 3: 5}`), convert `* 60` before passing to `apply_named_effect()`. Examples: Invisibility, Sanctuary, Shadowcloak, True Sight.
