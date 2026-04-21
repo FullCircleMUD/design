@@ -449,9 +449,9 @@ sea routes.
 
 | Mastery | Spell | Role | Description |
 |---------|-------|------|-------------|
-| BASIC | Magic Missile | Workhorse | Auto-hit force. tier × (1d4+1) missiles. Spammable, no save, no resistance interaction. |
+| BASIC | Magic Missile | Workhorse | Auto-hit force. tier × (1d4+2) missiles. Sits above the BASIC damage cluster — pays more mana than Fire Bolt for guaranteed damage. Spammable, no save, no resistance interaction. |
 | BASIC | Fire Bolt | Hit-roll DPS | d20+INT+mastery vs AC. tier × d8 fire. Can miss, crit on nat 20 doubles dice. Subject to fire resistance. |
-| BASIC | Frostbolt | Debuff workhorse | Flat 1d6 cold + contested INT+mastery vs CON to apply SLOWED (1–5 rounds per tier). The SLOWED is the value, damage is incidental. |
+| BASIC | Frostbolt | Debuff workhorse | 1d6 + (tier-1) cold + contested INT+mastery vs CON to apply SLOWED (1–5 rounds per tier). The SLOWED is the value, damage scales slowly so it sits well below the BASIC cluster. |
 | SKILLED | Flame Burst | Safe AoE | 3–6d6 fire (per tier). Diminishing accuracy per target (100/80/60/40/20%). |
 | EXPERT | Fireball | **Fireball eq.** | 8–14d6 fire (per tier), unsafe AoE, DEX save (DC = caster d20+INT+mastery) for half. Hits caster + allies. |
 | MASTER | Cone of Cold | Safe AoE + CC | 10–13d6 cold (per tier). Safe AoE diminishing accuracy. Auto-applies SLOWED (1 round at MASTER, 2 at GM — see Known Discrepancies). |
@@ -474,7 +474,7 @@ sea routes.
 
 | Mastery | Spell | Role | Description |
 |---------|-------|------|-------------|
-| BASIC | Drain Life | Workhorse | 2–6d6 cold (per tier). Caster heals 100% of actual damage dealt (after resistance), capped at max HP. Undead are immune (no life force). |
+| BASIC | Drain Life | Workhorse | tier × (1d4+1) cold — sits on the BASIC damage cluster; the 100% heal is the distinguishing rider. Caster heals 100% of actual damage dealt (after resistance), capped at effective max HP. Undead are immune (no life force). |
 | BASIC | Fear | CC | Contested INT+mastery vs WIS. FRIGHTENED for 1–5 rounds — target flees a random exit each round (or cowers if no exits). Save-each-round WIS to break early. HUGE+ immune. |
 | BASIC | Raise Skeleton | Summon *(stub)* | Raise 1–3 weak skeleton minions from a corpse. 2–10 minute duration per tier. Consumes the corpse. |
 | SKILLED | Vampiric Touch | Melee drain | Touch attack (d20+INT+mastery vs AC). 1–4d6 necrotic per tier. Caster heals **above** max HP. Mana cost scales dynamically (3%–95% of max) with the bonus HP bracket. 10-minute duration. |
@@ -633,7 +633,7 @@ class MagicMissile(Spell):
     def _execute(self, caster, target):
         tier = self.get_caster_tier(caster)
         missiles = tier
-        total_damage = sum(dice.roll("1d4+1") for _ in range(missiles))
+        total_damage = sum(dice.roll("1d4+2") for _ in range(missiles))
         target.hp = max(0, target.hp - total_damage)
         s = "s" if missiles > 1 else ""
         return (True, {
