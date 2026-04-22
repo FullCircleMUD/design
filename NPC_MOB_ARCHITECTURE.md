@@ -1,6 +1,6 @@
 # NPC & Mob Architecture — Class Hierarchy & Composition
 
-> For combat mechanics, see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For mob spawning, see [SPAWN_COMMODITY_MOBS.md](SPAWN_COMMODITY_MOBS.md). For NPC services and quests, see [NPC_QUEST_SYSTEM.md](NPC_QUEST_SYSTEM.md). For vertical movement, see [VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md). For combat AI memory and the strategy bot system, see [COMBAT_AI_MEMORY.md](COMBAT_AI_MEMORY.md). For embedded world knowledge, see [LORE_MEMORY.md](LORE_MEMORY.md).
+> For combat mechanics, see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For mob spawning, see [SPAWN_MOBS.md](SPAWN_MOBS.md). For NPC services and quests, see [NPC_QUEST_SYSTEM.md](NPC_QUEST_SYSTEM.md). For vertical movement, see [VERTICAL_MOVEMENT.md](VERTICAL_MOVEMENT.md). For combat AI memory and the strategy bot system, see [COMBAT_AI_MEMORY.md](COMBAT_AI_MEMORY.md). For embedded world knowledge, see [LORE_MEMORY.md](LORE_MEMORY.md).
 
 ## Overview
 

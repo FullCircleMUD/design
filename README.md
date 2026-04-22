@@ -55,8 +55,7 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 | **ECONOMY.md** | Gold sinks, AMM pricing, market tiers, resource economics, revenue model |
 | **TREASURY.md** | Three-wallet architecture (issuer/vault/operating), subscription processing, issuance discipline |
 | **UNIFIED_ITEM_SPAWN_SYSTEM.md** | Calculator + Distributor architecture for resources, gold, knowledge NFTs, and rare items |
-| **SPAWN_COMMODITY_MOBS.md** | Zone-based mob population maintenance via ZoneSpawnScript |
-| **SPAWN_BOSS_MOBS.md** | Unique mob placement and delay-based respawn system (pending refactor) |
+| **SPAWN_MOBS.md** | Mob spawning — JSON rules, population, respawn semantics (`respawn_seconds` vs `death_cooldown_seconds`), area tags, post-spawn hooks |
 | **TELEMETRY.md** | Economy telemetry snapshots, player session tracking, saturation snapshots |
 
 ### Compliance, Billing, Chain Boundary
@@ -124,29 +123,34 @@ Zone Spawn Rules (JSON)
     │
     ▼
 ZoneSpawnScript (15s tick)
-    ├── spawns Commodity Mobs ──► Players encounter → Combat
-    │       │                          │
-    │       ▼                          ▼
-    │   [deleted on death]       CombatHandler (per-combatant)
-    │       │                          │
-    │       └── repopulated by    execute_attack() — full weapon
-    │           next ZoneSpawnScript       hook pipeline
-    │           tick                       │
-    │                                   Weapon mastery effects
-    │                                   Parry / Riposte
-    │                                   Named effects (stun/prone/etc.)
-    │                                        │
-    └── Boss Mobs (is_unique=True)           ▼
-            │                         Mob dies → Corpse (loot)
-            ▼                                │
-        Per-boss _respawn() (current) ──┐    ▼
-        Slated for refactor — see       │   Quest events fire
-        SPAWN_BOSS_MOBS.md              │   XP awarded
-                                        │
-                                        ▼
-                          ZoneSpawnScript fills the gap
-                          for commodity mobs on the next tick
+    │
+    ├── spawns mobs into rooms      ──► Players encounter → Combat
+    │   per their JSON rule                    │
+    │   (target, area_tag, respawn,            ▼
+    │    optional post_spawn_hook)        CombatHandler (per-combatant)
+    │                                          │
+    │                                     execute_attack() — full weapon
+    │                                     hook pipeline (mastery, parry,
+    │                                     riposte, named effects)
+    │                                          │
+    │                                          ▼
+    │                                     Mob dies → Corpse (loot)
+    │                                          │
+    │                                          ├──► Quest events fire
+    │                                          │
+    │                                          ├──► XP awarded
+    │                                          │
+    │                                          └──► die() deletes mob and
+    │                                               (if rule sets
+    │                                                death_cooldown_seconds)
+    │                                               notifies the script
+    │                                               so the cooldown clock
+    │                                               restarts at kill time
+    │
+    └── next tick: rule below target + cooldown elapsed → spawn replacement
 ```
+
+Service NPCs (bartenders, shopkeepers, pets) bypass this loop — they are placed once by world builders, marked `is_unique=True`, and respawn via `delay(self.respawn_delay, self._respawn)` keeping the same dbref. See SPAWN_MOBS.md § What This System Does Not Handle.
 
 ---
 
