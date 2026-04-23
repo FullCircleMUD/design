@@ -481,6 +481,8 @@ Extends `LLMAIMixin` with embedding-based persistent memory. The full vision for
 
 ## Three Memory Systems
 
+> For the narrative vision of how these three systems combine to drive emergent gameplay, see [LLM_VISION.md](LLM_VISION.md).
+
 All NPC intelligence draws from three independent embedding-backed memory systems that compose at prompt time. Each answers a different question:
 
 | System | Table | Question it answers | Design doc |

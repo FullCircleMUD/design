@@ -1,6 +1,6 @@
 # Lore Memory — Embedded World Knowledge for NPCs
 
-> For the NPC/mob AI architecture and how all three memory systems compose, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md) § Three Memory Systems. For NPC interaction memory (dialogue), see [DATABASE.md](DATABASE.md) § pgvector for AI Memory. For combat AI memory and the strategy bot, see [COMBAT_AI_MEMORY.md](COMBAT_AI_MEMORY.md). For world lore source material, see [WORLD.md](WORLD.md).
+> For the big-picture vision of how LLM memory drives emergent gameplay across FCM, see [LLM_VISION.md](LLM_VISION.md). For the NPC/mob AI architecture and how all three memory systems compose, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md) § Three Memory Systems. For NPC interaction memory (dialogue), see [DATABASE.md](DATABASE.md) § pgvector for AI Memory. For combat AI memory and the strategy bot, see [COMBAT_AI_MEMORY.md](COMBAT_AI_MEMORY.md). For world lore source material, see [WORLD.md](WORLD.md).
 
 ---
 

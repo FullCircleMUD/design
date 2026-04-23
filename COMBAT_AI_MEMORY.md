@@ -1,6 +1,6 @@
 # Combat AI Memory & Strategy System
 
-> For NPC/mob class hierarchy and AI tiers, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md). For the interaction memory system (NPC dialogue), see [DATABASE.md](DATABASE.md) § pgvector for AI Memory. For embedded world knowledge, see [LORE_MEMORY.md](LORE_MEMORY.md). For how all three memory systems compose, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md) § Three Memory Systems. For combat mechanics and attack resolution, see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For the existing `ai_memory` app and dual-backend embedding storage, see `src/game/CLAUDE.md` § LLM NPC system.
+> For the big-picture vision of how LLM memory drives emergent gameplay across FCM, see [LLM_VISION.md](LLM_VISION.md). For NPC/mob class hierarchy and AI tiers, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md). For the interaction memory system (NPC dialogue), see [DATABASE.md](DATABASE.md) § pgvector for AI Memory. For embedded world knowledge, see [LORE_MEMORY.md](LORE_MEMORY.md). For how all three memory systems compose, see [NPC_MOB_ARCHITECTURE.md](NPC_MOB_ARCHITECTURE.md) § Three Memory Systems. For combat mechanics and attack resolution, see [COMBAT_SYSTEM.md](COMBAT_SYSTEM.md). For the existing `ai_memory` app and dual-backend embedding storage, see `src/game/CLAUDE.md` § LLM NPC system.
 
 ---
 

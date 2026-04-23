@@ -31,6 +31,7 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 
 | Document | What It Covers |
 |---|---|
+| **LLM_VISION.md** | Narrative entry point for FCM's LLM layer — how the three memory systems compose to make the world come alive and drive emergent gameplay. Read this first, then drill into the specs below |
 | **NPC_MOB_ARCHITECTURE.md** | BaseNPC / CombatMob composition hierarchy, mixin system, mob AI tiers, hybrid LLM combat mobs |
 | **NPC_QUEST_SYSTEM.md** | NPC hierarchy, training, shopkeeping, quest engine, implemented quests |
 | **LORE_MEMORY.md** | Embedded world knowledge for NPCs — scope-tagged lore entries, semantic retrieval, multi-tag AND semantics |
