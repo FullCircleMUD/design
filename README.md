@@ -152,7 +152,7 @@ ZoneSpawnScript (15s tick)
     └── next tick: rule below target + cooldown elapsed → spawn replacement
 ```
 
-Service NPCs (bartenders, shopkeepers, pets) bypass this loop — they are placed once by world builders, marked `is_unique=True`, and respawn via `delay(self.respawn_delay, self._respawn)` keeping the same dbref. See SPAWN_MOBS.md § What This System Does Not Handle.
+Service NPCs (bartenders, shopkeepers, etc.) bypass this loop — they are placed once by world builders and default to `is_immortal=True`, so they never reach `die()` and the spawn system never has to replace them. See SPAWN_MOBS.md § What This System Does Not Handle.
 
 ---
 
@@ -247,8 +247,8 @@ POST-KILL:
     at_kill() on weapon → mob special abilities (Rampage, Cleave)
     XP awarded to the killer (formula in BaseActor.die / _award_xp)
     Corpse dropped with mob's loot
-    is_unique=False → mob deleted, ZoneSpawnScript repopulates
-    is_unique=True → mob stays in DB, _respawn() scheduled
+    Mob deleted; ZoneSpawnScript repopulates after the rule's
+        death_cooldown_seconds (or respawn_seconds) elapses
 ```
 
 ---

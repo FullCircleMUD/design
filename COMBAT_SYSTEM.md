@@ -722,7 +722,7 @@ commands/
 typeclasses/
 ├── actors/
 │   ├── base_actor.py         ← effective_attacks_per_round, take_damage(), effective stats
-│   └── mob.py                ← CombatMob — die(), _respawn(), at_kill()
+│   └── mob.py                ← CombatMob — die(), at_kill()
 └── mixins/
     └── effects_manager.py    ← EffectsManagerMixin — tick_combat_round(), clear_combat_effects()
 

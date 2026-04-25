@@ -36,6 +36,8 @@ Every field is optional except `typeclass`, `key`, and `area_tag`. Mix and match
 | `desc` | str | Sets `mob.db.desc`. |
 | `attrs` | dict | Per-rule stat/attribute overrides applied via `setattr(mob, k, v)` after creation. Routes through `AttributeProperty` to `.db`. Use this to give one generic typeclass many distinct named instances. |
 | `post_spawn_hook` | str (dotted path) | Module-level `fn(mob) -> None` invoked after `start_ai()` on every fresh spawn. Used to set AI state, reset per-life flags, etc. |
+| `spawn_with_typeclass` | str (dotted path) | Pack-spawn hint. If a living instance of this typeclass exists within the rule's `area_tag`, spawn into *that mob's room* (followers appear with their leader). Falls through to `den_room_tag`, then to a random pick, when no living instance exists or the chosen room is full. |
+| `den_room_tag` | str | Single-room fallback for pack respawn. Used as the primary location when `spawn_with_typeclass` finds no living leader, and as the fixed respawn point for the leader itself. The room must carry this tag in category `mob_area`. |
 
 A rule's `attrs` dict can also override loot fields (`loot_gold_max`, `loot_resources`, `spawn_recipes_max`, `spawn_scrolls_max`). The script re-reads these after applying `attrs` and updates spawn-tag categories so the unified item spawn service can find the mob.
 
@@ -112,6 +114,34 @@ A bespoke typeclass (`KoboldChieftain`) handles combat-tick behaviours like the 
 
 12 kobolds in the area, but 25% drop a recipe — controlled by spawn-table targets, not runtime RNG. Both rules share `key`, `desc`, and `area_tag` so players can't tell them apart. See § Pseudo-Random Loot below.
 
+### Pack spawning — followers appear with their leader
+
+```json
+[
+    {
+        "typeclass": "...mobs.southern_wolf.Direwolf",
+        "key": "a direwolf",
+        "area_tag": "wolves_ne",
+        "target": 1, "max_per_room": 1,
+        "death_cooldown_seconds": 1800,
+        "den_room_tag": "wolves_ne_den",
+        "attrs": {"den_room_tag": "wolves_ne_den"}
+    },
+    {
+        "typeclass": "...mobs.southern_wolf.SouthernWolf",
+        "key": "a southern wolf",
+        "area_tag": "wolves_ne",
+        "target": 3, "max_per_room": 4,
+        "death_cooldown_seconds": 1800,
+        "spawn_with_typeclass": "...mobs.southern_wolf.Direwolf",
+        "den_room_tag": "wolves_ne_den",
+        "attrs": {"den_room_tag": "wolves_ne_den"}
+    }
+]
+```
+
+The alpha respawns at `wolves_ne_den` (one designated room). Each follower respawns into the alpha's *current* room when alive — co-locating the pack on respawn so the `MobFollowableMixin` can lock onto the leader on the next AI tick. If the alpha is dead, followers fall back to the den room and wait for the leader to respawn. The `attrs.den_room_tag` is read by the mob's own `ai_retreating()` for healing behavior; the rule-level `den_room_tag` is read by `_pick_spawn_room` for placement.
+
 ### Mastery override on a generic mob class
 
 ```json
@@ -149,7 +179,7 @@ Single source of truth — define an area once, mobs spawn and roam within it.
 
 ## Death Lifecycle
 
-`CombatMob.die()` runs the common death sequence (corpse, loot transfer, XP, alignment) and then:
+`CombatMob.die()` runs the common death sequence (corpse, loot transfer, XP, alignment) and then deletes the mob. The `ZoneSpawnScript` spawns a fresh replacement on the rule's `death_cooldown_seconds` clock — the same object never returns.
 
 ```python
 # Notify ZoneSpawnScript when this mob carried death-cooldown metadata
@@ -160,14 +190,7 @@ if rule_id and zone_key:
     if script:
         script.on_mob_death(rule_id)
 
-# Branch on is_unique
-if self.is_unique:
-    # Service NPC path (bartenders, shopkeepers, pets) — see below
-    self.location = None
-    delay(self.respawn_delay, self._respawn)
-else:
-    # All combat mobs — delete; ZoneSpawnScript spawns a fresh replacement
-    self.delete()
+self.delete()
 ```
 
 The `db.spawn_rule_id` and `db.spawn_zone_key` attributes are stamped on the mob at spawn time when its rule sets `death_cooldown_seconds`. `on_mob_death(rule_id)` updates `last_spawn_times[rule_id] = now`, so the existing cooldown check in `_check_rule` then naturally measures from death.
@@ -209,7 +232,7 @@ Examples in the codebase: `Kobold` + `KoboldRecipeLoad`; `Gnoll` + `GnollRecipeL
 
 ## What This System Does Not Handle
 
-- **Service NPCs with `is_unique=True`** — bartenders, shopkeepers, guildmasters, trainers, librarian, town guards, townfolk, and pets. These are placed once by world builders in `npcs.py` files and use `delay(self.respawn_delay, self._respawn)` to come back with the same dbref after death. They live a different lifecycle (placed once, persistent identity, dbref preserved). Don't migrate these — the legacy path is correct for them.
+- **Service NPCs** — bartenders, shopkeepers, guildmasters, trainers, librarian, townfolk, etc. These are placed once by world builders in `npcs.py` files and default to `is_immortal=True` so they never reach `die()`. They have a persistent dbref by virtue of never dying; this system does not respawn them.
 - **Procedural dungeon mobs** — dungeon templates (`world/dungeons/templates/`) own their mobs; mobs are created when an instance spawns and never respawn. See `PROCEDURAL_DUNGEONS.md`.
 - **Mob loot tables** — what items appear on a corpse is handled by the unified item spawn service. See `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
 - **Resource nodes** — see `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
@@ -250,7 +273,7 @@ Each of these is implementable as an extra optional JSON field plus a check in `
 | System | How It Relates |
 |---|---|
 | **AI handlers** | Spawned mobs use `area_tag` for wander containment via the AI state machine; `post_spawn_hook` can flip the initial AI state (e.g. `set_ai_idle`). |
-| **Combat** | Mob death triggers deletion (or the legacy NPC respawn path). The script repopulates after the cooldown. |
+| **Combat** | Mob death deletes the object. The script repopulates after the rule's cooldown. |
 | **Procedural dungeons** | Dungeons spawn their own mobs — outside the zone-script scope. |
 | **Quest system** | Quest progress matches kills by typeclass string, not dbref. JSON create/delete on each respawn is safe — quests still tick. |
 | **Combat memory** | `CombatMemory` is keyed on mob_type / mob_name / level. Persists across the dbref churn from JSON respawn. |
@@ -270,6 +293,6 @@ world/spawns/
 └── <zone_key>.json           ← per-zone rule lists
 
 typeclasses/actors/
-├── mob.py                    ← CombatMob.die() (deletion + death notification + legacy is_unique branch)
+├── mob.py                    ← CombatMob.die() (corpse + death notification + deletion)
 └── mobs/                     ← mob typeclasses (Wolf, Kobold, KoboldChieftain, GnollWarlord, …)
 ```
