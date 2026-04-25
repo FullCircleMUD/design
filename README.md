@@ -73,6 +73,7 @@ System-level design for FullCircleMUD. These documents describe the *what* and *
 |---|---|
 | **DATABASE.md** | Django app layout, four-database architecture, model overview, migrations |
 | **WEBSITE.md** | Web frontend pages, geo-detection infrastructure, page inventory, implementation status |
+| **CONNECTION_TRANSPORT.md** | Why FCM is WebSocket-only — Cloudflare, `cf-ipcountry`, telnet/SSH limitations, decision rationale |
 
 > Deployment, infrastructure, recovery runbooks, and Railway/CI configuration live in the private `ops/` repository, not in `design/`.
 

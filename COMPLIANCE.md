@@ -101,6 +101,8 @@ See `design/WEBSITE.md` § Terms of Service for page status.
 
 Login geo-logging (IP hash + country code) is gated by `settings.LOG_PLAYER_GEO_DATA` (currently `False`). When disabled, no IP hashes or country codes are recorded. The infrastructure is retained and can be re-enabled if jurisdictional tracking becomes necessary.
 
+The `geo_country` field used here is populated from Cloudflare's `cf-ipcountry` header on the WebSocket handshake. For the transport-layer reasons FCM is WebSocket-only and what telnet/SSH would require to maintain the same compliance posture, see [CONNECTION_TRANSPORT.md](CONNECTION_TRANSPORT.md).
+
 ### Game Activity Logs
 
 Standard game activity logs (session times, economic activity, transfer logs) are maintained for game operations, fraud prevention, and dispute resolution. These are operational records, not compliance audit trails.
