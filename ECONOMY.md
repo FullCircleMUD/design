@@ -434,7 +434,7 @@ Enchanting wearables (rings, amulets, etc.) is **deterministic** — same inputs
 
 ### Weapons — Gem Insets (Enchanter + Jeweller)
 
-> **Status: partially implemented — needs redesign work.** The original implementation used runtime `d100` rolls for gem enchanting, which is non-compliant with FCM's gambling law constraints (no random chance-based mechanics can decide the value a player receives for consideration paid). The enchanting mechanic is being redesigned around the pre-disclosure + slot consumption model described below. Gem tables, enchant recipes, and the inset command (`cmd_inset`) exist in code but the slot-based outcome queue and commit flow need to be built.
+> **Status: shipped.** The `EnchantmentSlot` model, `EnchantmentService` (preview_slot / consume_slot with `select_for_update`), the multi-effect cascade rolling model, the procedural restriction generator, and the slot-based preview→commit flow in `cmd_craft.py` are all live. Race-loss aborts cleanly without consuming materials. See [CRAFTING_SYSTEM.md § Gem Enchanting Architecture](CRAFTING_SYSTEM.md) for the implementation surface and [§ Implementation status](CRAFTING_SYSTEM.md) for what remains pending (engine wiring of named effects like detect_traps/regen_multiplier, restriction enforcement, emerald/diamond recipes, ingredient tier expansion, LLM name generation).
 
 Two distinct crafting roles combine to produce enchanted weapons:
 
@@ -453,28 +453,35 @@ Because there are potentially hundreds of weapon types and scores of possible ge
 
 ```
 EnchantmentSlot
-├── table_key         "ruby_skilled", "sapphire_expert", etc.
+├── output_table      "enchanted_ruby" | "enchanted_emerald" | "enchanted_diamond"
+├── mastery_level     1-5 (BASIC..GRANDMASTER)  — unique together with output_table
 ├── slot_number       monotonically increasing integer, for display
-├── current_outcome   the rolled result waiting to be claimed
+├── current_outcome   JSON: {"wear_effects": [...], "restrictions": {...}}
 └── rolled_at         timestamp of when this outcome was generated
 ```
 
-One row per `(gem_type, mastery_level)` combination. At bootstrap, each row is seeded with `slot_number=1` and a freshly rolled outcome. Every slot has an outcome ready from day one — players never see an empty slot.
+One row per `(output_table, mastery_level)` combination. Rows are seeded **lazily** by `EnchantmentService.preview_slot()` on first query — adding new entries to `gem_tables.py` requires no migration.
+
+`current_outcome` holds two values that map directly onto existing item systems:
+- **`wear_effects`** — list of standard wear_effect dicts (same shape used by every other item; ready to extend a weapon's `wear_effects` array on inset).
+- **`restrictions`** — dict whose keys are `ItemRestrictionMixin` field names (`required_classes`, `excluded_classes`, `required_races`, `excluded_races`, `min_alignment_score`, `max_alignment_score`). Applied to the gem's mixin fields directly; on inset, merged into the weapon's same fields.
+
+Both can be empty (no-op cascade).
 
 #### Query flow (`enchant <gem>`)
 
 ```
 Player types: enchant ruby
 
-System reads the ruby_skilled slot (pure read, no DB write):
+cmd_craft.py calls EnchantmentService.preview_slot(output_table, mastery)
+  → pure read; lazily seeds the row on first ever query
 
-    "The next ruby enchant [SKILLED] is enchant #312.
-     It will have these effects:
-       +1 perception bonus
-       +1 stealth bonus
-       Restriction: Thief class only
+    "Next available enchantment (slot #312):
+       Effects: +1 perception bonus, +1 stealth bonus
+       Restrictions: must be class thief; non-evil alignment only
 
-     If another player accepts this before you, it will become unavailable.
+     (Another enchanter may claim this slot before you.
+      If so, no materials will be consumed.)
      Continue [Y]/N?"
 ```
 
@@ -482,39 +489,34 @@ System reads the ruby_skilled slot (pure read, no DB write):
 
 #### Commit flow (player types Y)
 
-The commit happens inside a database transaction using row-level locking:
+`cmd_craft.py` calls `EnchantmentService.consume_slot(output_table, mastery, expected_slot_number)` **before** consuming materials. Race-loss costs the player nothing.
 
 ```
 BEGIN TRANSACTION
-    SELECT EnchantmentSlot FOR UPDATE WHERE table_key = "ruby_skilled"
+    SELECT EnchantmentSlot FOR UPDATE
+      WHERE output_table = "enchanted_ruby" AND mastery_level = 2
         ← lock acquired; concurrent commits block here
 
-    IF slot.slot_number == remembered_slot_number:
-        # ── Race won: slot is still what the player saw ──
-        apply outcome to the gem
-        consume gem + pay fee
+    IF slot.slot_number == expected_slot_number:
+        # ── Race won ──
+        outcome = slot.current_outcome
         slot.slot_number += 1
-        slot.current_outcome = roll_next_outcome()
-        slot.rolled_at = now()
+        slot.current_outcome = roll_gem_enchantment(...)   # next outcome rolled HERE
+        slot.save()
         COMMIT
-        Display: "Your ruby is now enchanted with: ..."
+        return outcome    # caller now consumes materials, runs craft progress
+                          # bar, then stamps outcome onto the spawned gem
 
     ELSE:
         # ── Race lost: another player consumed #312 first ──
-        new_slot_number = slot.slot_number
-        new_outcome = slot.current_outcome
         COMMIT (no changes written)
-        Display: "Someone else claimed ruby enchant #312 just before you.
-
-                  The next ruby enchant [SKILLED] is now #313.
-                  Effects: ...
-                  If another player accepts this before you, it will
-                  become unavailable.
-                  Continue [Y]/N?"
-        (re-prompt with the new slot number)
+        return None       # caller aborts, tells player the new slot number,
+                          # no materials consumed
 ```
 
-`SELECT ... FOR UPDATE` (Django's `select_for_update()`) guarantees only one commit transaction can be "inside" a given slot at a time. The second transaction waits for the first to finish, then reads the updated state. The `slot_number` check acts as a tiebreaker so the race loser knows to re-prompt with the new slot.
+`select_for_update()` guarantees only one commit transaction can be inside a given slot at a time. The `slot_number` tiebreaker handles the race-loss path. Because `consume_slot` runs BEFORE materials are consumed in `cmd_craft.py`, race-loss is safe — the player simply re-issues the command to see the next slot.
+
+The next outcome is rolled at the moment of consumption (not in advance, not lazily on rejection). Effects are produced by the layered cascade (`roll_effects`); restrictions by the procedural restriction generator (`roll_restrictions`). See [CRAFTING_SYSTEM.md § Gem Enchanting Architecture](CRAFTING_SYSTEM.md) for the rolling model.
 
 #### Two rules, two purposes
 
