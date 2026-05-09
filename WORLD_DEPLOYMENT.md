@@ -16,9 +16,9 @@ The pipeline is therefore tiered. A small **world base** of connective tissue is
 ## Three-Tier Architecture
 
 ```
-World base   (zone:world_base)            never rebuilt in production
-├── Gateways    (district:gateways)       cross-zone transition rooms
-└── System      (district:system)         Limbo, Purgatory, recycle bin
+World base   (zone:world_base)*           never rebuilt in production
+├── Gateways    (district:gateways)*      cross-zone transition rooms
+└── System      (district:system)*        Limbo, Purgatory, recycle bin
 
 Zones        (zone:<x>)                   rebuildable
 └── Districts   (district:<y>)            rebuildable, the redeploy unit
@@ -26,14 +26,20 @@ Zones        (zone:<x>)                   rebuildable
 Spawn rules  (JSON in world/spawns/)      hot-reloadable, self-healing
 ```
 
+\* Target tag scheme. Today's shipped reality (see [Tag Conventions](#tag-conventions) for the full mapping):
+- System rooms are tagged `zone:system_zone` + `district:system_district` (set in `_ensure_system_room` in `deploy_world.py`).
+- Gateway rooms are tagged with their owning zone's actual `zone`/`district` keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`), not a unified `world_base` meta-zone.
+
+The unification under `zone:world_base` lands when `build_world_base()` is factored out — see [What's Implemented vs Planned](#whats-implemented-vs-planned).
+
 ### World Base
 
 The world base is the connective scaffolding the rest of the world hangs off. It contains:
 
-- **Gateway rooms** — every cross-zone transition room (`RoomGateway` instances), tagged `zone:world_base` + `district:gateways`. Their `destinations` lists are populated by zone builders during their build pass; the rooms themselves are not destroyed.
-- **System rooms** — Limbo, Purgatory, the NFT recycle bin. Tagged `zone:world_base` + `district:system`. Already protected today via `_is_system_room()` (`world/game_world/zone_utils.py`).
+- **Gateway rooms** — every cross-zone transition room (`RoomGateway` instances). Today tagged with their owning zone's `zone`/`district` keys; planned to migrate to `zone:world_base` + `district:gateways` when the world base layer is codified. Their `destinations` lists are populated by zone builders during their build pass; the rooms themselves are not destroyed.
+- **System rooms** — Limbo, Purgatory, the NFT recycle bin. Today tagged `zone:system_zone` + `district:system_district`; planned to migrate to `zone:world_base` + `district:system`. Protected today via name-match in `_is_system_room()` (`world/game_world/zone_utils.py`) — the tag-based protection planned alongside the unification will replace the name-match check.
 
-The world base is built by a one-shot setup function and is not part of any zone or district redeploy path. Its rooms have stable dbrefs that other code may rely on.
+The world base is built by a one-shot setup function and is not part of any zone or district redeploy path. Its rooms have stable dbrefs that other code may rely on. The two system rooms also have a YAML-authored counterpart at `shard0/scaffold/` in fcm-world for atomic per-room redeploy via the `evennia-world-builder` library.
 
 ### Zones
 
@@ -104,17 +110,21 @@ A composite-key resolver is cheaper than introducing a per-room semantic tag (`r
 
 Tags are already applied consistently across all 21 active zones; this section codifies the convention so future builders stay aligned.
 
-| Category   | Value                  | Applied to                          |
-|------------|------------------------|-------------------------------------|
-| `zone`     | `<zone_key>`           | every room in the zone              |
-| `zone`     | `world_base`           | gateways, system rooms              |
-| `district` | `<district_key>`       | every room in the district          |
-| `district` | `gateways`             | cross-zone transition rooms         |
-| `district` | `system`               | Limbo, Purgatory, recycle bin       |
-| `mob_area` | `<spawn_area_key>`     | rooms participating in a spawn pool |
-| `map_cell` | `<terrain>:<point>`    | cartography survey grid             |
+| Category   | Value                  | Applied to                          | Status |
+|------------|------------------------|-------------------------------------|--------|
+| `zone`     | `<zone_key>`           | every room in the zone              | shipped |
+| `zone`     | `system_zone`          | system rooms (Purgatory, recycle bin) — set by `_ensure_system_room` | shipped |
+| `zone`     | `world_base`           | gateways, system rooms (unified)    | planned (replaces `system_zone` + per-zone gateway tagging) |
+| `district` | `<district_key>`       | every room in the district          | shipped |
+| `district` | `system_district`      | system rooms (Purgatory, recycle bin) | shipped |
+| `district` | `gateways`             | cross-zone transition rooms         | planned |
+| `district` | `system`               | Limbo, Purgatory, recycle bin (unified naming) | planned |
+| `mob_area` | `<spawn_area_key>`     | rooms participating in a spawn pool | shipped |
+| `map_cell` | `<terrain>:<point>`    | cartography survey grid             | shipped |
 
 Every room must carry exactly one `zone` tag and one `district` tag. Other tag categories are additive and orthogonal.
+
+Today gateway rooms are tagged with their owning zone's keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`) — they are not yet unified under a `world_base` meta-zone. The unification is part of the planned `build_world_base()` factor-out.
 
 ## Build & Clean Operations
 
@@ -124,7 +134,7 @@ The pipeline mirrors Evennia's own clean-by-tag pattern:
 |---------------------------------|-------------------------------------|------------|
 | `clean_zone(zone)`              | tag `zone == zone`                  | implemented |
 | `clean_district(zone, district)`| tag `zone == zone` AND `district == district` | planned   |
-| `clean_world_base()`            | tag `zone == world_base`            | not exposed; behind interactive confirm |
+| `clean_world_base()`            | planned: tag `zone == world_base`; today no equivalent exists (system rooms are protected by name match in `_is_system_room()` and never enter any clean path) | not exposed; behind interactive confirm |
 | `build_zone()` per zone         | calls each `build_<district>()`     | partly implemented (inline today) |
 | `build_district(zone, district)`| creates rooms with both tags        | planned (factor out) |
 | `build_world_base()`            | one-shot setup                      | partly implemented (`_ensure_system_room` etc.) |
@@ -137,7 +147,7 @@ Clean steps mirror today's `clean_zone()`:
 4. **Delete exits** whose location is in the affected scope.
 5. **Delete rooms** in the affected scope.
 
-System rooms are protected by their `zone:world_base` tag and never enter the delete set.
+System rooms are protected today by **name match** in `_is_system_room()` (`SYSTEM_KEYS = {"Limbo", "Purgatory", "nft_recycle_bin"}`) and never enter the delete set. Once they unify under `zone:world_base` per the planned factor-out, the protection switches to a tag check on the same set.
 
 ## Redeploy Protocol
 
@@ -276,7 +286,8 @@ New-shard deployment is anticipated to be a roughly yearly event at most, so non
 - `RoomGateway` model with declarative `destinations` list, repopulated by `deploy_world()`.
 - `ZoneSpawnScript` with hot-reload of JSON spawn rules and self-healing population on tick.
 - `@rebuild_world` and `@rebuild_zone` commands running in background threads.
-- System room protection via `_is_system_room()` in `zone_utils.py`.
+- System room protection via name-match in `_is_system_room()` in `zone_utils.py`. System rooms are tagged `zone:system_zone` + `district:system_district` today, but the protection is by name (`SYSTEM_KEYS`), not by tag.
+- YAML-authored scaffold for atomic per-room redeploy of system rooms via the `evennia-world-builder` library — see `shard0/scaffold/purgatory.yaml` and `shard0/scaffold/nft_recycle_bin.yaml` in fcm-world. Each file owns one room and can be rebuilt in isolation.
 
 **Planned (this design):**
 
@@ -285,7 +296,7 @@ New-shard deployment is anticipated to be a roughly yearly event at most, so non
 - District manifest in `deploy_world.py` (or sibling module).
 - Per-district `build_<district>()` factored out of monolithic `build_zone()` orchestrators.
 - `@rebuild_district <zone> <district>` admin command.
-- Codification of the world base layer (gateways, system rooms) under `zone:world_base`.
+- Codification of the world base layer under `zone:world_base`. This unifies gateway rooms (today tagged with their owning zone's keys) and system rooms (today tagged `zone:system_zone` + `district:system_district`) into one meta-zone with `district:gateways` and `district:system` sub-districts. `_is_system_room()` becomes a tag check rather than a name check.
 - `SHARD_ID` env var read by `build_world_base()` so the same script runs everywhere (when sharding lands; today the script just builds everything).
 
 The implementation is small in surface area; most of the discipline is convention rather than code. The single largest engineering task is factoring existing zone builders into per-district functions and registering them in the manifest — work that can proceed zone by zone without breaking anything.
