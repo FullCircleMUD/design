@@ -51,6 +51,7 @@ The foundation for all game rooms. Provides environment systems (lighting, weath
 | `natural_light` | None | Override lighting (None = derive from terrain) |
 | `always_lit` | False | Permanently lit (torches, magical light) |
 | `sheltered` | None | Override weather exposure (None = derive from terrain) |
+| `subterranean` | None | Override weather suppression (None = derive from terrain; True = no weather at all, e.g. extra-planar/void rooms with no terrain tag to lean on) |
 
 ### Zone / District / Terrain Tagging
 
@@ -88,7 +89,7 @@ Terrain drives three derived properties:
 | `is_sheltered` | URBAN = True, else False | Muffled weather sounds |
 | `is_weather_exposed` | Not subterranean AND not sheltered | Full weather effects |
 
-All derivations can be overridden via explicit `natural_light`, `always_lit`, or `sheltered` attributes.
+All derivations can be overridden via explicit `natural_light`, `always_lit`, `sheltered`, or `subterranean` attributes. The `subterranean` override exists for rooms that need weather suppressed without claiming the underground/dungeon terrain — e.g. RoomPurgatory (the void between life and death), or any future extra-planar / dream-sequence / debug room.
 
 ### Lighting System
 
@@ -293,7 +294,18 @@ Global fallback location. Characters with no home end up here. Zone cleanup evac
 
 **File:** `typeclasses/terrain/rooms/room_purgatory.py`
 
-Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Created once in `deploy_world()`.
+Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Created once in `deploy_world()` (or via the YAML scaffold at `shard0/scaffold/purgatory.yaml` in fcm-world).
+
+Class-level overrides ensure the void between lives is mechanically inert without per-instance YAML or post-creation hooks:
+
+| Attribute | RoomBase default | RoomPurgatory override | Effect |
+|---|---|---|---|
+| `allow_combat` | True | False | No fights in the death-state room |
+| `allow_pvp` | False | False | (matches base; declared for clarity) |
+| `allow_death` | True | False | Cannot die again while already dead |
+| `always_lit` | False | True | The "dim light pulses" — never dark |
+| `max_height` | 1 | 0 | No flying / vertical movement |
+| `subterranean` | None (derived) | True | No rain, snow, or wind in the void |
 
 ### RoomRecycleBin
 
@@ -336,7 +348,7 @@ Rooms are classified as `"WORLD"` for blockchain service dispatch — fungible o
 2. **CmdSets are injected once** in `at_object_creation()` with `persistent=True`. They survive server restarts.
 3. **Override display hooks, not return_appearance** — customize rooms by overriding `get_display_header/footer/desc`, not by rewriting the assembly logic.
 4. **`from_obj=caller` is mandatory** on all `msg_contents` calls for HIDDEN/INVISIBLE filtering to work.
-5. **Terrain drives defaults** — set terrain once, lighting and weather exposure derive automatically. Only override `natural_light`, `always_lit`, or `sheltered` when the default derivation is wrong.
+5. **Terrain drives defaults** — set terrain once, lighting and weather exposure derive automatically. Only override `natural_light`, `always_lit`, `sheltered`, or `subterranean` when the default derivation is wrong (or when the room has no terrain tag and shouldn't fall through to the "no terrain = exposed, lit by sun" defaults).
 6. **Quest tags are lists** — a room can trigger multiple quests on entry.
 7. **Safe zones** set `allow_combat=False, allow_pvp=False, allow_death=False` — this is the standard pattern for banks, inns, temples, etc.
 8. **Room/object lookup: always filter by district tag.** Evennia's `db_key` is NOT globally unique — it's also the player-visible room name. Multiple zones will have rooms with the same key (e.g. "The Vault"). Always scope `ObjectDB.objects.filter()` with a district or zone tag, or search within a known room's `.contents`. See CLAUDE.md § "Room/Object Lookup Convention" for full patterns.
