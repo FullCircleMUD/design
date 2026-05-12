@@ -232,7 +232,7 @@ Examples in the codebase: `Kobold` + `KoboldRecipeLoad`; `Gnoll` + `GnollRecipeL
 
 ## What This System Does Not Handle
 
-- **Service NPCs** — bartenders, shopkeepers, guildmasters, trainers, librarian, townfolk, etc. These are placed once by world builders in `npcs.py` files and default to `is_immortal=True` so they never reach `die()`. They have a persistent dbref by virtue of never dying; this system does not respawn them.
+- **Service NPCs** — bartenders, shopkeepers, guildmasters, trainers, librarian, townfolk, etc. These are authored as YAML entities in fcm-world (typically one NPC file per character, e.g. `shard0/millholm/town/npc_aldric.yaml`) and default to `is_immortal=True` so they never reach `die()`. They have a persistent dbref by virtue of never dying; this system does not respawn them.
 - **Procedural dungeon mobs** — dungeon templates (`world/dungeons/templates/`) own their mobs; mobs are created when an instance spawns and never respawn. See `PROCEDURAL_DUNGEONS.md`.
 - **Mob loot tables** — what items appear on a corpse is handled by the unified item spawn service. See `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
 - **Resource nodes** — see `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
@@ -278,7 +278,7 @@ Each of these is implementable as an extra optional JSON field plus a check in `
 | **Quest system** | Quest progress matches kills by typeclass string, not dbref. JSON create/delete on each respawn is safe — quests still tick. |
 | **Combat memory** | `CombatMemory` is keyed on mob_type / mob_name / level. Persists across the dbref churn from JSON respawn. |
 | **Unified item spawn service** | Loot drops are placed onto mobs by the unified spawn service tagging. The zone script re-syncs `spawn_resources` / `spawn_gold` / `spawn_scrolls` / `spawn_recipes` tag categories after applying `attrs`. |
-| **World builder scripts** | Call `ZoneSpawnScript.create_for_zone(zone_key)` after rooms exist and tags are placed. |
+| **Per-zone `soft_deploy.py`** | After `wb_build` has placed rooms and `mob_area` tags, call `ZoneSpawnScript.create_for_zone(zone_key)` from the zone's `build_zone()` (`src/game/world/game_world/zones/<zone>/soft_deploy.py`). The script then maintains population against the YAML-deployed world. |
 
 ---
 

@@ -288,13 +288,13 @@ Infrastructure rooms that support game mechanics. Not part of any zone — creat
 
 **Evennia default room** (`#2`, `settings.DEFAULT_HOME`)
 
-Global fallback location. Characters with no home end up here. Zone cleanup evacuates players to Limbo before deleting rooms. New characters start here before entering the tutorial or game world. Contains a one-way exit down to The Harvest Moon (game entry point, created by `deploy_world` with `one_way_limbo=True`).
+Global fallback location. Characters with no home end up here. Zone cleanup evacuates players to Limbo before deleting rooms. New characters start here before entering the tutorial or game world. Contains a one-way exit down to The Harvest Moon (game entry point, authored in the fcm-world YAML scaffold).
 
 ### RoomPurgatory
 
 **File:** `typeclasses/terrain/rooms/room_purgatory.py`
 
-Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Created once in `deploy_world()` (or via the YAML scaffold at `shard0/scaffold/purgatory.yaml` in fcm-world).
+Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Authored in the fcm-world YAML scaffold at `shard0/scaffold/purgatory.yaml` and built by `wb_build` like any other room.
 
 Class-level overrides ensure the void between lives is mechanically inert without per-instance YAML or post-creation hooks:
 
@@ -318,7 +318,7 @@ Hidden infrastructure room for orphaned object cleanup. No exits, no player inte
 - **NFT items** are despawned from the blockchain mirror DB and deleted.
 - **All other objects** (WorldItems, fixtures, corpses, etc.) are deleted with a log message.
 
-This is the catch-all safety net — anything that loses its location during zone cleanup, room deletion, or container destruction ends up here and is cleaned up automatically. Created once in `deploy_world()`. All NFT items use this room as their `home` so orphaned NFTs are always caught.
+This is the catch-all safety net — anything that loses its location during zone cleanup, room deletion, or container destruction ends up here and is cleaned up automatically. Authored in the fcm-world YAML scaffold at `shard0/scaffold/nft_recycle_bin.yaml` and built by `wb_build`. All NFT items declare this room as their `home:` in YAML so orphaned NFTs are always caught.
 
 ## CmdSet Injection Pattern
 

@@ -152,7 +152,7 @@ ZoneSpawnScript (15s tick)
     └── next tick: rule below target + cooldown elapsed → spawn replacement
 ```
 
-Service NPCs (bartenders, shopkeepers, etc.) bypass this loop — they are placed once by world builders and default to `is_immortal=True`, so they never reach `die()` and the spawn system never has to replace them. See SPAWN_MOBS.md § What This System Does Not Handle.
+Service NPCs (bartenders, shopkeepers, etc.) bypass this loop — they are authored once in fcm-world YAML and default to `is_immortal=True`, so they never reach `die()` and the spawn system never has to replace them. See SPAWN_MOBS.md § What This System Does Not Handle.
 
 ---
 

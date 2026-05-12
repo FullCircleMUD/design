@@ -88,7 +88,7 @@ This is the creative bible for FullCircleMUD. Everything that shapes the *world 
 
 | System | Type | Current Content | Expandability |
 |---|---|---|---|
-| Zones | Registry | 1 (Millholm, 11 districts, ~400+ rooms) | Add a Python builder script. Zone/district/terrain tags. Soft rebuild support. |
+| Zones | Registry | 1 (Millholm, 11 districts, ~400+ rooms) | Add YAML files under `fcm-world/shard0/<zone>/`. Zone/district/terrain tags. Per-file `wb_build` redeploy. See [WORLD_DEPLOYMENT.md](WORLD_DEPLOYMENT.md). |
 | Terrain types | Registry | 12 (Urban, Rural, Forest, Mountain, Desert, Swamp, Coastal, Underground, Dungeon, Water, Arctic, Plains) | Add to TerrainType enum. Drives weather exposure, natural light, forage eligibility, future systems. |
 | Climate zones | Registry | 5 (Temperate, Arctic, Desert, Tropical, Coastal) | Add to ClimateZone enum + weather tables. Per-zone mapping. |
 | Weather tables | Registry | 20 transition matrices (5 climates x 4 seasons) | Add/tune probabilities. New climates get their own weather personality. |

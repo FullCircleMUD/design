@@ -1,302 +1,230 @@
 # World Deployment
 
-> Technical design document for the world build, redeploy, and hot-reload pipeline. Covers how zones and districts are loaded into the running database, how individual districts can be redeployed without disrupting players in other parts of the world, and the tag and identity conventions that make this safe. For room and exit internals, see [ROOM_ARCHITECTURE.md](ROOM_ARCHITECTURE.md) and [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md). For zone-to-zone travel, see [INTERZONE_TRAVEL.md](INTERZONE_TRAVEL.md). For multi-shard sharding (which uses the same zone seam), see [SCALING.md](SCALING.md). This document is about deploying **content into the running game**, not about deploying the game process to infrastructure.
+> Technical design document for how FullCircleMUD world content is authored, validated, and applied to the running game. The pipeline is owned by the [`evennia-world-builder`](https://github.com/FullCircleMUD/evennia-world-builder) library; world content lives in the [`fcm-world`](https://github.com/FullCircleMUD/fcm-world) YAML repository. This document is FCM-specific — it covers what the library means *for FCM*, FCM's authoring conventions, the operator workflow, and how the YAML pipeline composes with FCM's runtime systems (spawn scripts, evacuation, sharding). For library internals (pipeline stages, validator predicates, cleanup model) follow the links into the library's own DESIGN docs. For room and exit internals see [ROOM_ARCHITECTURE.md](ROOM_ARCHITECTURE.md) and [EXIT_ARCHITECTURE.md](EXIT_ARCHITECTURE.md). For zone-to-zone travel see [INTERZONE_TRAVEL.md](INTERZONE_TRAVEL.md). For multi-shard sharding see [SCALING.md](SCALING.md). This document is about deploying **content into the running game**, not about deploying the game process to infrastructure.
 
 ## Design Philosophy
 
-The world is content, and content changes more often than systems. As game systems stabilise, the dominant ongoing work shifts to authoring new zones, balancing existing districts, and patching bugs in specific rooms. The deployment pipeline must follow that shift:
+World content is data, and data changes more often than the systems that interpret it. As game systems stabilise, the dominant ongoing work shifts to authoring new zones, balancing existing districts, and patching bugs in specific rooms. The pipeline follows that shift:
 
-- **Locally** the burden of rebuilding the entire world is small, and the simplest path is fine.
-- **In production** rebuilding the entire world for a one-room fix is unacceptable. We need to redeploy content at the smallest sensible granularity — a district — without disturbing players in unrelated parts of the world.
+- **World content is authored as YAML**, not as imperative Python builders. Rooms, exits, fixtures, NPCs, contents, locks, attributes — all declared as data.
+- **A library applies the data** to Evennia's database. The library is `evennia-world-builder`, a separate repo with its own version, its own tests, and a stable contract with the consumer game.
+- **A file is the atomic redeploy unit.** Authors choose granularity by how they chunk YAML — one room per file means one-room redeploys; thirty rooms in one file means thirty-room redeploys. The library does no finer-grained partial clean within a file.
+- **Operator-driven, no orchestrator.** Operators broadcast a warning, wait for players to clear, then manually run the rebuild command. No scheduler, no lock state, no automated rollback.
 
-The pipeline is therefore tiered. A small **world base** of connective tissue is built once and effectively never touched. **Zones** are the unit of authorship. **Districts** are the unit of redeploy. Each tier is rebuildable in isolation by the tier above it, and the design refuses to introduce parallel systems where Evennia or the existing FCM helpers already cover the need.
+The pre-YAML era used Python `build_<zone>()` / `build_<district>()` functions, a planned `find_room` resolver, a district manifest, and an `@rebuild_district` command. That whole approach is superseded — `deploy_world.py` and every per-district Python builder have been retired. Git history preserves the prior thinking if a reader ever needs it.
 
-**This is a manual-operator design, not an automation layer.** Operators broadcast a warning to a zone's players, wait for them to evacuate, then manually run the redeploy command. There is no scheduler, no lock-state machinery, no automated rollback, no router-dispatched job orchestration. District redeploys are localised enough and infrequent enough that operator judgement plus a five-minute heads-up to players is the right level of control. New-shard deployment is rarer still — a planned downtime event, not a hot operation.
-
-## Three-Tier Architecture
+## Three Repositories
 
 ```
-World base   (zone:world_base)*           never rebuilt in production
-├── Gateways    (district:gateways)*      cross-zone transition rooms
-└── System      (district:system)*        Limbo, Purgatory, recycle bin
+src/game                      consumer game (this repo)
+  typeclasses/                rooms, exits, NPCs, items — game systems, not content
+  world/game_world/zones/*/soft_deploy.py
+                              per-zone clean + ZoneSpawnScript creation
+  world/spawns/*.json         mob spawn rules (independent of YAML)
+  commands/, services/, …     everything else FCM-specific
 
-Zones        (zone:<x>)                   rebuildable
-└── Districts   (district:<y>)            rebuildable, the redeploy unit
+libraries/evennia-world-builder    pipeline library (separate git repo)
+  Reader → Definitions → Finder → Loader → Validator → Builder
+  Ships wb_build (in-game) + wb-validate (CLI)
 
-Spawn rules  (JSON in world/spawns/)      hot-reloadable, self-healing
+fcm-world                     world content (separate git repo)
+  definitions.yaml            level scheme: (shard, zone, district, file)
+  index.yaml                  top-level manifest pointer
+  shard0/scaffold/            system rooms (Limbo, Purgatory, recycle bin)
+  shard0/<zone>/<district>/   the world, as data
 ```
 
-\* Target tag scheme. Today's shipped reality (see [Tag Conventions](#tag-conventions) for the full mapping):
-- System rooms are tagged `zone:system_zone` + `district:system_district` (set in `_ensure_system_room` in `deploy_world.py`).
-- Gateway rooms are tagged with their owning zone's actual `zone`/`district` keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`), not a unified `world_base` meta-zone.
+The library installs into the game's venv as a normal Python package; the YAML repo is fetched at build time by the library's Reader (GitHub by default, local filesystem for development). FCM points the Reader at `fcm-world` via `WORLDBUILDER_READER_KWARGS` in [server/conf/settings.py](../src/game/server/conf/settings.py).
 
-The unification under `zone:world_base` lands when `build_world_base()` is factored out — see [What's Implemented vs Planned](#whats-implemented-vs-planned).
+## Deployment Identity
 
-### World Base
+Every Evennia object the library creates is tagged with two values: **`wb_deployment_file`** (the YAML file path, set by the Builder) and **`wb_deployment_id`** (an author-supplied integer, mandatory, unique within its file). The pair is globally unique across the world.
 
-The world base is the connective scaffolding the rest of the world hangs off. It contains:
+This identity is load-bearing:
 
-- **Gateway rooms** — every cross-zone transition room (`RoomGateway` instances). Today tagged with their owning zone's `zone`/`district` keys; planned to migrate to `zone:world_base` + `district:gateways` when the world base layer is codified. Their `destinations` lists are populated by zone builders during their build pass; the rooms themselves are not destroyed.
-- **System rooms** — Limbo, Purgatory, the NFT recycle bin. Today tagged `zone:system_zone` + `district:system_district`; planned to migrate to `zone:world_base` + `district:system`. Protected today via name-match in `_is_system_room()` (`world/game_world/zone_utils.py`) — the tag-based protection planned alongside the unification will replace the name-match check.
+- Cleanup on rebuild is a one-tag sweep: delete every object tagged `wb_deployment_file=<file>`, then recreate from the current YAML. Entities added, removed, or changed are all handled by the same primitive.
+- Cross-references between entities use `{deployment_file, deployment_id}` dicts in YAML — `location:`, `destination:`, `home:`. The Builder resolves these against (a) the in-build map for entities being built right now, and (b) DB tag-search for entities in already-built files.
+- Folder reorganisation changes `deployment_file` for affected entities and will require migration tooling. **Treat the fcm-world folder layout as a stable structural choice.**
 
-The world base is built by a one-shot setup function and is not part of any zone or district redeploy path. Its rooms have stable dbrefs that other code may rely on. The two system rooms also have a YAML-authored counterpart at `shard0/scaffold/` in fcm-world for atomic per-room redeploy via the `evennia-world-builder` library.
+For the full identity contract see [DESIGN/deployment-identity.md](../../libraries/evennia-world-builder/DESIGN/deployment-identity.md) in the library.
 
-### Zones
+### Tags Authored on Rooms
 
-A zone is a coherent geographic region (Millholm, Aethenveil, Shadowsward, etc.) with its own identity, tagged `zone:<zone_key>`. A zone owns:
+Every room YAML must carry exactly one `zone` tag and one `district` tag. Other tag categories are additive.
 
-- One or more districts.
-- Zone-level build orchestration (calling each district's builder in dependency order).
-- Zone-scoped configuration (spawn JSON file paths, zone-wide hooks).
+| Category   | Value              | Applied to                              |
+|------------|--------------------|------------------------------------------|
+| `zone`     | `<zone_key>`       | every room in the zone                  |
+| `zone`     | `system_zone`      | system rooms (Limbo, Purgatory, recycle bin) |
+| `district` | `<district_key>`   | every room in the district              |
+| `district` | `system_district`  | system rooms                            |
+| `mob_area` | `<spawn_area_key>` | rooms participating in a `ZoneSpawnScript` pool |
+| `map_cell` | `<terrain>:<point>`| cartography survey grid                 |
 
-Zones are listed in `ACTIVE_ZONES` in `world/game_world/deploy_world.py`. Each has a `soft_deploy.py` that exposes `build_zone()` and `clean_zone()`.
+These tags are author-controlled in YAML; the library is content-agnostic about what tags mean. FCM systems read them: `clean_zone()` scopes by `zone`, `ZoneSpawnScript` finds spawn rooms by `mob_area`, cartography composes a district map from `map_cell`.
 
-### Districts
+Gateway rooms today are tagged with their owning zone's `zone` / `district` keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`) — not a unified `world_base` meta-zone. System rooms today are tagged `zone:system_zone` + `district:system_district`. A future unification under `zone:world_base` is possible; not on the near-term roadmap.
 
-A district is the **redeploy unit** — the smallest chunk of the world we redeploy in production. Tagged `zone:<zone_key>` + `district:<district_key>`. A district has:
+## Operator Workflow
 
-- A builder function (`build_<district>()`) that creates rooms, places mobs/items via spawn rules, wires intra-district exits, and attaches inbound edges from gateway rooms or neighbouring districts via the resolver.
-- A declared **evacuation target** — the room players in the district are sent to during redeploy (typically the zone's gateway room, or `DEFAULT_HOME` for self-contained districts).
-- A list of **dependencies** — other districts whose rooms it links to. Used by the resolver's tolerant mode (a missing dependency mid-rebuild logs and retries rather than crashing).
+Two commands cover the whole pipeline:
 
-Today's zones already use district tags consistently; what's new is making the per-district builder the public surface (factored out of the monolithic `build_zone()`) and registering it in a manifest.
+| Command                 | Surface          | What it runs                                |
+|-------------------------|------------------|---------------------------------------------|
+| `wb_build <scope>`      | In-game (OOC/IC) | Full pipeline incl. Builder; superuser-only |
+| `wb-validate --root <repo>` | Shell / CI    | Everything *up to* the Builder              |
 
-## Stable Identity
+### `wb_build` scopes
 
-Every persistent room has a natural composite identity: **`(zone_tag, district_tag, room.key)`**. This triple is stable across rebuilds — the dbref is not. All cross-district and cross-zone references resolve through this triple, never via stored dbrefs.
+The library's `definitions.yaml` declares FCM's level scheme as `(shard, zone, district, file)`. `wb_build` accepts scope queries against those levels:
 
-### `find_room(zone, district, key)`
+- `wb_build all` — every YAML file in the manifest. Required keyword; bare `wb_build` refuses (safety guard).
+- `wb_build zone=millholm` — every file under `shard0/millholm/`.
+- `wb_build zone=millholm district=town` — every file under `shard0/millholm/town/`.
+- `wb_build zone=millholm district=town file=bakery.yaml` — that one file.
+- Append `--force-validate` to force whole-repo pre-validation regardless of the `repo-ci-pre-validation` flag.
 
-A thin wrapper around Evennia's `search_tag` that intersects the zone tag, district tag, and room key. Returns the live room or `None`. This is the only resolver primitive in the system; everything else composes from it.
+The smallest sensible redeploy is a single file. Author files at the granularity you want to redeploy — a single bakery, a single forest path, a 30-room dungeon — whatever maps best to how that content is iterated on.
 
-```python
-# Pseudocode — wrapper around evennia.search_tag.
-def find_room(zone, district, key):
-    rooms = search_tag(zone, category="zone")
-    return next(
-        (r for r in rooms
-         if r.tags.get(district, category="district") and r.key == key),
-        None,
-    )
-```
+### Redeploy protocol
 
-District builders use it to obtain neighbour rooms before passing them to the existing exit helpers in `utils/exit_helpers.py` (`connect_bidirectional_exit`, `connect_bidirectional_door_exit`, etc.). There is no separate "spec-based" exit API — the resolver composes with the existing helpers.
+1. Operator broadcasts a warning to affected players: *"The bakery is being rebuilt in 5 minutes; finish what you're doing."*
+2. Operator waits ~5 minutes.
+3. Operator runs `wb_build <scope>`.
 
-### Exit Wiring Convention
+`wb_build` defers the entire pipeline to a Twisted worker thread via `evennia.utils.utils.run_async`. **Gameplay continues while the build runs** — players outside the scope are unaffected. Operator-facing output (pre-validation summary, validator findings, cleanup count, created objects) is collected during the worker pass and flushed to the caller via the success callback when the build completes.
 
-When a district builds an exit into a room owned by another district or by the world base, it must use the resolver:
+### What `wb_build` does, step by step
 
-```python
-# Inside build_<district>() in some zone's soft_deploy.py
-from utils.world import find_room
-from utils.exit_helpers import connect_bidirectional_exit
+For the canonical version see [DESIGN/library-commands.md](../../libraries/evennia-world-builder/DESIGN/library-commands.md) in the library. Summarised:
 
-target = find_room("aethenveil", "aethenveil_travel", "border_post")
-if target is None:
-    # Operator sequencing error or genuinely missing dependency.
-    log.warning("build aborted: target room not found")
-    raise BuildError("border_post not in aethenveil_travel — build that first")
+1. **Read** YAML via the configured `Reader` (GitHub by default; local filesystem in development).
+2. **Walk** the `index.yaml` manifest tree to find entities matching the scope query.
+3. **Pre-validate** (whole repo, unless gated off by `repo-ci-pre-validation` in `definitions.yaml`).
+4. **Validate** the in-scope entities through the full predicate pipeline. Any finding refuses the build with a complete report; no DB mutation.
+5. **Clean** every object tagged with the in-scope `wb_deployment_file` values. (Players in a deleted room are relocated to their `home` by Evennia's own pipeline — see [Evacuation](#evacuation).)
+6. **Build** in four passes:
+   - **Pass 1** — non-exits (rooms, fixtures, NPCs, items).
+   - **Pass 2** — exits. Destinations resolve against the just-built rooms or via DB tag-search for cross-file targets.
+   - **Pass 3** — `incoming_exits:` file-level registrations. If a cross-file exit's home file is *not* in scope and the exit was cascade-deleted by step 5, the library fetches the canonical file and rebuilds just the missing exit, tagged with its true home file so future cleanups handle it correctly.
+   - **Pass 4** — `links:` file-level declarations. Resolves cross-entity attribute references (e.g. paired door `other_side`).
 
-connect_bidirectional_exit(local_room, target, "north")
-```
+### Cross-file rebuild safety
 
-If `find_room` returns `None`, the operator has run builds out of order or a referenced district is missing. The right response is to fail loudly so the operator sees it, fixes the sequencing, and reruns. There is no deferred-link queue.
+When a single file is redeployed, cross-file exits pointing at rooms in *other* files survive — they were never in scope, never cleaned. Cross-file exits pointing *into* a redeployed file are the load-bearing case: the destination room is deleted and recreated, and the inbound exits live in a different file. FCM authors register these via `incoming_exits:` at the bottom of the destination file, and pass 3 restores any exit the cleanup cascade took out. The pattern is documented per file in fcm-world.
 
-### Why Composite, Not Extra Tags
+## Authoring Workflow
 
-A composite-key resolver is cheaper than introducing a per-room semantic tag (`room:border_post`) and avoids cluttering the tag namespace. The exception is **named landmarks** referenced from many zones (a god's temple, a great library) — those may carry a single semantic landmark tag in addition to their zone/district tags. This is opt-in and documented per landmark.
+The YAML side of FCM. For an author landing here, the loop is:
 
-## Tag Conventions
+1. **Edit YAML** in `fcm-world/shard0/<zone>/<district>/<file>.yaml`.
+2. **Validate locally**: from `FCM/src/game/` with the venv active:
+   ```
+   wb-validate --reader local --root ../../fcm-world
+   ```
+   This runs Reader → Definitions → Finder → Loader → Validator and prints any findings. No DB mutation. Run before committing.
+3. **Commit + push** in fcm-world.
+4. **Deploy in-game**: `wb_build zone=<zone> district=<district> file=<file>.yaml` against the running server (which fetches the new content via the configured Reader).
 
-Tags are already applied consistently across all 21 active zones; this section codifies the convention so future builders stay aligned.
+`wb-validate` is also wired as a pre-commit hook / CI gate for fcm-world. A repo with `repo-ci-pre-validation: true` in `definitions.yaml` trusts that gate and skips whole-repo pre-validation inside `wb_build`. FCM currently keeps the flag off — every `wb_build` re-validates the whole repo. Cheap insurance, kept until the CI gate is more battle-tested.
 
-| Category   | Value                  | Applied to                          | Status |
-|------------|------------------------|-------------------------------------|--------|
-| `zone`     | `<zone_key>`           | every room in the zone              | shipped |
-| `zone`     | `system_zone`          | system rooms (Purgatory, recycle bin) — set by `_ensure_system_room` | shipped |
-| `zone`     | `world_base`           | gateways, system rooms (unified)    | planned (replaces `system_zone` + per-zone gateway tagging) |
-| `district` | `<district_key>`       | every room in the district          | shipped |
-| `district` | `system_district`      | system rooms (Purgatory, recycle bin) | shipped |
-| `district` | `gateways`             | cross-zone transition rooms         | planned |
-| `district` | `system`               | Limbo, Purgatory, recycle bin (unified naming) | planned |
-| `mob_area` | `<spawn_area_key>`     | rooms participating in a spawn pool | shipped |
-| `map_cell` | `<terrain>:<point>`    | cartography survey grid             | shipped |
+For YAML shape, file structure, and per-entity dimensions (typeclass, contents, exits, attributes, locks, aliases, descriptions), see the library's design docs:
 
-Every room must carry exactly one `zone` tag and one `district` tag. Other tag categories are additive and orthogonal.
+- [discovery-and-loading.md](../../libraries/evennia-world-builder/DESIGN/discovery-and-loading.md) — manifests, `entities:` shape, nested `contents:` / `exits:`.
+- [deployment-identity.md](../../libraries/evennia-world-builder/DESIGN/deployment-identity.md) — `deployment_id`, `home:`, cross-refs.
+- [builder.md](../../libraries/evennia-world-builder/DESIGN/builder.md) — per-entity build pass; what's applied to each object.
+- [validator.md](../../libraries/evennia-world-builder/DESIGN/validator.md) — predicate tiers and what gets caught.
+- [links.md](../../libraries/evennia-world-builder/DESIGN/links.md) — cross-entity attribute references.
 
-Today gateway rooms are tagged with their owning zone's keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`) — they are not yet unified under a `world_base` meta-zone. The unification is part of the planned `build_world_base()` factor-out.
+## System Rooms
 
-## Build & Clean Operations
+Limbo, Purgatory, and the NFT recycle bin live as one YAML file each under `fcm-world/shard0/scaffold/`:
 
-The pipeline mirrors Evennia's own clean-by-tag pattern:
+- `shard0/scaffold/purgatory.yaml`
+- `shard0/scaffold/nft_recycle_bin.yaml`
+- (Limbo follows the same pattern when its YAML file is added — see the scaffold folder for the current state.)
 
-| Operation                       | Filter                              | Status     |
-|---------------------------------|-------------------------------------|------------|
-| `clean_zone(zone)`              | tag `zone == zone`                  | implemented |
-| `clean_district(zone, district)`| tag `zone == zone` AND `district == district` | planned   |
-| `clean_world_base()`            | planned: tag `zone == world_base`; today no equivalent exists (system rooms are protected by name match in `_is_system_room()` and never enter any clean path) | not exposed; behind interactive confirm |
-| `build_zone()` per zone         | calls each `build_<district>()`     | partly implemented (inline today) |
-| `build_district(zone, district)`| creates rooms with both tags        | planned (factor out) |
-| `build_world_base()`            | one-shot setup                      | partly implemented (`_ensure_system_room` etc.) |
+Each file owns exactly one room, so rebuilding one system room is a one-file `wb_build`. They are tagged `zone:system_zone` + `district:system_district` and protected from accidental destruction via the name-match guard in `_is_system_room()` in [world/game_world/zone_utils.py](../src/game/world/game_world/zone_utils.py) — they never enter any `clean_zone` delete set.
 
-Clean steps mirror today's `clean_zone()`:
+`RoomRecycleBin` extends `evennia.DefaultRoom` directly (not `RoomBase`) so the catch-all bin doesn't drag in combat / lighting / weather / inventory mechanics. See [ROOM_ARCHITECTURE.md](ROOM_ARCHITECTURE.md) for the room class hierarchy.
 
-1. **Evacuate players** in the affected scope to the declared evac target.
-2. **Delete mobs / NPCs**, returning their gold and resources to vault.
-3. **Delete orphaned items** (NFTs follow recycle-bin rules).
-4. **Delete exits** whose location is in the affected scope.
-5. **Delete rooms** in the affected scope.
+## Evacuation
 
-System rooms are protected today by **name match** in `_is_system_room()` (`SYSTEM_KEYS = {"Limbo", "Purgatory", "nft_recycle_bin"}`) and never enter the delete set. Once they unify under `zone:world_base` per the planned factor-out, the protection switches to a tag check on the same set.
+Players and objects in a room being deleted by the cleanup pass are handled by Evennia's own object lifecycle, not by world-builder primitives:
 
-## Redeploy Protocol
+- **Characters** in a deleted room → moved to their `home` attribute (typically Limbo for default characters).
+- **NPCs** with `home: { deployment_file: …, deployment_id: … }` in YAML → moved to that home room.
+- **NFT items** with `home: shard0/scaffold/nft_recycle_bin.yaml#1` → moved to the recycle bin, which deletes them on arrival (handled by `RoomRecycleBin.at_object_receive`).
+- **Untagged objects** without an explicit `home:` → fall through to `settings.DEFAULT_HOME` (Limbo).
 
-Per-district redeploy is the canonical production operation. Per-zone redeploy is the same protocol applied at zone scope; full-world rebuild is reserved for local development. The whole sequence is operator-driven — there is no orchestrator.
-
-**Operator workflow:**
-
-1. Operator broadcasts a warning to the affected zone: *"the inn district will be rebuilt in 5 minutes; please move to the town square."*
-2. Operator waits ~5 minutes for players to clear out.
-3. Operator runs `@rebuild_district <zone> <district>`.
-
-**What `@rebuild_district` does:**
-
-1. `clean_district(zone, district)` — evacuate any stragglers to the district's evac target, then delete by composite tag (mobs → items → exits → rooms).
-2. `build_<district>()` — rebuild rooms, intra-district exits, and inbound edges from gateways or neighbouring districts via `find_room`.
-3. `ZoneSpawnScript.create_for_zone(zone)` — reload the zone's spawn JSON. The next tick (≤15s) repopulates mobs.
-
-The command runs in a background thread so the server stays responsive, but there's no orchestration layer — it's just three function calls in sequence, with exceptions propagating to the operator's terminal.
-
-### Failure Handling
-
-If `build_<district>()` raises, the exception is logged and the operator sees it in their terminal. The district has been deleted (step 1) but not rebuilt — players entering would find nothing there. The operator fixes the builder and reruns `@rebuild_district`. There is no automatic rollback and no lock state — the operator is the lock.
-
-This is acceptable because: builders are version-controlled, the operator is present and watching, and the affected scope is one district. A failed rebuild is a "five more minutes, sorry" event, not an outage.
-
-### Cross-District References During Redeploy
-
-A district being redeployed temporarily disappears between clean and build. Other districts holding live exits into it find their `destination` references invalidated — Evennia handles this gracefully (deleted-destination exits report sensibly to anyone trying to traverse). When the rebuild completes, the destination is recreated with the same `(zone, district, key)` identity, but the dangling exits are still pointing at the now-deleted dbref. The fix is for the rebuilt district's `build_<district>()` to **re-attach the inbound side of any cross-district exits it owns**. Each district owns the rooms on its own side of every inbound edge, so this is a natural part of every district builder, not a special protocol.
-
-`RoomGateway.destinations` lists are populated separately at world-base / zone-build time and are not touched by district redeploys — cross-zone wiring is unaffected.
-
-## Player Evacuation
-
-Player evacuation is scoped to the unit being rebuilt:
-
-- **District redeploy** — players in rooms tagged `district:<y>` are moved to the district's declared evac target.
-- **Zone redeploy** — players in rooms tagged `zone:<x>` are moved to Limbo (matching today's behaviour).
-- **World base rebuild** — never executed in production.
-
-The evacuation target for each district is part of its manifest entry. Sensible defaults:
-
-- Most districts within a zone that has a gateway → that zone's outbound gateway room.
-- Self-contained districts (deep dungeons, cut-off islands) → `DEFAULT_HOME`.
-- A district being redeployed cannot be its own evac target.
-
-Evacuation happens at the start of `clean_district`, before any deletes. The existing `clean_zone()` already does this for the zone scope; `clean_district` extends the same pattern. Because the operator has broadcast a warning and waited five minutes, in practice almost all players have already left voluntarily — the evacuation step is mainly a safety net for stragglers and AFK players.
+The operator's pre-build broadcast is what keeps players from being yanked mid-action; the home-relocation is the safety net for stragglers, AFK characters, and unattended NPCs. Because rebuilds are scoped (single file or single district most of the time), the relocation footprint is small.
 
 ## Spawn Lifecycle
 
-`ZoneSpawnScript` already self-heals across rebuilds. Its lifecycle is:
+Mob spawning is independent of the YAML pipeline. `ZoneSpawnScript` runs on its own 15-second tick and finds spawn rooms by `mob_area` tag query — tags that authors set in YAML. The script is created and maintained from Python:
 
-- One persistent script per zone (`zone_spawn_<zone_key>`).
-- On rebuild, the script's `db.spawn_table` is updated in place from the JSON.
-- Mob deletions during clean are absorbed — the next 15-second tick repopulates from the (possibly updated) table.
+- One persistent script per zone (`zone_spawn_<zone_key>`), created in `src/game/world/game_world/zones/<zone>/soft_deploy.py`'s `build_zone()`.
+- The script's `db.spawn_table` is reloaded from `world/spawns/<zone>.json` on each `create_for_zone()` call.
+- Mob deletions during YAML cleanup are absorbed by the script's self-healing loop — the next tick repopulates missing population from the (possibly updated) table.
 
-District redeploy does **not** delete the zone's spawn script. It simply triggers a JSON reload via `ZoneSpawnScript.create_for_zone()` and lets the next tick refill missing population. Boss death cooldowns (the `death_cooldown_seconds` JSON field, see [SPAWN_MOBS.md](SPAWN_MOBS.md)) are preserved across rebuilds because they live on the script, not on the room.
+A `wb_build` does not touch the spawn script. After a redeploy, the operator either lets the next tick repopulate (≤15s) or runs `build_zone()` from the Evennia shell if the spawn JSON itself has changed. Boss death cooldowns (`death_cooldown_seconds` in the JSON; see [SPAWN_MOBS.md](SPAWN_MOBS.md)) live on the script and survive YAML redeploys.
 
-## District Manifest
+The two systems are deliberately separated:
 
-A small registry maps each district to its builder and evac target — what `@rebuild_district` needs to run a redeploy. Conceptually:
+- **Static content** (rooms, exits, fixtures, NPCs that don't respawn) → YAML, deployed via the library.
+- **Dynamic mob population** → JSON spawn rules, executed by `ZoneSpawnScript`, finding rooms via `mob_area` tags placed by the YAML.
+
+## What's Left in Python
+
+The retirement of `deploy_world.py` removed the entire monolithic build orchestration. Per-zone `soft_deploy.py` files survive in a much-shrunken form:
 
 ```python
-DISTRICTS = {
-    ("millholm", "millholm_town"): District(
-        builder="world.game_world.zones.millholm.town:build_town",
-        evac_target=("millholm", "millholm_town", "town_gate"),
-    ),
-    ...
-}
+# Per-zone soft_deploy.py
+ZONE_KEY = "millholm"
+
+def clean_zone():
+    _clean_zone(ZONE_KEY)  # wipes the zone's tagged rooms / NPCs / items
+
+def build_zone():
+    # Create / refresh the ZoneSpawnScript instances for each mob area
+    for area_key in ("millholm_farms", "millholm_woods", …):
+        ZoneSpawnScript.create_for_zone(area_key)
 ```
 
-The manifest lives alongside `ACTIVE_ZONES` in `world/game_world/deploy_world.py` (or a sibling module). A district is registered exactly once. Each district that wants to be redeployable must be registered here; districts not in the manifest can only be rebuilt as part of a full zone rebuild.
+What's still Python and still load-bearing:
 
-The manifest is intentionally minimal — no dependency graph, no automatic ordering. Operators sequence builds correctly; if they don't, `find_room` returns `None` and the build fails loudly so they can fix it and rerun.
+- **Typeclasses** in `src/game/typeclasses/` — rooms, exits, NPCs, items, services. Game systems, not content; not touched by YAML deploys.
+- **Spawn JSON + `ZoneSpawnScript`** — independent pipeline as described above.
+- **Internal exit-creation helpers** in `src/game/utils/exit_helpers.py` (`connect_bidirectional_exit`, `connect_bidirectional_door_exit`, etc.). The library's Loader and FCM's exit typeclasses call these internally; they are no longer the authoring surface. Authors author `exits:` blocks in YAML.
 
-## Admin Commands
-
-| Command                                  | Scope          | Status     |
-|------------------------------------------|----------------|------------|
-| `@rebuild_world`                         | All zones      | implemented |
-| `@rebuild_zone <zone>`                   | One zone       | implemented |
-| `@rebuild_district <zone> <district>`    | One district   | planned     |
-| `@rebuild_world_base`                    | World base     | planned, gated by interactive confirm — almost never used |
-
-All commands run in background threads, return control to the caller, and report completion (or failure) via `caller.msg`.
-
-The Evennia batch processors (`@batchcommand`, `@batchcode`) are explicitly **not** part of this pipeline. They are designed for one-shot offline initial setup, run synchronously in the reactor, have no idempotency, and require text-`exec` semantics that are incompatible with our importable, testable, async-rebuildable Python builders. We use Evennia's built-in command framework and our own builders, not its batch tooling.
-
-## Builder Conventions
-
-For consistency across all zones — current and future — district builders must:
-
-1. **Tag every room** with `zone:<zone_key>` (category `zone`) and `district:<district_key>` (category `district`) at creation time. Use the per-zone `ZONE_KEY` and `DISTRICT` constants already established in `soft_deploy.py` files.
-2. **Look up cross-district neighbours** via `find_room(zone, district, key)`. Never store or pass dbrefs across district boundaries.
-3. **Use `utils/exit_helpers.py`** for all exit creation — never instantiate exit typeclasses directly. Pass live room objects, obtained via `find_room` for cross-boundary cases.
-4. **Register the district** in the manifest. A district that exists only as inline code inside `build_zone()` cannot be redeployed individually.
-5. **Declare an evac target** in the manifest. The target must not be inside the district being declared.
-6. **Fail loudly on missing neighbours** during build. If `find_room` returns `None`, raise — do not silently skip. The operator needs to see the sequencing error so they can build the missing district first and rerun.
-7. **Avoid global state** (module-level dicts, class attributes) that would survive across rebuilds. All persistent state belongs in the database and is reachable via tags.
-8. **Be idempotent against a clean DB** — running a build function on a clean DB must produce a complete, playable district. No reliance on prior runs.
-
-These conventions are enforced by code review for now. When a builder linter is worth writing, it will check these rules statically.
+No human edits the legacy zone-builder Python anymore. New zones are added by creating a folder under `fcm-world/shard0/<zone>/` and writing the YAML.
 
 ## Sharding Interaction
 
-The world deployment model extends naturally to the multi-shard architecture in [SCALING.md](SCALING.md). At `shard_count == 1` (today's reality) every claim below collapses to a no-op.
+The world deployment model extends naturally to the multi-shard architecture in [SCALING.md](SCALING.md). At `shard_count == 1` (today) every claim below collapses to a no-op.
 
-**Districts are shard-local by construction.** A district lives entirely within one zone, and a zone lives entirely on one shard. Per-district redeploy never crosses a shard boundary — the operator runs `@rebuild_district` on the shard that owns the zone, and that's it. The frequent operation has zero multi-shard complexity.
-
-**World base is built on every shard via the same script.** `build_world_base()` reads a `SHARD_ID` environment variable and creates only the gateway rooms relevant to that shard, plus the system rooms (Limbo, Purgatory, recycle bin) which exist independently on every shard. The shard → gateways mapping is hard-coded as branches inside the script — no registry, no config layer. At `shard_count == 1` the branching is a no-op and the script builds every gateway.
-
-**Gateway pairing is two physical rooms, one per side.** A gateway between zone A (shard X) and zone B (shard Y) lives as two `RoomGateway` rows — one owned by X (the outbound side from A), one owned by Y (the outbound side from B). Each side's `destinations` list stores the composite triple `(target_zone, target_district, target_key)` instead of a live cross-shard object reference. When a player traverses an outbound gateway whose target zone is on a different shard, the SCALING handoff protocol fires.
-
-**`find_room` is shard-local.** It returns rooms tagged within the current shard's zone scope. Cross-shard lookups are not a builder operation — they happen inside the handoff protocol, not inside district builders. Builders that need to wire an exit to a room on another shard are doing something wrong; that exit belongs on a `RoomGateway`.
-
-**Deploying a new shard is a planned downtime event.** Deferred from the everyday operator workflow:
-
-1. Bring the game offline.
-2. Update the hard-coded branches in `build_world_base()` to reflect the new gateway distribution.
-3. Spin up the new instance with its `SHARD_ID`.
-4. Run `build_world_base()` on every shard (each picks up its responsibilities from the env var).
-5. On each shard, manually run `@rebuild_zone` for each zone now assigned to it. Zone content is the operator's responsibility to deploy in the right place.
-6. Bring the game online.
-
-If the shard reshuffle happens while there is live player content (placed loot, in-flight quests, account balances), zone ObjectDB rows stay in Postgres untouched — what changes is which shard's `ACTIVE_ZONES` includes them and therefore which idmapper caches them. Step 5 is then a cache-attribution flip, not a content rebuild. This is the production reshuffle path; pre-launch shuffles can wipe and rebuild without ceremony.
-
-New-shard deployment is anticipated to be a roughly yearly event at most, so none of this is automated. An operator with the runbook does it by hand.
+- **Each shard runs its own `wb_build`** against its own slice of the YAML repo. Today the slice is the whole repo; multi-shard splits it by `shard` level — the top-level `definitions.yaml` already declares `shard` as the outermost manifest level.
+- **System rooms are per-shard.** Each shard builds its own Limbo / Purgatory / recycle bin from `shard0/scaffold/*.yaml`. Different shards may reach different revisions of the scaffold YAML; that's fine, the rooms are independent.
+- **Gateway rooms are paired across shards.** A gateway between zone A (shard X) and zone B (shard Y) lives as two `RoomGateway` rows — one owned by each side, each authored in the YAML of the shard that owns it. Each side's `destinations:` list stores composite `(target_zone, target_district, target_key)` triples; cross-shard traversal hands off via the SCALING protocol.
+- **Shard reshuffles are planned downtime events.** Bring the game offline, update the `shard` level assignment, rerun `wb_build` per shard, bring the game online.
 
 ## What's Implemented vs Planned
 
 **Implemented today:**
 
-- Zone tag + district tag on every room (consistent across all 21 zones).
-- `clean_zone()` with tag-based delete and player evacuation.
-- `connect_bidirectional_*` exit helper family.
-- `RoomGateway` model with declarative `destinations` list, repopulated by `deploy_world()`.
-- `ZoneSpawnScript` with hot-reload of JSON spawn rules and self-healing population on tick.
-- `@rebuild_world` and `@rebuild_zone` commands running in background threads.
-- System room protection via name-match in `_is_system_room()` in `zone_utils.py`. System rooms are tagged `zone:system_zone` + `district:system_district` today, but the protection is by name (`SYSTEM_KEYS`), not by tag.
-- YAML-authored scaffold for atomic per-room redeploy of system rooms via the `evennia-world-builder` library — see `shard0/scaffold/purgatory.yaml` and `shard0/scaffold/nft_recycle_bin.yaml` in fcm-world. Each file owns one room and can be rebuilt in isolation.
+- Full world content authored as YAML in `fcm-world` (1,959 entities across 4 shards as of last validation).
+- `evennia-world-builder` library — Reader (GitHub + local), Definitions, Finder, Loader, Validator, Builder, four-pass build, cross-file refs, `incoming_exits:`, `links:`, surgical rebuilds, async pipeline.
+- `wb_build` in-game admin command and `wb-validate` CLI.
+- Per-zone `clean_zone()` and `ZoneSpawnScript` creation in shrunken `soft_deploy.py` files.
+- `RoomGateway` model with declarative `destinations:` lists, authored per zone in YAML.
+- `ZoneSpawnScript` self-healing on tick, decoupled from YAML deploys.
+- System room protection via `_is_system_room()` name-match in `zone_utils.py`.
 
-**Planned (this design):**
+**Possible future work (not on the immediate roadmap):**
 
-- `find_room(zone, district, key)` resolver — thin wrapper around `search_tag`.
-- `clean_district(zone, district)` — `clean_zone` with two-tag filter and district-scoped evacuation.
-- District manifest in `deploy_world.py` (or sibling module).
-- Per-district `build_<district>()` factored out of monolithic `build_zone()` orchestrators.
-- `@rebuild_district <zone> <district>` admin command.
-- Codification of the world base layer under `zone:world_base`. This unifies gateway rooms (today tagged with their owning zone's keys) and system rooms (today tagged `zone:system_zone` + `district:system_district`) into one meta-zone with `district:gateways` and `district:system` sub-districts. `_is_system_room()` becomes a tag check rather than a name check.
-- `SHARD_ID` env var read by `build_world_base()` so the same script runs everywhere (when sharding lands; today the script just builds everything).
+- Migration tooling for fcm-world folder reorganisation (today, moving a file invalidates its `deployment_file` tag and orphans previously-built objects).
+- Codification of a `world_base` meta-zone unifying gateway rooms and system rooms under one tag namespace.
+- A second Reader implementation if the GitHub Reader's rate-limit or auth model proves limiting in production.
+- Cross-repo references (referring from one YAML repo to another). Out of scope for v0; single content-repo per build.
 
-The implementation is small in surface area; most of the discipline is convention rather than code. The single largest engineering task is factoring existing zone builders into per-district functions and registering them in the manifest — work that can proceed zone by zone without breaking anything.
+The pipeline is in production use today. Most ongoing work happens in `fcm-world` (content) rather than in the library (infrastructure).

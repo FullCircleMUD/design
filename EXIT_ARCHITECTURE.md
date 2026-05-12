@@ -77,7 +77,7 @@ The standard exit for the game world. Provides two systems:
 - **Unlike height-gated exits, size-gated exits remain visible** in the exit list — the player should see the passage exists so they know a shrink spell is needed.
 - Door helpers default `max_size` to `Size.MEDIUM.value` (standard human-sized door). Stable doors, castle gates, etc. override to `Size.LARGE.value` or higher.
 
-**When to use:** Most world exits. Created via `connect_bidirectional_exit()` helper.
+**When to use:** Most world exits. Authored as a YAML `exits:` entry; the Loader materialises it via `connect_bidirectional_exit()` internally.
 
 ### ExitDoor
 
@@ -98,7 +98,7 @@ A door that can be opened, closed, locked, unlocked, hidden, made invisible, and
 - `door_name` attribute controls what `open door` matches — use distinct names when multiple doors exist in one room (e.g. "door" vs "stone door")
 - **Auto-close:** all doors auto-close after 5 minutes by default (`auto_close_seconds = 300`). Set to `0` to disable, or any other value for custom timing (e.g. `30` for a spring-loaded door). The timer starts when the door is opened and is cancelled if the door is manually closed. The auto-close fires `at_close()` so reciprocal pairing syncs the other side automatically.
 
-**When to use:** Any door connection. Created via `connect_bidirectional_door_exit()` helper.
+**When to use:** Any door connection. Authored as a paired YAML `exits:` entry (with `links:` for reciprocal `other_side`); the Loader materialises the pair via `connect_bidirectional_door_exit()` internally.
 
 ## Conditional Routing
 
@@ -238,7 +238,9 @@ If a direction has no visible exit: "You see nothing special in that direction."
 
 **File:** `utils/exit_helpers.py`
 
-**CRITICAL: All exits MUST be created through a helper function.** Never use bare `create_object()` for exits. If an exit type isn't covered by an existing helper, create a new helper first, then use it. This ensures consistency across all zones and makes auditing/refactoring possible.
+**Authoring layer.** World content authors do not call these helpers directly — they declare exits in YAML (`exits:` blocks on rooms in fcm-world). The helpers below are the **internal primitives** the `evennia-world-builder` Loader composes when materialising YAML exit declarations into Evennia objects, plus the runtime path used by code that genuinely needs to construct exits on the fly (procedural dungeons, conditional routing rebinds). See [WORLD_DEPLOYMENT.md](WORLD_DEPLOYMENT.md) for the authoring story.
+
+**CRITICAL: If a new exit type is needed, add a helper here first.** Never bypass this layer with bare `create_object()`. The library's Loader, the procedural dungeon system, and any future runtime exit creation should all go through helpers so that pairing, reverse-direction derivation, and door-link symmetry stay consistent everywhere.
 
 All bidirectional helpers use the `OPPOSITES` dict to auto-derive the reverse direction.
 
@@ -275,9 +277,9 @@ Exit-specific mixins:
 
 ## Key Implementation Rules
 
-1. **All exits MUST be created through helper functions** in `utils/exit_helpers.py`. Never use bare `create_object()` for exits. If a new exit type isn't covered by an existing helper, create the helper first, then use it.
+1. **All exits MUST be authored in YAML** (`exits:` blocks on rooms in fcm-world). Runtime exit creation (procedural dungeons, conditional rebinds) MUST go through `utils/exit_helpers.py`. Never use bare `create_object()` for exits. If a new exit type isn't covered by an existing helper, create the helper first, then use it.
 2. **All world exits should use ExitVerticalAware or a subclass** — never bare `DefaultExit`. The direction system and vertical checks are standard.
-3. **Doors must be created in pairs** via `connect_bidirectional_door_exit()`. Unpaired doors will desync.
+3. **Doors must be created in pairs** — the Loader handles this when authoring in YAML; runtime callers use `connect_bidirectional_door_exit()`. Unpaired doors will desync.
 4. **Use `set_direction()`, not manual alias adds** — it handles both the attribute and aliases atomically.
 5. **Distinct `door_name` values** when multiple doors exist in one room — prevents `open door` from matching the wrong one.
 6. **at_traverse super() chain** — each exit class checks its own conditions then calls `super().at_traverse()`. Breaking the chain skips downstream checks (e.g. skipping ExitVerticalAware's height checks). Dungeon entry exits (`ProceduralDungeonExit`) intentionally skip super since they handle movement internally.
