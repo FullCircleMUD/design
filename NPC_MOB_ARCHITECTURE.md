@@ -418,7 +418,6 @@ Adds mob-specific attributes on top of CombatMixin's combat capability and State
 - `attack_message` — used for miss messages only (e.g. "bites at you but misses"). Hit messages use the damage descriptor system.
 - `initiate_attack(target)` — inherited from CombatMixin (`mob_attack` kept as compat alias)
 - `_roll_damage()`, `_create_corpse()`
-- Loot: `loot_resources`, `loot_gold_max`, `spawn_scrolls_max`, `spawn_recipes_max`
 - HP condition text (`get_condition_text()`)
 - Area-restricted wandering via `area_tag` tags
 - `max_per_room` anti-stacking

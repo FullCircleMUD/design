@@ -725,15 +725,25 @@ spawn_resources_max = {1: 20}
 
 ### Tag Registration
 
-Tags and max attributes are registered in `CombatMob.at_object_creation()` based on the mob's AttributeProperty values:
-- `loot_resources` dict → `spawn_resources` tag + `spawn_resources_max`
-- `loot_gold_max > 0` → `spawn_gold` tag + `spawn_gold_max`
-- `scroll_loot_slots > 0` → `spawn_scrolls` tag + `spawn_scrolls_max` (via `_build_tier_max()`)
-- `recipe_loot_slots > 0` → `spawn_recipes` tag + `spawn_recipes_max` (via `_build_tier_max()`)
+Tags and max attributes are declared per-rule in YAML by the mob-spawner library (see **SPAWN_MOBS.md**). Each rule that wants its mob to participate in the unified spawn system sets:
 
-`ZoneSpawnScript._spawn_mob()` re-syncs all tags after spawning to handle spawn rule attribute overrides.
+- `attrs: {spawn_<cat>_max: ...}` — the runtime capacity values the distributor reads at allocation time
+- `tags: [{key: spawn_<cat>, category: spawn_<cat>}, ...]` — the indexed eligibility flags the distributor queries to find drop targets
 
-`WorldChest.at_object_creation()` registers `spawn_gold` tag + `spawn_gold_max` when `loot_gold_max > 0`.
+The library's `_spawn_one` applies both at spawn time. No typeclass-level loot defaults, no `at_object_creation` derivation — the YAML rule is the single source of truth.
+
+Example for a mob that should drop gold + hide:
+
+```yaml
+attrs:
+  spawn_gold_max: 2
+  spawn_resources_max: {8: 1}      # 8 = hide
+tags:
+  - {key: spawn_gold, category: spawn_gold}
+  - {key: spawn_resources, category: spawn_resources}
+```
+
+`WorldChest.at_object_creation()` registers `spawn_gold` tag + `spawn_gold_max` when its own `loot_gold_max > 0` — chests are placed by world-builder (not mob-spawner), so they keep self-contained init logic.
 
 ---
 

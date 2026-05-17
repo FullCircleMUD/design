@@ -1,298 +1,273 @@
 # SPAWN_MOBS.md — Mob Spawn System
 
-Design doc for how mobs are placed and respawn in the game world. One system, one engine — `ZoneSpawnScript` reading per-zone JSON rules. Mobs differ in their JSON configuration: how many, how often, what room, what AI. There is no "boss vs commodity" distinction in the machinery — only knobs.
+Design doc for how mobs are placed and respawn in the game world. Spawning is driven by the [`evennia-mob-spawner`](https://github.com/FullCircleMUD/evennia-mob-spawner) library reading declarative YAML rules from the [`fcm-mobs`](https://github.com/FullCircleMUD/fcm-mobs) content repo. The library owns the engine (tick loop, population maintenance, room selection); FCM owns the data (rules, typeclasses).
 
-For item spawning (loot, NFTs, scrolls), see **UNIFIED_ITEM_SPAWN_SYSTEM.md**. For service NPCs (bartenders, shopkeepers) which use a different lifecycle, see **NPC_QUEST_SYSTEM.md**.
+For item spawning (loot, NFTs, scrolls), see **UNIFIED_ITEM_SPAWN_SYSTEM.md**. For service NPCs (bartenders, shopkeepers, trainers), see **NPC_QUEST_SYSTEM.md** — those have a different lifecycle (immortal, built once by world-builder, never respawn).
 
 ---
 
 ## How It Works
 
-Each zone has a JSON file at `world/spawns/<zone_key>.json` containing a list of spawn rules. A `ZoneSpawnScript` for that zone is created at world build time via `ZoneSpawnScript.create_for_zone(zone_key)`, loads the JSON, and ticks every 15 seconds. On each tick, it audits each rule:
+```
+fcm-mobs/shard0/<zone>/<file>.yaml   ← rules (data)
+            │
+            ▼
+GitHubReader (in evennia-mob-spawner)
+            │
+            ▼
+Validator → Deployer → MobSpawnerScript (one per YAML file)
+                            │
+                            ▼ every MOB_SPAWNER_TICK_SECONDS (default 15s)
+                       observe → cooldown → spawn → tag
+```
 
-1. Count living mobs matching the rule (`typeclass + area_tag`).
-2. If count is below `target` and the cooldown has elapsed, pick an eligible room and spawn one.
-3. Stamp `last_spawn_times[rule_id] = now` so the next spawn waits for the cooldown.
+Each leaf YAML file in `fcm-mobs/shard0/<zone>/` becomes one persistent `MobSpawnerScript` in the game DB after `ms_load`. The script holds that file's rule table and runs a tick loop that:
 
-When a mob dies, `mob.die()` deletes the object and (when configured) notifies the script so cooldowns can restart from kill time rather than from the last spawn attempt. The script's next tick repopulates.
+1. **Observes** living mobs per rule by querying the identity tags stamped at spawn time (`mob_spawner_rule = str(rule_id)` AND `mob_spawner_file = <script.db_key>`).
+2. **Detects deaths** via count delta — no callback from the typeclass is required.
+3. **Gates on cooldown** — either `respawn_seconds` (clock from last spawn) or `death_cooldown_seconds` (clock from observed kill).
+4. **Picks a room** — three-tier fallback: pack-spawn with a leader (`spawn_with_typeclass`) → den room (`den_room_tag`) → random within the rule's `area_tag` pool. All steps respect `max_per_room`.
+5. **Spawns one mob** — `create_object(typeclass, key, location)` then stamps tags and applies the rule's `desc`/`attrs`/`tags`.
+6. **Invokes the optional hook** — if the typeclass defines `ms_at_post_spawn(self)`, the library calls it for per-spawn behaviour resets (rally-cry flags, AI state, etc.).
 
-Rule identity is `f"{typeclass}:{area_tag}"` — same typeclass in different areas counts as different rules.
+Population identity is keyed on `(file, rule_id)`. Two rules sharing the same typeclass and area_tag count as independent populations — this is what enables the indistinguishable-variant loot pattern below without subclass proliferation.
 
 ---
 
-## JSON Rule Fields
+## Rule Schema
 
-Every field is optional except `typeclass`, `key`, and `area_tag`. Mix and match for the encounter you want.
+Every field except the required ones is optional. Mix and match for the encounter you want.
 
-| Field | Type | Purpose |
-|---|---|---|
-| `typeclass` | str | Dotted Python path to the mob class. Use a generic class (`typeclasses.actors.mob.CombatMob`) when the mob differs only in stats — see `attrs`. |
-| `key` | str | The mob's in-game name. Any string — unique names like `"the Heffalump"` or `"Rabbit"` work fine. |
-| `area_tag` | str | Tag that scopes the rule. Rooms tagged `mob_area=<area_tag>` form the spawn pool *and* the AI wander container. To pin to a single room, give that room a dedicated tag. |
-| `target` | int | How many of this rule should be alive at once. |
-| `max_per_room` | int | Cap per room. `0` means no cap. Use `1` to prevent stacking and to pin solitary mobs alongside `target=1`. |
-| `respawn_seconds` | int | Cooldown measured from the **last spawn attempt**. Right for populations that should always be near target — wolves, kobolds. |
-| `death_cooldown_seconds` | int | Cooldown measured from **kill time** (the script is notified by `mob.die()`). Right for "respawn N minutes after death" semantics. Overrides `respawn_seconds` if both are set. |
-| `desc` | str | Sets `mob.db.desc`. |
-| `attrs` | dict | Per-rule stat/attribute overrides applied via `setattr(mob, k, v)` after creation. Routes through `AttributeProperty` to `.db`. Use this to give one generic typeclass many distinct named instances. |
-| `post_spawn_hook` | str (dotted path) | Module-level `fn(mob) -> None` invoked after `start_ai()` on every fresh spawn. Used to set AI state, reset per-life flags, etc. |
-| `spawn_with_typeclass` | str (dotted path) | Pack-spawn hint. If a living instance of this typeclass exists within the rule's `area_tag`, spawn into *that mob's room* (followers appear with their leader). Falls through to `den_room_tag`, then to a random pick, when no living instance exists or the chosen room is full. |
-| `den_room_tag` | str | Single-room fallback for pack respawn. Used as the primary location when `spawn_with_typeclass` finds no living leader, and as the fixed respawn point for the leader itself. The room must carry this tag in category `mob_area`. |
-
-A rule's `attrs` dict can also override loot fields (`loot_gold_max`, `loot_resources`, `spawn_recipes_max`, `spawn_scrolls_max`). The script re-reads these after applying `attrs` and updates spawn-tag categories so the unified item spawn service can find the mob.
-
----
-
-## Examples
-
-These illustrate the full range — same engine, different configurations.
-
-### Wolf pack — many mobs, wide area, spawn-attempt cooldown
-
-```json
-{
-    "typeclass": "typeclasses.actors.mobs.wolf.Wolf",
-    "key": "a grey wolf",
-    "area_tag": "millholm_woods",
-    "target": 6, "max_per_room": 1,
-    "respawn_seconds": 180,
-    "desc": "A grey wolf prowls through the undergrowth."
-}
-```
-
-Six wolves spread across every room tagged `mob_area=millholm_woods`, no more than one per room. After a kill the next replacement spawns 3 minutes after the *previous* spawn (or sooner if the previous spawn was already > 3 min ago).
-
-### Stationary atmospheric NPC — generic typeclass, full stat overrides, idle hook
-
-```json
-{
-    "typeclass": "typeclasses.actors.mob.CombatMob",
-    "key": "Rabbit",
-    "area_tag": "haw_rabbit_house",
-    "target": 1, "max_per_room": 1,
-    "death_cooldown_seconds": 300,
-    "post_spawn_hook": "typeclasses.scripts.spawn_hooks.set_ai_idle",
-    "desc": "A fussy-looking rabbit with a permanent expression of mild irritation.",
-    "attrs": {
-        "room_description": "gives you a dirty look, you must have stepped in his garden.",
-        "damage_dice": "2d4+1", "level": 5,
-        "base_hp_max": 55, "hp_max": 55, "hp": 55,
-        "base_strength": 17, "strength": 17,
-        "base_armor_class": 15, "armor_class": 15,
-        "loot_gold_max": 10,
-        "spawn_recipes_max": {"skilled": 1}
-    }
-}
-```
-
-`area_tag` belongs to a single room (`rabbit_house`), so `target=1` pins Rabbit there. `set_ai_idle` keeps him stationary — without it, base CombatMob's `ai_wander` would move him 30% of ticks. Death cooldown of 5 minutes gives a brief consequence window after a kill.
-
-### Single-room unique encounter with state reset
-
-```json
-{
-    "typeclass": "typeclasses.actors.mobs.kobold_chieftain.KoboldChieftain",
-    "key": "the Kobold Chieftain",
-    "area_tag": "mine_kobold_warren",
-    "target": 1, "max_per_room": 1,
-    "death_cooldown_seconds": 1800,
-    "post_spawn_hook": "typeclasses.scripts.spawn_hooks.reset_chieftain_state",
-    "desc": "A squat but powerfully built kobold wearing a crude crown…"
-}
-```
-
-A bespoke typeclass (`KoboldChieftain`) handles combat-tick behaviours like the rally cry. The post-spawn hook clears `db.has_rallied` on every fresh spawn. `mine_kobold_warren` is a tag attached to exactly one room, alongside the broader `mine_kobolds` tag used by the surrounding kobold population.
-
-### Loot variants — same look, different drops
-
-```json
-[
-    {"typeclass": "...mobs.kobold.Kobold",         "key": "a kobold", "area_tag": "mine_kobolds", "target": 9, "max_per_room": 3, "respawn_seconds": 120, "desc": "..."},
-    {"typeclass": "...mobs.kobold.KoboldRecipeLoad","key": "a kobold", "area_tag": "mine_kobolds", "target": 3, "max_per_room": 3, "respawn_seconds": 120, "desc": "..."}
-]
-```
-
-12 kobolds in the area, but 25% drop a recipe — controlled by spawn-table targets, not runtime RNG. Both rules share `key`, `desc`, and `area_tag` so players can't tell them apart. See § Pseudo-Random Loot below.
-
-### Pack spawning — followers appear with their leader
-
-```json
-[
-    {
-        "typeclass": "...mobs.southern_wolf.Direwolf",
-        "key": "a direwolf",
-        "area_tag": "wolves_ne",
-        "target": 1, "max_per_room": 1,
-        "death_cooldown_seconds": 1800,
-        "den_room_tag": "wolves_ne_den",
-        "attrs": {"den_room_tag": "wolves_ne_den"}
-    },
-    {
-        "typeclass": "...mobs.southern_wolf.SouthernWolf",
-        "key": "a southern wolf",
-        "area_tag": "wolves_ne",
-        "target": 3, "max_per_room": 4,
-        "death_cooldown_seconds": 1800,
-        "spawn_with_typeclass": "...mobs.southern_wolf.Direwolf",
-        "den_room_tag": "wolves_ne_den",
-        "attrs": {"den_room_tag": "wolves_ne_den"}
-    }
-]
-```
-
-The alpha respawns at `wolves_ne_den` (one designated room). Each follower respawns into the alpha's *current* room when alive — co-locating the pack on respawn so the `MobFollowableMixin` can lock onto the leader on the next AI tick. If the alpha is dead, followers fall back to the den room and wait for the leader to respawn. The `attrs.den_room_tag` is read by the mob's own `ai_retreating()` for healing behavior; the rule-level `den_room_tag` is read by `_pick_spawn_room` for placement.
-
-### Mastery override on a generic mob class
-
-```json
-{
-    "typeclass": "typeclasses.actors.mobs.kobold.KoboldWarrior",
-    "key": "a kobold warrior",
-    "area_tag": "mine_kobolds",
-    "target": 2, "max_per_room": 1,
-    "respawn_seconds": 240,
-    "attrs": {
-        "class_skill_mastery_levels": {"bash": 3},
-        "weapon_skill_mastery_levels": {"dagger": 3}
-    }
-}
-```
-
-`attrs` can promote any mob's mastery levels per-rule without subclassing.
+| Field | Required | Type | Purpose |
+|---|---|---|---|
+| `rule_id` | ✓ | int (≥0) | Author-supplied integer, unique within the file. The script's persistent bookkeeping (cooldown clocks, observed counts) is keyed on it. Stable across YAML reordering. |
+| `typeclass` | ✓ | str | Dotted Python path to the mob class. Generic classes (`typeclasses.actors.mob.CombatMob`, `typeclasses.actors.mobs.aggressive_mob.AggressiveMob`) are fine when the mob differs only in stats — drive everything via `attrs`. |
+| `key` | ✓ | str | The mob's in-game display name. Multiple rules can share a key (the indistinguishable-variant pattern — see below). |
+| `area_tag` | ✓ | str | Tag (under category `mob_area`) defining the rule's room pool. Same tag drives the AI wander container. |
+| `target` | ✓ | int (≥1) | How many of this rule's mobs should be alive at once. |
+| `max_per_room` | ✓ | int (≥1) | Per-room cap. Enforced per-rule via identity tags, so two rules sharing typeclass+area_tag respect their caps independently. |
+| `respawn_seconds` | exactly one of | int | Cooldown from last spawn attempt. Right for populations that should stay near target (wolves, kobolds). |
+| `death_cooldown_seconds` | exactly one of | int | Cooldown from observed kill time. Right for "boss respawns N minutes after death" semantics. Validator enforces mutual exclusivity with `respawn_seconds`. |
+| `desc` | optional | str | Sets `mob.db.desc`. |
+| `attrs` | optional | dict | Per-rule attribute overrides applied via `setattr(mob, k, v)`. Routes through `AttributeProperty` to `mob.db`. **Loot lives here** as `spawn_*_max` attrs. |
+| `tags` | optional | list | List of tags to stamp on the spawned mob alongside the library's identity tags. Each entry is a bare string (untyped) or a mapping `{key, category?}`. **Loot eligibility lives here** as `spawn_*` tags. Library-reserved category prefix `mob_spawner_` is refused at validation. |
+| `spawn_with_typeclass` | optional | str | Pack-spawn trigger. Library finds a living instance of this typeclass within the rule's `area_tag` and spawns into that mob's room. Falls through to den / random when no leader is found. |
+| `den_room_tag` | optional | str | Single-room lair fallback. Used after `spawn_with_typeclass` finds no leader, and as the leader's own spawn room. |
 
 ---
 
-## Area Tags — Spawn Pool + Wander Container
+## Tags Stamped on Every Spawned Mob
 
-Every spawned mob is tagged with the rule's `area_tag` (category `mob_area`). One tag, two purposes:
+The library applies four tag categories at spawn time:
 
-1. **Spawn room pool** — `_pick_spawn_room` queries rooms tagged `mob_area=<area_tag>`, picks one that isn't at `max_per_room` capacity, and spawns there.
-2. **AI wander container** — `ai_wander` only walks into other rooms with the same tag. A wolf tagged `millholm_woods` won't wander into the farms.
+| Category | Key | Source | Purpose |
+|---|---|---|---|
+| `mob_area` | `area_tag` value | from rule | AI wander containment + (legacy) other consumer queries |
+| `mob_spawner_rule` | `str(rule_id)` | identity | half of the population discriminator |
+| `mob_spawner_file` | script's `db_key` (file path) | identity | other half of the discriminator |
+| consumer-declared | from YAML `tags:` | data | application-specific (loot eligibility, quest markers, faction flags, ...) |
 
-Single source of truth — define an area once, mobs spawn and roam within it.
+The identity tags are passive — the library queries them, the typeclass doesn't read or write them. They're how `ms_status` / `ms_spawn_report` and the population-counting code find the right mobs without depending on typeclass.
 
-**Pinning a mob to one room:** give that room a dedicated tag used only by the rule that should spawn there. Rooms can carry multiple `mob_area` tags — adding a dedicated tag doesn't remove or interfere with broader tags. The Kobold Warren has `mine_kobolds` (for the surrounding kobold population) and `mine_kobold_warren` (used only by the chieftain rule).
+The consumer-declared `tags:` field is where loot eligibility flags live for FCM:
 
-**Builder responsibility:** when adding rooms to a zone, tag them with `set_zone()` and any appropriate `mob_area` tags. Without tags, no mobs will spawn there.
+```yaml
+tags:
+  - {key: spawn_gold, category: spawn_gold}
+  - {key: spawn_resources, category: spawn_resources}
+```
+
+---
+
+## Loot Model — Data in YAML
+
+**Loot is data, not typeclass behaviour.** Each rule that wants its mob to drop loot declares the runtime values directly in YAML:
+
+```yaml
+- rule_id: 1
+  typeclass: typeclasses.actors.mobs.wolf.Wolf
+  key: a grey wolf
+  area_tag: woods_wolves
+  target: 12
+  max_per_room: 1
+  respawn_seconds: 120
+  desc: A grey wolf pads through the undergrowth...
+  attrs:
+    spawn_resources_max: {8: 1}    # 8 = hide id
+    spawn_gold_max: 2
+  tags:
+    - {key: spawn_resources, category: spawn_resources}
+    - {key: spawn_gold, category: spawn_gold}
+```
+
+The unified item spawn distributor (see UNIFIED_ITEM_SPAWN_SYSTEM.md) finds drop-eligible targets by querying the `spawn_*` tag, then reads `spawn_*_max` to size the headroom for proportional allocation.
+
+Typeclass `loot_*` defaults are not used anywhere in the spawn path. The `at_object_creation` derivation that used to translate them to runtime `spawn_*_max` is gone. If a mob has no rule (e.g. test-created via raw `create_object`), it carries no loot tags and the distributor ignores it.
+
+---
+
+## Indistinguishable Variant Pattern
+
+Same look, different loot — without subclass proliferation. Make multiple rules share `key`, `desc`, `area_tag`, `typeclass`, with distinct `rule_id`s and per-rule `attrs` / `tags`:
+
+```yaml
+# All produce "a grey wolf" with identical desc — players cannot tell them apart.
+- rule_id: 1
+  typeclass: typeclasses.actors.mobs.wolf.Wolf
+  key: a grey wolf
+  area_tag: woods_wolves
+  target: 12
+  attrs: {spawn_resources_max: {8: 1}, spawn_gold_max: 2}    # hide-only
+  tags:
+    - {key: spawn_resources, category: spawn_resources}
+    - {key: spawn_gold, category: spawn_gold}
+
+- rule_id: 2
+  typeclass: typeclasses.actors.mobs.wolf.Wolf
+  key: a grey wolf
+  area_tag: woods_wolves
+  target: 1
+  attrs: {spawn_scrolls_max: {basic: 1}}                       # scroll-only
+  tags:
+    - {key: spawn_scrolls, category: spawn_scrolls}
+```
+
+Apparent loot randomness comes from population ratios, not per-kill RNG. Compliance-relevant: deterministic supply governed by population control isn't a gambling mechanic.
+
+The library counts each rule's population independently via the `(file, rule_id)` identity tags, so the rules don't fight each other for `target` or `max_per_room` even though their typeclass + area_tag are identical.
+
+---
+
+## Admin Commands
+
+All ship from the library, auto-installed into `AccountCmdSet`, locked to `cmd:superuser()`. Same scope syntax across all: `all | <level>=<value> [<level>=<value> ...]`. Bare command (no args) prints usage.
+
+| Command | Effect |
+|---|---|
+| `ms_load all` | Fetch the entire fcm-mobs repo via the configured Reader, validate, and deploy. Per-file scripts get upserted in place; cooldown state preserved for rules that survive the swap. |
+| `ms_load shard=shard0 zone=millholm file=town` | Same but scoped to one file. |
+| `ms_status [scope]` | Read-only: lists scripts in scope with state (active/paused/stopped), rule count, tick interval, next-tick estimate. |
+| `ms_spawn_report [scope]` | Live population census: for each script in scope, per-rule current vs target counts, grouped by `area_tag`. Under-target rules marked with `*`. |
+| `ms_restart [scope]` | Kick the ticker without re-reading YAML. Recovery for stopped/paused scripts; preserves state. |
+| `ms_stop [scope]` | Pause the ticker. State preserved; resumable via `ms_restart`. |
+| `ms_delete [scope]` | Remove scripts entirely (state lost). Use to clean up orphans whose YAML files have been removed from the manifest. |
+
+---
+
+## Settings Wiring
+
+```python
+# src/game/server/conf/settings.py
+MOB_SPAWNER_READER = "evennia_yaml_reader.github.GitHubReader"
+MOB_SPAWNER_REPO   = "FullCircleMUD/fcm-mobs"
+MOB_SPAWNER_REF    = "main"
+MOB_SPAWNER_GITHUB_PAT = os.environ.get("MOB_SPAWNER_GITHUB_PAT", "")  # set in secret_settings.local
+
+# Composed at file bottom (after secret_settings load so PAT override propagates)
+MOB_SPAWNER_READER_KWARGS = {
+    "repo": MOB_SPAWNER_REPO,
+    "ref": MOB_SPAWNER_REF,
+    "pat": MOB_SPAWNER_GITHUB_PAT,
+}
+```
+
+`evennia_mob_spawner` is in `INSTALLED_APPS`. Library auto-installs its admin commands at server start via `AppConfig.ready()`.
+
+Optional tunables (defaults shown):
+- `MOB_SPAWNER_TICK_SECONDS = 15` — interval for every `MobSpawnerScript`. Library-level, not per-rule.
+- `MOB_SPAWNER_AREA_TAG_CATEGORY = "mob_area"` — tag category for `area_tag` / `den_room_tag` queries.
 
 ---
 
 ## Death Lifecycle
 
-`CombatMob.die()` runs the common death sequence (corpse, loot transfer, XP, alignment) and then deletes the mob. The `ZoneSpawnScript` spawns a fresh replacement on the rule's `death_cooldown_seconds` clock — the same object never returns.
+`CombatMob.die()` runs the common death sequence (corpse, loot transfer, XP, alignment) and deletes the mob. The library observes the death via tick-time count delta — no callback from the typeclass to the script is required or accepted. The next tick's spawn-decision logic sees `current < target` and (if cooldown allows) repopulates.
 
-```python
-# Notify ZoneSpawnScript when this mob carried death-cooldown metadata
-rule_id = self.db.spawn_rule_id
-zone_key = self.db.spawn_zone_key
-if rule_id and zone_key:
-    script = ScriptDB.objects.filter(db_key=f"zone_spawn_{zone_key}").first()
-    if script:
-        script.on_mob_death(rule_id)
-
-self.delete()
-```
-
-The `db.spawn_rule_id` and `db.spawn_zone_key` attributes are stamped on the mob at spawn time when its rule sets `death_cooldown_seconds`. `on_mob_death(rule_id)` updates `last_spawn_times[rule_id] = now`, so the existing cooldown check in `_check_rule` then naturally measures from death.
-
-`last_spawn_times` is persisted on the script's `db`, so cooldowns survive restarts.
-
-### Post-spawn hooks
-
-`at_object_creation()` runs on every fresh spawn and sets up equipment, base stats, etc. `post_spawn_hook` is the place for state that needs explicit per-life reset — flags that wouldn't be cleared by `at_object_creation` because they default to `None` (Evennia's `db` returns `None` for unset attrs, but a typeclass might assume a different default).
-
-Two homes for hooks:
-- **Generic, reusable** — `typeclasses/scripts/spawn_hooks.py` (e.g. `set_ai_idle(mob)`, `reset_chieftain_state(mob)`).
-- **Specific to one mob** — alongside the typeclass file.
-
-A bad hook path logs an error via `logger.log_err` and the spawn proceeds. Hooks fail safe.
+For rules using `death_cooldown_seconds`, the library stamps `last_death_time` on the rule when it observes the count drop. The cooldown clock for the next spawn starts from that timestamp.
 
 ---
 
-## Pseudo-Random Loot via Spawn Variants
+## ms_at_post_spawn — Per-Spawn Behaviour Reset
 
-To make loot feel randomised without per-kill RNG, use **class variants** — multiple typeclasses identical in appearance, stats, and behaviour, differing only in the loot the unified spawn service loads onto them.
+The library calls `mob.ms_at_post_spawn()` after every fresh spawn IF the typeclass defines that method. Use it to reset state that needs to be clean at the start of each life — e.g. a boss's `db.has_rallied` flag that wouldn't be cleared by `at_object_creation` because its default is `None`:
 
-**Pattern:**
-1. **Base class** — drops gold, no knowledge.
-2. **Loot variant(s)** — child classes with `loot_gold_max = 0` and `spawn_recipes_max` / `spawn_scrolls_max` populated.
+```python
+class KoboldChieftain(CombatMob):
+    def ms_at_post_spawn(self):
+        """Reset per-spawn combat state on every fresh spawn."""
+        self.db.has_rallied = False
+        # ... any other per-life setup
+```
 
-All variants share the same `key`, `desc`, `area_tag`, and `max_per_room` in the spawn JSON. Players cannot tell them apart; the apparent randomness is the population ratio.
+Duck-typed protocol: one optional method name, no inheritance demands, no required base class. Validator's Tier 3 checks the signature is `mob.ms_at_post_spawn()` (zero required args after `self`) so typos like `def ms_at_post_spawn(self, foo):` are caught at load time, not runtime.
 
-Examples in the codebase: `Kobold` + `KoboldRecipeLoad`; `Gnoll` + `GnollRecipeLoad` + `GnollScrollLoad`; `Jagular` + `JagularRecipeLoad` + `JagularScrollLoad`; `Woozle` + `WoozleRecipeLoad` + `WoozleScrollLoad`.
+Method on the typeclass is the canonical home — it lives with the code it resets state for, not in a sibling module of dotted-path callbacks.
 
-**Guidelines:**
-- Variant classes inherit everything from the base, override only loot attributes.
-- Keep variants in the same file as the base for discoverability.
-- Same `key` and `desc` across variants is mandatory — players must see one creature, not three.
-- Same `area_tag` across variants means they share the same room pool and wander together.
-- Adjust ratios by changing JSON target counts, no recompile.
+---
+
+## Area Tags — Spawn Pool + Wander Container
+
+Every spawned mob carries the rule's `area_tag` under category `mob_area`. One tag, two purposes:
+
+1. **Spawn room pool** — `_pick_room` queries rooms tagged `mob_area=<area_tag>`. Library's identity-tag filter ensures `max_per_room` is counted per-rule, not pooled across rules sharing the area.
+2. **AI wander container** — `ai_wander` only steps into other rooms with the same tag. A wolf tagged `woods_wolves` won't wander into the farms.
+
+**Pinning a mob to one room:** give that room a dedicated tag used only by the rule that should spawn there. Rooms can carry multiple `mob_area` tags — adding a dedicated tag doesn't remove or interfere with broader tags.
+
+**Builder responsibility:** when authoring rooms in the world-builder YAML (fcm-world), tag them with `mob_area:<area_tag>` for any spawn rule that should populate them. Without a tag, no mobs spawn there.
 
 ---
 
 ## What This System Does Not Handle
 
-- **Service NPCs** — bartenders, shopkeepers, guildmasters, trainers, librarian, townfolk, etc. These are authored as YAML entities in fcm-world (typically one NPC file per character, e.g. `shard0/millholm/town/npc_aldric.yaml`) and default to `is_immortal=True` so they never reach `die()`. They have a persistent dbref by virtue of never dying; this system does not respawn them.
+- **Service NPCs** — bartenders, shopkeepers, guildmasters, trainers, librarian, townfolk-with-quests, etc. These are authored as YAML entities in **fcm-world** and default to `is_immortal=True` so they never reach `die()`. They have a persistent dbref by virtue of never dying. This system does not respawn them.
 - **Procedural dungeon mobs** — dungeon templates (`world/dungeons/templates/`) own their mobs; mobs are created when an instance spawns and never respawn. See `PROCEDURAL_DUNGEONS.md`.
-- **Mob loot tables** — what items appear on a corpse is handled by the unified item spawn service. See `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
+- **Loot composition** — what items appear on a corpse is handled by the unified item spawn service. See `UNIFIED_ITEM_SPAWN_SYSTEM.md`. The mob spawn system's only loot-related responsibility is stamping `spawn_*_max` attrs + `spawn_*` tags as declared by each rule.
 - **Resource nodes** — see `UNIFIED_ITEM_SPAWN_SYSTEM.md`.
 
 ---
 
 ## Operational Notes
 
-**Hot reload.** JSON files can be re-read without restarting. `ZoneSpawnScript` re-reads its rules on demand — useful while building.
+**Hot reload.** `ms_load` re-fetches the YAML from GitHub and re-deploys. Scripts that survive the redeploy preserve their cooldown clocks; rules removed from the YAML are purged from the script's bookkeeping.
 
-**Restart-safe.** Population state persists naturally: spawned mobs are real Evennia objects, the script's `db.last_spawn_times` is persisted, and dead mobs were already deleted before the restart. Cooldowns survive.
+**Restart-safe.** Population state persists naturally: spawned mobs are real Evennia objects, the script's `db.last_spawn_times` / `db.last_death_times` survive restarts, dead mobs were deleted before the restart.
 
-**Targets are not caps.** A coordinated party can drive a zone below target by clearing faster than the cooldown — that's intended behaviour. Cooldowns control how fast the zone refills, not whether players can clear it.
+**Targets are not caps.** A coordinated party can drive a zone below target by clearing faster than the cooldown — that's intended. Cooldowns control how fast the zone refills, not whether players can clear it.
 
-**Cooldown precision.** The audit runs on the 15-second tick, so any cooldown is effectively `cooldown + (0–15)` seconds. Don't design encounters that rely on second-level precision.
+**Cooldown precision.** The audit runs on the tick interval (default 15s), so any cooldown is effectively `cooldown + (0–15)` seconds. Don't design encounters that rely on second-level precision.
 
-**No player-count scaling.** A zone configured for 6 wolves is 6 wolves whether 1 or 100 players are online. Future enhancement if needed; not currently a problem.
+**No player-count scaling.** A zone configured for 6 wolves is 6 wolves whether 1 or 100 players are online. Future enhancement if needed.
 
-**Event content.** Special events can swap mobs by editing JSON and reloading — "the woods are overrun with corrupted wolves this week" is a one-line change.
-
----
-
-## Future Work
-
-The current engine handles unconditional respawn (with cooldown semantics chosen per rule). Conditional spawning is unbuilt:
-
-- **Time gating** — bosses that only appear at night, in winter, during a storm.
-- **Spawn chance** — % per respawn window rather than guaranteed-after-cooldown.
-- **Population prerequisite** — a chieftain that only spawns when the surrounding pack is intact.
-- **Global event flags** — world state toggles to enable/disable spawn rules (seasonal, quest-driven).
-
-Each of these is implementable as an extra optional JSON field plus a check in `_check_rule`. They'll be added when the first encounter that needs them is designed.
-
----
-
-## System Interactions
-
-| System | How It Relates |
-|---|---|
-| **AI handlers** | Spawned mobs use `area_tag` for wander containment via the AI state machine; `post_spawn_hook` can flip the initial AI state (e.g. `set_ai_idle`). |
-| **Combat** | Mob death deletes the object. The script repopulates after the rule's cooldown. |
-| **Procedural dungeons** | Dungeons spawn their own mobs — outside the zone-script scope. |
-| **Quest system** | Quest progress matches kills by typeclass string, not dbref. JSON create/delete on each respawn is safe — quests still tick. |
-| **Combat memory** | `CombatMemory` is keyed on mob_type / mob_name / level. Persists across the dbref churn from JSON respawn. |
-| **Unified item spawn service** | Loot drops are placed onto mobs by the unified spawn service tagging. The zone script re-syncs `spawn_resources` / `spawn_gold` / `spawn_scrolls` / `spawn_recipes` tag categories after applying `attrs`. |
-| **Per-zone `soft_deploy.py`** | After `wb_build` has placed rooms and `mob_area` tags, call `ZoneSpawnScript.create_for_zone(zone_key)` from the zone's `build_zone()` (`src/game/world/game_world/zones/<zone>/soft_deploy.py`). The script then maintains population against the YAML-deployed world. |
+**Event content.** Special events swap mobs by editing the YAML repo and reloading — "the woods are overrun with corrupted wolves this week" is a YAML diff + `ms_load`.
 
 ---
 
 ## Files
 
 ```
-typeclasses/scripts/
-├── zone_spawn_script.py      ← engine: tick, populate, _check_rule, _spawn_mob, on_mob_death
-└── spawn_hooks.py            ← reusable post_spawn_hook callables (set_ai_idle, reset_chieftain_state)
+# Library (engine) — separate repo, editable install
+libraries/evennia-mob-spawner/
+└── src/evennia_mob_spawner/
+    ├── script.py        # MobSpawnerScript: tick loop, room selection, spawn-one
+    ├── commands.py      # ms_load, ms_status, ms_spawn_report, ms_restart, ms_stop, ms_delete
+    ├── validator.py     # rule-schema predicates (rule_id, typeclass, attrs, tags, ...)
+    ├── deployer.py      # upsert-with-state-preservation
+    ├── loader.py        # YAML → LoadResult
+    └── finder.py        # manifest walker (definitions.yaml + per-folder index.yaml)
 
-world/spawns/
-└── <zone_key>.json           ← per-zone rule lists
+# Content (rules) — separate repo, fetched via GitHubReader
+fcm-mobs/
+├── definitions.yaml     # levels: [shard, zone, file], CI-gating flag
+├── index.yaml           # top-level shard list
+└── shard0/
+    └── millholm/
+        ├── town.yaml    # one MobSpawnerScript per leaf file
+        ├── woods.yaml
+        └── ...
 
-typeclasses/actors/
-├── mob.py                    ← CombatMob.die() (corpse + death notification + deletion)
-└── mobs/                     ← mob typeclasses (Wolf, Kobold, KoboldChieftain, GnollWarlord, …)
+# Consumer (typeclasses) — FCM gamedir
+src/game/typeclasses/actors/
+├── mob.py               # CombatMob base
+└── mobs/                # concrete typeclasses (Wolf, Kobold, Skeleton, ...)
 ```
