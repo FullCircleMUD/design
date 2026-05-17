@@ -121,13 +121,13 @@ AMM Buy/Sell Prices                            (ore+ingot→iron sword)
 ### Mob and Combat Systems
 
 ```
-Zone Spawn Rules (JSON)
+Mob spawn rules (fcm-mobs YAML)
     │
     ▼
-ZoneSpawnScript (15s tick)
+evennia-mob-spawner (per-rule tick)
     │
     ├── spawns mobs into rooms      ──► Players encounter → Combat
-    │   per their JSON rule                    │
+    │   per their rule                         │
     │   (target, area_tag, respawn,            ▼
     │    optional post_spawn_hook)        CombatHandler (per-combatant)
     │                                          │
@@ -247,7 +247,7 @@ POST-KILL:
     at_kill() on weapon → mob special abilities (Rampage, Cleave)
     XP awarded to the killer (formula in BaseActor.die / _award_xp)
     Corpse dropped with mob's loot
-    Mob deleted; ZoneSpawnScript repopulates after the rule's
+    Mob deleted; evennia-mob-spawner repopulates after the rule's
         death_cooldown_seconds (or respawn_seconds) elapses
 ```
 
@@ -335,4 +335,4 @@ A server with 10 players and a server with 1,000 players should feel equally sup
 
 ### Evennia Persistence
 
-Scripts (CombatHandlers, ZoneSpawnScript, ResourceSpawnScript, NFTSaturationScript) survive `evennia restart` via Evennia's built-in script persistence. The game can be restarted mid-combat and handlers resume correctly. Server startup (`at_server_start()`) ensures all global scripts exist and restarts any orphaned timers (corpse decay, purgatory, mob respawn).
+Scripts (CombatHandlers, evennia-mob-spawner population scripts, UnifiedSpawnScript, NFTSaturationScript) survive `evennia restart` via Evennia's built-in script persistence. The game can be restarted mid-combat and handlers resume correctly. Server startup (`at_server_start()`) ensures all global scripts exist and restarts any orphaned timers (corpse decay, purgatory, mob respawn).

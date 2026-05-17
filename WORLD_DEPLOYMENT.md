@@ -18,9 +18,8 @@ The pre-YAML era used Python `build_<zone>()` / `build_<district>()` functions, 
 ```
 src/game                      consumer game (this repo)
   typeclasses/                rooms, exits, NPCs, items — game systems, not content
-  world/game_world/zones/*/soft_deploy.py
-                              per-zone clean + ZoneSpawnScript creation
-  world/spawns/*.json         mob spawn rules (independent of YAML)
+  utils/exit_helpers.py       runtime exit helpers (procedural dungeons,
+                              conditional rebinds); not the authoring surface
   commands/, services/, …     everything else FCM-specific
 
 libraries/evennia-world-builder    pipeline library (separate git repo)
@@ -33,6 +32,8 @@ fcm-world                     world content (separate git repo)
   shard0/scaffold/            system rooms (Limbo, Purgatory, recycle bin)
   shard0/<zone>/<district>/   the world, as data
 ```
+
+Mob populations are managed by a parallel pipeline — the [`evennia-mob-spawner`](https://github.com/FullCircleMUD/evennia-mob-spawner) library against the [`fcm-mobs`](https://github.com/FullCircleMUD/fcm-mobs) content repo, with its own operator commands (`ms_load` / `ms_status` / `ms_restart` / `ms_stop` / `ms_delete`). The two pipelines are deliberately separate: static room/exit/fixture/NPC content lives in `fcm-world` and is applied via `wb_build`; respawning mob populations live in `fcm-mobs` and are applied via `ms_load`. They meet only at the `mob_area` tag, which world-builder authors place on rooms and mob-spawner uses to find where to spawn.
 
 The library installs into the game's venv as a normal Python package; the YAML repo is fetched at build time by the library's Reader (GitHub by default, local filesystem for development). FCM points the Reader at `fcm-world` via `WORLDBUILDER_READER_KWARGS` in [server/conf/settings.py](../src/game/server/conf/settings.py).
 
@@ -58,10 +59,10 @@ Every room YAML must carry exactly one `zone` tag and one `district` tag. Other 
 | `zone`     | `system_zone`      | system rooms (Limbo, Purgatory, recycle bin) |
 | `district` | `<district_key>`   | every room in the district              |
 | `district` | `system_district`  | system rooms                            |
-| `mob_area` | `<spawn_area_key>` | rooms participating in a `ZoneSpawnScript` pool |
+| `mob_area` | `<spawn_area_key>` | rooms participating in an evennia-mob-spawner population pool |
 | `map_cell` | `<terrain>:<point>`| cartography survey grid                 |
 
-These tags are author-controlled in YAML; the library is content-agnostic about what tags mean. FCM systems read them: `clean_zone()` scopes by `zone`, `ZoneSpawnScript` finds spawn rooms by `mob_area`, cartography composes a district map from `map_cell`.
+These tags are author-controlled in YAML; the library is content-agnostic about what tags mean. FCM systems read them: `wb_build` cleans by `wb_deployment_file` (per-file scoped), evennia-mob-spawner finds spawn rooms by `mob_area`, and cartography composes a district map from `map_cell`. (The legacy zone-tag-scoped `clean_zone()` helper has been retired; `wb_build`'s file-scoped cleanup is the production primitive.)
 
 Gateway rooms today are tagged with their owning zone's `zone` / `district` keys (e.g. `zone:port_shadowmere` + `district:port_shadowmere_travel`) — not a unified `world_base` meta-zone. System rooms today are tagged `zone:system_zone` + `district:system_district`. A future unification under `zone:world_base` is possible; not on the near-term roadmap.
 
@@ -144,7 +145,7 @@ Limbo, Purgatory, and the NFT recycle bin live as one YAML file each under `fcm-
 - `shard0/scaffold/nft_recycle_bin.yaml`
 - (Limbo follows the same pattern when its YAML file is added — see the scaffold folder for the current state.)
 
-Each file owns exactly one room, so rebuilding one system room is a one-file `wb_build`. They are tagged `zone:system_zone` + `district:system_district` and protected from accidental destruction via the name-match guard in `_is_system_room()` in [world/game_world/zone_utils.py](../src/game/world/game_world/zone_utils.py) — they never enter any `clean_zone` delete set.
+Each file owns exactly one room, so rebuilding one system room is a one-file `wb_build`. They are tagged `zone:system_zone` + `district:system_district` and protected from accidental destruction by `wb_build`'s file-scoped cleanup model — system rooms only enter a delete set if `shard0/scaffold/` is explicitly named in the build scope. (The previous zone-tag `clean_zone()` sweep with an `_is_system_room()` name-match guard has been retired alongside the rest of the legacy zone-build infrastructure.)
 
 `RoomRecycleBin` extends `evennia.DefaultRoom` directly (not `RoomBase`) so the catch-all bin doesn't drag in combat / lighting / weather / inventory mechanics. See [ROOM_ARCHITECTURE.md](ROOM_ARCHITECTURE.md) for the room class hierarchy.
 
@@ -161,43 +162,38 @@ The operator's pre-build broadcast is what keeps players from being yanked mid-a
 
 ## Spawn Lifecycle
 
-Mob spawning is independent of the YAML pipeline. `ZoneSpawnScript` runs on its own 15-second tick and finds spawn rooms by `mob_area` tag query — tags that authors set in YAML. The script is created and maintained from Python:
+Mob spawning lives in its own pipeline: the [`evennia-mob-spawner`](https://github.com/FullCircleMUD/evennia-mob-spawner) library reading the [`fcm-mobs`](https://github.com/FullCircleMUD/fcm-mobs) content repo. From the world-builder's point of view it is opaque — the only contact surface is the `mob_area` tag that world-builder authors place on rooms, which the spawner uses as the population's room set.
 
-- One persistent script per zone (`zone_spawn_<zone_key>`), created in `src/game/world/game_world/zones/<zone>/soft_deploy.py`'s `build_zone()`.
-- The script's `db.spawn_table` is reloaded from `world/spawns/<zone>.json` on each `create_for_zone()` call.
-- Mob deletions during YAML cleanup are absorbed by the script's self-healing loop — the next tick repopulates missing population from the (possibly updated) table.
+Operator surface mirrors `wb_build` shape:
 
-A `wb_build` does not touch the spawn script. After a redeploy, the operator either lets the next tick repopulate (≤15s) or runs `build_zone()` from the Evennia shell if the spawn JSON itself has changed. Boss death cooldowns (`death_cooldown_seconds` in the JSON; see [SPAWN_MOBS.md](SPAWN_MOBS.md)) live on the script and survive YAML redeploys.
+| Command         | What it does                                                       |
+|-----------------|--------------------------------------------------------------------|
+| `ms_load`       | Load (or reload) spawn definitions for a scope from `fcm-mobs`     |
+| `ms_status`     | Inspect live spawn population vs. target                           |
+| `ms_restart`    | Tear down and re-create a spawner                                  |
+| `ms_stop`       | Stop a spawner without deleting its mobs                           |
+| `ms_delete`     | Stop and delete a spawner (its mobs go through normal lifecycle)   |
 
-The two systems are deliberately separated:
+A `wb_build` does not touch any mob spawner; an `ms_load` does not touch any room. The two operate on disjoint object sets. Mobs deleted as collateral during a `wb_build` cleanup (e.g. a tagged NPC inside a redeployed room) are repopulated by the spawner's own self-healing loop on the next tick. Boss death cooldowns live on the spawner side and survive `wb_build` redeploys.
 
-- **Static content** (rooms, exits, fixtures, NPCs that don't respawn) → YAML, deployed via the library.
-- **Dynamic mob population** → JSON spawn rules, executed by `ZoneSpawnScript`, finding rooms via `mob_area` tags placed by the YAML.
+The two pipelines are deliberately separated:
+
+- **Static content** (rooms, exits, fixtures, persistent NPCs that don't respawn) → `fcm-world`, deployed via `wb_build`.
+- **Respawning mob populations** → `fcm-mobs`, deployed via `ms_load`, finding rooms by `mob_area` tags that the world-builder side placed.
+
+The legacy `ZoneSpawnScript` + `world/spawns/*.json` pipeline that previously did this job has been retired; its class is dormant in the source tree pending future deletion.
 
 ## What's Left in Python
 
-The retirement of `deploy_world.py` removed the entire monolithic build orchestration. Per-zone `soft_deploy.py` files survive in a much-shrunken form:
+World content is no longer built from Python. The previous orchestrator `deploy_world.py` was deleted; the per-zone `soft_deploy.py` shells that used to handle `clean_zone()` and spawn-script creation were commented out in place once `wb_build` plus evennia-mob-spawner covered every previous use case. Those files (`world/game_world/zone_utils.py`, `world/game_world/zones/millholm/soft_deploy.py`, `world/game_world/zones/book_zones/hundred_acre_wood.py`) sit in the source tree behind dated `DEPRECATION NOTICE` docstrings, marked for future deletion pending live verification. `ZoneSpawnScript` is dormant in the same way.
 
-```python
-# Per-zone soft_deploy.py
-ZONE_KEY = "millholm"
-
-def clean_zone():
-    _clean_zone(ZONE_KEY)  # wipes the zone's tagged rooms / NPCs / items
-
-def build_zone():
-    # Create / refresh the ZoneSpawnScript instances for each mob area
-    for area_key in ("millholm_farms", "millholm_woods", …):
-        ZoneSpawnScript.create_for_zone(area_key)
-```
-
-What's still Python and still load-bearing:
+What's still Python and load-bearing:
 
 - **Typeclasses** in `src/game/typeclasses/` — rooms, exits, NPCs, items, services. Game systems, not content; not touched by YAML deploys.
-- **Spawn JSON + `ZoneSpawnScript`** — independent pipeline as described above.
-- **Internal exit-creation helpers** in `src/game/utils/exit_helpers.py` (`connect_bidirectional_exit`, `connect_bidirectional_door_exit`, etc.). The library's Loader and FCM's exit typeclasses call these internally; they are no longer the authoring surface. Authors author `exits:` blocks in YAML.
+- **Internal exit-creation helpers** in `src/game/utils/exit_helpers.py` (`connect_bidirectional_exit`, `connect_bidirectional_door_exit`, etc.). The library's Loader and FCM's exit typeclasses call these internally, and runtime exit creators (procedural dungeons, conditional rebinds) still go through them — but they are not the authoring surface. Authors author `exits:` blocks in YAML.
+- **Per-player / runtime room builders** in `src/game/world/tutorial/` and `src/game/world/test_world/`. Tutorials are per-player ephemeral instances, not authored static content; test_world is dev/QA staging. Neither fits the `wb_build` model.
 
-No human edits the legacy zone-builder Python anymore. New zones are added by creating a folder under `fcm-world/shard0/<zone>/` and writing the YAML.
+No human edits zone-build Python anymore. New zones are added by creating a folder under `fcm-world/shard0/<zone>/` and writing the YAML.
 
 ## Sharding Interaction
 
@@ -212,13 +208,13 @@ The world deployment model extends naturally to the multi-shard architecture in 
 
 **Implemented today:**
 
-- Full world content authored as YAML in `fcm-world` (1,959 entities across 4 shards as of last validation).
+- Full world content authored as YAML in `fcm-world`. Every static zone, including book zones, is on the YAML pipeline.
 - `evennia-world-builder` library — Reader (GitHub + local), Definitions, Finder, Loader, Validator, Builder, four-pass build, cross-file refs, `incoming_exits:`, `links:`, surgical rebuilds, async pipeline.
 - `wb_build` in-game admin command and `wb-validate` CLI.
-- Per-zone `clean_zone()` and `ZoneSpawnScript` creation in shrunken `soft_deploy.py` files.
 - `RoomGateway` model with declarative `destinations:` lists, authored per zone in YAML.
-- `ZoneSpawnScript` self-healing on tick, decoupled from YAML deploys.
-- System room protection via `_is_system_room()` name-match in `zone_utils.py`.
+- System room protection via `wb_build`'s file-scoped cleanup (system rooms in `shard0/scaffold/` only enter the delete set if explicitly scoped).
+- Parallel mob-spawn pipeline via [`evennia-mob-spawner`](https://github.com/FullCircleMUD/evennia-mob-spawner) reading [`fcm-mobs`](https://github.com/FullCircleMUD/fcm-mobs); operator-driven via `ms_load`.
+- Legacy infrastructure (`deploy_world.py`, per-zone `soft_deploy.py`, `zone_utils.clean_zone()`, `ZoneSpawnScript`, `world/spawns/*.json`) retired or commented out behind dated DEPRECATION NOTICE blocks pending future deletion.
 
 **Possible future work (not on the immediate roadmap):**
 

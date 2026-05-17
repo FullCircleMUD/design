@@ -845,7 +845,7 @@ The enchanting *process* consumes gems, the gems may have been drops, the finish
 | **RoomHarvesting** | Target for resources (tagged rooms with capacity) |
 | **CombatMob** | Target for resources/gold/NFTs (tagged mobs with capacity); death transfers all loot to corpse |
 | **WorldChest** | Target for resources/gold (tagged containers with capacity) |
-| **ZoneSpawnScript** | Maintains mob populations; syncs target tags on spawned mobs |
+| **evennia-mob-spawner** | Maintains mob populations from `fcm-mobs` content; syncs target tags on spawned mobs |
 | **Corpse** | Mob death transfers resources/gold/NFTs to lootable corpse; unclaimed corpses return to RESERVE |
 | **ReallocationServiceScript** | Daily SINK → RESERVE cycle; determines gold RESERVE available to GoldCalculator |
 | **SPELL_REGISTRY / RECIPES** | Source data for `populate_knowledge_config()` — auto-generates knowledge entries in SPAWN_CONFIG |
@@ -927,7 +927,7 @@ Comprehensive test coverage across `tests/spawn_tests/` and `tests/quest_tests/`
 | Saturation script | `typeclasses/scripts/nft_saturation_service.py` — `NFTSaturationScript` |
 | Saturation service | `blockchain/xrpl/services/nft_saturation.py` — `NFTSaturationService.take_daily_snapshot()` (still so named, but runs hourly) |
 | Mob base (tags) | `typeclasses/actors/mob.py` — `CombatMob`, `_build_tier_max()` |
-| Zone spawn (tag sync) | `typeclasses/scripts/zone_spawn_script.py` — `ZoneSpawnScript._spawn_mob()` |
+| Mob spawn (tag sync) | `libraries/evennia-mob-spawner/src/evennia_mob_spawner/script.py` (the legacy `typeclasses/scripts/zone_spawn_script.py` is dormant) |
 | Quest debt hook | `world/quests/base_quest.py` — `FCMQuest._register_quest_debt()` |
 | Chest (gold tags) | `typeclasses/world_objects/chest.py` — `WorldChest` |
 | Tests | `tests/spawn_tests/` and `tests/quest_tests/` |

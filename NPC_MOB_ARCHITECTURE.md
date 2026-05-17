@@ -973,7 +973,7 @@ BanditChief(AggressiveMixin, HumanoidWearslotsMixin, LLMAIMixin, CombatMob)
 |--------|------------------|
 | **Combat (execute_attack)** | Humanoid mobs with weapons → full weapon hook pipeline. Animal mobs → `damage_dice` fallback |
 | **Height combat (height_utils)** | `can_reach_target()` checks wielded weapon type OR `InnateRangedMixin.mob_weapon_type` for animals |
-| **Spawning (ZoneSpawnScript)** | Weapon creation in `at_object_creation()`, not spawn JSON. JSON `attrs` can set mastery levels |
+| **Spawning (evennia-mob-spawner)** | Weapon creation in `at_object_creation()`, not in spawn rules. Spawn-rule `attrs` can set mastery levels |
 | **Loot (corpse)** | `_create_corpse()` transfers worn equipment to corpse — already implemented |
 | **Flee** | Height advantage flee checks enemy weapon types — works for armed humanoid mobs and innate ranged mobs |
 | **Mastery (CmdSkillBase)** | `mob_func()` fallback for animal mobs, full mastery dispatch for humanoids with mastery dicts |

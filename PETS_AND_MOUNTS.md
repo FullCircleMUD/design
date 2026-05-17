@@ -389,7 +389,7 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 | `DogWearSlot` | Built | Example of non-humanoid wearslots |
 | `cmd_tame` | **Built** | Hidden contested d20 + CHA + mastery vs tame DC, 120s per-(tamer,target) fail cooldown, XP on both outcomes |
 | `ANIMAL_HANDLING` skill | Defined | General skill, all classes |
-| `WildMule` | **Built** | Tameable mob POC, wanders the Hundred Acre Wood via ZoneSpawnScript (target=1, 12h respawn), tame_dc=10, BASIC |
+| `WildMule` | **Built** | Tameable mob POC, wanders the Hundred Acre Wood via evennia-mob-spawner (target=1, 12h respawn), tame_dc=10, BASIC |
 | Pet NFTItemTypes | **Built** | Mule, War Dog, Horse seeded in migration |
 
 ---
@@ -458,7 +458,7 @@ This creates a natural supply chain: wild animal spawns → trainers → player 
 - `WildMule` tameable mob typeclass (passive, tame_dc=10, BASIC mastery)
 - Taming flow: validate tameable → check mastery → fail-cooldown check → hidden contested roll → assign_item_type → spawn_pet → auto-follow → award XP
 - Pet NFTItemType seed data: Mule, War Dog, Horse in migration
-- POC: WildMule wanders the whole Hundred Acre Wood grid (30 rooms) via `ZoneSpawnScript` with `world/spawns/book_hundred_acre_wood.json`, `target=1`, `respawn_seconds=43200` (12 hours). No longer a one-shot world-build spawn.
+- POC: WildMule wanders the whole Hundred Acre Wood grid (30 rooms) via the evennia-mob-spawner library with rules in `fcm-mobs/shard0/hundred-acre-wood/`, `target=1`, `respawn_seconds=43200` (12 hours). No longer a one-shot world-build spawn.
 - Book transport (`read` / `recall`) explicitly carries same-room followers (pets + grouped players) through the teleport, so a tamed mule comes home with you to the library.
 - Tested end-to-end: tame → follow → book zone recall → library transitions
 
