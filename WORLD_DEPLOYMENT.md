@@ -137,6 +137,31 @@ For YAML shape, file structure, and per-entity dimensions (typeclass, contents, 
 - [validator.md](../../libraries/evennia-world-builder/DESIGN/validator.md) — predicate tiers and what gets caught.
 - [links.md](../../libraries/evennia-world-builder/DESIGN/links.md) — cross-entity attribute references.
 
+## Consumer typeclass hooks (`wb_at_post_build`)
+
+The library duck-type-invokes `obj.wb_at_post_build()` on every entity it builds, at the end of each `_build_one` pass — after every `_apply_*` step (aliases, locks, attributes, tags) has run. Consumer typeclasses that need to derive state from YAML-supplied values define the method; absent on a typeclass, nothing happens (opt-in). Library-side contract and rationale: [post-build-hook.md](../../libraries/evennia-world-builder/DESIGN/post-build-hook.md).
+
+Why FCM needs this. Evennia's standard `at_object_post_creation` fires after the `attributes=` kwarg of `create_object` has been processed — but the world-builder library passes only `desc` via that kwarg and applies every other YAML attribute via `obj.attributes.add(...)` afterwards. So for a wb_build deployment, Evennia's hook fires with the typeclass defaults still in place rather than the YAML-supplied values. `wb_at_post_build` fills that gap by firing *after* the library's full apply pipeline has completed.
+
+**FCM convention.** Typeclasses that already use `at_object_post_creation` (because Python-direct creation paths exist alongside wb_build — tutorial instance builders, dev/QA fixtures, tests) keep the existing hook unchanged and add a one-line `wb_at_post_build` that recalls it:
+
+```python
+def at_object_post_creation(self):
+    super().at_object_post_creation()
+    # ...derive state from self.<attribute>...
+
+def wb_at_post_build(self):
+    """Re-run post-attribute derivation under wb_build, after the
+    library has applied YAML attributes. See library DESIGN/post-build-hook.md."""
+    self.at_object_post_creation()
+```
+
+This puts the derivation logic in one place. Under wb_build the derivation runs twice (once during `create_object` with typeclass defaults, once here with YAML values); idempotent because Evennia's `AttributeHandler` stores at most one `Attribute` row per `(db_key, db_category)` — the second write replaces the value of the same row, no orphan data. Under Python-direct creation, `wb_at_post_build` is never invoked and `at_object_post_creation` alone runs.
+
+**Canonical consumer in FCM.** `RoomHarvesting` (`src/game/typeclasses/terrain/rooms/room_harvesting.py`) — derives the `spawn_resources_max` dict the unified-spawn distributor expects from its scalar `resource_id` + `resource_count_max`. See [UNIFIED_ITEM_SPAWN_SYSTEM.md](UNIFIED_ITEM_SPAWN_SYSTEM.md) § Tag Registration for the spawn-side semantics.
+
+**Follow-up.** The `durability` mixin (`src/game/typeclasses/mixins/durability.py`) has the same shape — `at_object_post_creation` triggers `at_durability_init()` which reads `self.max_durability` — and needs the same `wb_at_post_build` recall. Not yet adopted; tracked as a follow-up.
+
 ## System Rooms
 
 Limbo, Purgatory, and the NFT recycle bin live as one YAML file each under `fcm-world/shard0/scaffold/`:

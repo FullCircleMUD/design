@@ -235,7 +235,7 @@ Resource refinement (wheat → flour, ore → ingots). No skill required. Suppor
 
 **File:** `typeclasses/terrain/rooms/room_harvesting.py`
 
-Wilderness resource gathering. Tracks `resource_count` (current) and `max_resource_count` (cap). `ResourceSpawnService` replenishes hourly based on economy data. Description changes dynamically based on abundance (abundant/scarce/depleted). `spawn_rate_weight` (1-5) controls relative spawn allocation. Injects `CmdSetHarvesting`.
+Wilderness resource gathering. Each room hosts **one** resource, authored in YAML as scalar `resource_id` + `resource_count_max` (the cap); the runtime `resource_count` (current) is tracked on the room and decremented by harvest commands. The `UnifiedSpawnScript` fires the unified spawn pipeline hourly; `FungibleDistributor` reads each room's derived `spawn_resources_max` dict (`{resource_id: resource_count_max}`) to know per-room capacity. The dict is derived from the scalars by `at_object_post_creation` (Python-direct creation) and by `wb_at_post_build` (YAML deploys via world-builder); see [UNIFIED_ITEM_SPAWN_SYSTEM.md](UNIFIED_ITEM_SPAWN_SYSTEM.md) § Tag Registration for the canonical-scalar / derived-dict pattern. Description changes dynamically based on abundance (`desc_abundant` / `desc_scarce` / `desc_depleted`, switched on `resource_count` vs `abundance_threshold`). Injects `CmdSetHarvesting`.
 
 ### RoomInn
 

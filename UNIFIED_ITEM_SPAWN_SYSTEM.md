@@ -745,6 +745,17 @@ tags:
 
 `WorldChest.at_object_creation()` registers `spawn_gold` tag + `spawn_gold_max` when its own `loot_gold_max > 0` — chests are placed by world-builder (not mob-spawner), so they keep self-contained init logic.
 
+**`RoomHarvesting` authors its capacity differently because a harvest room hosts exactly one resource.** The YAML carries `resource_id` and `resource_count_max` as **scalars** — those are the canonical authored data the harvest commands, room descriptions, and the `resource_count` runtime counter all read directly. The dict `spawn_resources_max` the distributor expects (`{resource_id: cap}`) is *derived* from those two scalars by the typeclass; storing the dict on the room is the reshape, not the source of truth.
+
+Derivation runs at both creation paths the room sees:
+
+- **`at_object_post_creation`** — Evennia's standard hook, fires after `create_object`'s `attributes=` kwarg lands. Covers Python-direct creation (tutorial harvest rooms, dev/QA economic-test world, tests) where the caller passes `resource_id` / `resource_count_max` via the kwarg, so the typeclass sees correct values when the hook runs.
+- **`wb_at_post_build`** — the world-builder library's per-entity post-apply hook. Fires after the library's `_apply_*` steps complete, so the YAML-supplied scalars are in place by the time it runs. The FCM implementation just calls `self.at_object_post_creation()` — single source of truth for the derivation. See [WORLD_DEPLOYMENT.md](WORLD_DEPLOYMENT.md) § Consumer typeclass hooks for the pattern and the library-side rationale.
+
+Under `wb_build` both hooks fire and the derivation runs twice (once with typeclass defaults during `create_object`, once with YAML values after the library's apply pipeline). Idempotent — Evennia's `AttributeHandler` stores at most one `Attribute` row per `(db_key, db_category)`, so the second write replaces the value of the same row. Under Python-direct creation, `wb_at_post_build` is never invoked and `at_object_post_creation` alone runs.
+
+The `spawn_resources` tag itself is registered unconditionally in `at_object_creation` (early in Evennia's lifecycle, before any attributes are applied) — it doesn't depend on resource values, so it doesn't need to be deferred to a post-apply hook.
+
 ---
 
 ## NFT Items in the Unified System
