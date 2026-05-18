@@ -294,7 +294,7 @@ Global fallback location. Characters with no home end up here. Zone cleanup evac
 
 **File:** `typeclasses/terrain/rooms/room_purgatory.py`
 
-Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Authored in the fcm-world YAML scaffold at `shard0/scaffold/purgatory.yaml` and built by `wb_build` like any other room.
+Death staging area. Characters arrive here on death via `die()`, auto-released after 60 seconds to their bound cemetery (or Limbo if unbound). Early release costs 50 gold. Injects `CmdSetPurgatory` for the release command. Authored in the fcm-world YAML scaffold at `shard<N>/scaffold/purgatory.yaml` — every shard has its own copy (`shard0/scaffold/purgatory.yaml`, `shard1/scaffold/purgatory.yaml`, …). Identification at runtime is by typeclass (`isinstance(loc, RoomPurgatory)`), not by name or dbref, so the same code works on every shard without modification; see [SCALING.md § What's shipped vs. still on the roadmap](SCALING.md#whats-shipped-vs-still-on-the-roadmap).
 
 Class-level overrides ensure the void between lives is mechanically inert without per-instance YAML or post-creation hooks:
 
@@ -318,7 +318,7 @@ Hidden infrastructure room for orphaned object cleanup. No exits, no player inte
 - **NFT items** are despawned from the blockchain mirror DB and deleted.
 - **All other objects** (WorldItems, fixtures, corpses, etc.) are deleted with a log message.
 
-This is the catch-all safety net — anything that loses its location during zone cleanup, room deletion, or container destruction ends up here and is cleaned up automatically. Authored in the fcm-world YAML scaffold at `shard0/scaffold/nft_recycle_bin.yaml` and built by `wb_build`. All NFT items declare this room as their `home:` in YAML so orphaned NFTs are always caught.
+This is the catch-all safety net — anything that loses its location during zone cleanup, room deletion, or container destruction ends up here and is cleaned up automatically. Authored in the fcm-world YAML scaffold at `shard<N>/scaffold/nft_recycle_bin.yaml` — every shard has its own copy. Identification is by typeclass (`isinstance(loc, RoomRecycleBin)`), so the same `at_object_receive` logic handles cleanup on each shard locally. All NFT items declare this room as their `home:` in YAML so orphaned NFTs are always caught.
 
 ## CmdSet Injection Pattern
 
