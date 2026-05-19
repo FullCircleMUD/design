@@ -58,6 +58,22 @@ what is still design work:
   the `from_db` chokepoint on foreign-shard rows. `at_post_puppet`
   additionally scopes its searches to local shard (plus `"*"`) so
   the written pk is always a row this shard can later dereference.
+  Defensive try/except wrappers around the eventual reads
+  (`self.home` in the location fallback chain, `self.respawn_location`
+  existence check) so a stored cross-shard reference from a previous
+  shard's puppet pass doesn't raise out of the puppet flow — the
+  refused load is treated as "not set" and the heal re-points to a
+  local row.
+- Per-shard `DEFAULT_HOME` in each shard's settings file
+  (`settings_shard0.py`, `settings_shard1.py`). Evennia's
+  `create_object` falls back to `settings.DEFAULT_HOME` when no
+  `home=` kwarg is passed; resolving that dbref instantiates the
+  target row, which on a sharded process must be local-shard (or
+  global `"*"`) or the `from_db` chokepoint refuses. Each shard
+  points `DEFAULT_HOME` at a room it owns: `#2` on shard0 (the
+  migrate-created Limbo), and a `cross_shard_dig`-bootstrapped
+  `Shard1-Limbo` on shard1. `settings_router.py` doesn't override —
+  the router doesn't run `create_object` calls that need a default.
 - Per-shard scaffold rooms in `fcm-world` (`shard0/scaffold/`,
   `shard1/scaffold/`) — every shard has its own Purgatory and
   `nft_recycle_bin`.
