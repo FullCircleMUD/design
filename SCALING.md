@@ -46,13 +46,26 @@ what is still design work:
   `settings_shard1.py`, `settings_common_shard_config.py`).
 - `AccountBank` stamped `shard_id="*"` (global asset, loadable from any
   shard) — `at_post_login` and `ensure_bank` both set this.
-- `_restart_purgatory_timers` scoped per shard (router skips entirely,
-  each shard scopes its character query to its own partition).
-- `at_pre_puppet` / `at_post_puppet` integrity-check `home` and
-  `respawn_location` instead of healing with global `search_tag`.
+- Startup restart helpers scoped per shard (router skips entirely,
+  each shard scopes its character / mob query to its own partition):
+  `_restart_purgatory_timers` and `_restart_mob_tickers`.
+- `at_pre_puppet` / `at_post_puppet` retrofit `home` and
+  `respawn_location` using pk-only lookups (`search_tag(...).values_list("pk")`
+  plus direct writes to `db_home_id` / the `respawn_location`
+  Attribute). The healing fallback chain (inn → Limbo for home,
+  cemetery → respawn) is unchanged; the SQL projection avoids
+  instantiating any row, so global tag-join queries no longer trip
+  the `from_db` chokepoint on foreign-shard rows. `at_post_puppet`
+  additionally scopes its searches to local shard (plus `"*"`) so
+  the written pk is always a row this shard can later dereference.
 - Per-shard scaffold rooms in `fcm-world` (`shard0/scaffold/`,
   `shard1/scaffold/`) — every shard has its own Purgatory and
   `nft_recycle_bin`.
+- Router-side `AUTO_PUPPET_ON_LOGIN = True` — the library's
+  `shard_aware_at_post_login` redirect-to-last-shard branch activates
+  on the flag, so a returning player whose `_last_puppet` is set with
+  a usable shard_id auto-redirects to that shard instead of landing
+  on the OOC character-select menu.
 
 **Roadmap (FCM-side, in this document):**
 
@@ -70,7 +83,10 @@ what is still design work:
   commands (`cross_shard_move`) invoke the primitive.
 - Cross-zone arrival hook that updates `db_home` and
   `respawn_location` to the new shard's "trackside graveyard" room so
-  the puppet integrity check holds after any cross-shard move.
+  both FKs reference local-shard rows after any cross-shard move
+  (avoiding latent `from_db` chokepoint trips on later FK reads from
+  recall, rent, death/respawn, or any other non-IC code path that
+  dereferences these fields).
 
 ---
 
@@ -286,8 +302,9 @@ FCM consumes the primitive in two places today:
    An exit on the source shard whose `at_traverse` checks safe state
    (not in combat, not casting, no in-flight delayed callbacks),
    updates `db_home` and `respawn_location` to the target shard's
-   "trackside graveyard" room (preserving the shard-local invariant
-   the puppet integrity check enforces), then calls
+   "trackside graveyard" room (so both FKs remain dereferenceable on
+   the destination shard — avoiding latent chokepoint trips on later
+   recall / rent / respawn reads), then calls
    `cross_shard_character_move`. This is the consumer-side gating
    layer the library leaves for FCM to write per its
    [`consumer-constraints.md`](https://github.com/FullCircleMUD/evennia-shards/blob/main/DESIGN/consumer-constraints.md).
@@ -403,8 +420,18 @@ Verified on Windows during the shards-integration work:
   shard1, then walk over via the move primitive).
 - `AccountBank` `shard_id="*"` stamping verified — accounts loaded
   across shards without tripping the chokepoint.
-- `_restart_purgatory_timers` scoped per shard — each shard's
-  startup reboots only its own characters' release timers.
+- Startup restart helpers (`_restart_purgatory_timers` and
+  `_restart_mob_tickers`) scoped per shard — each shard's startup
+  touches only its own characters / mobs.
+- `at_pre_puppet` / `at_post_puppet` pk-only healing verified —
+  the home / respawn / cemetery retrofit fallbacks no longer
+  instantiate global queryset rows, so IC succeeds on cross-shard
+  arrival even when the FCs / Attribute defaults point at foreign-
+  shard rows.
+- End-to-end `cross_shard_move` verified — admin runs
+  `cross_shard_move shard1 <room_pk>`, session redirects via ticket,
+  destination shard auto-puppets and the look output of the
+  destination room arrives on the client.
 
 The PoC validated that the architecture composes correctly with FCM's
 existing libraries and runtime. What it didn't validate (because the
