@@ -888,6 +888,126 @@ Comprehensive test coverage across `tests/spawn_tests/` and `tests/quest_tests/`
 - **NFT quest rewards** — future quests awarding NFTs will need quest debt registration
 - **Telemetry dashboards** — spawn telemetry, surplus tracking
 - **Auction House** — Tier 3 market for Master+ and enchanted items
+- **Multi-shard distribution architecture** — see [Future Work: Multi-Shard Distribution Architecture](#future-work-multi-shard-distribution-architecture) below
+
+---
+
+## Future Work: Multi-Shard Distribution Architecture
+
+When the game runs in multi-shard mode (via the evennia-shards library), the calculator + distributor design above continues to work for the *math* (calculators are pure functions over game state) but the *execution model* needs to change. This section captures the agreed approach; implementation is deferred until the multi-shard deployment is actually live.
+
+### The problem
+
+In single-process / monolith mode, the spawn services run once per tick against a single Postgres view of the world. There's one `UnifiedSpawnScript` reading state and one `BaseDistributor` placing items.
+
+In multi-shard mode, naively running the same services on every shard process causes three failure modes:
+
+1. **Headroom undercount.** Each shard sees only its own characters / mobs / rooms via the tenant auto-filter. `KnowledgeCalculator`'s saturation math computed on shard0 ignores shard1's playerbase — pricing is wrong.
+2. **Race conditions.** Multiple shard processes computing the same global budget and writing the same `BudgetState` row will collide. Either last-write-wins (silently corrupt) or transaction conflicts (loud but disruptive).
+3. **Distribution skew.** Each shard's distributor only sees its own targets, so even if the math were right, item placement would be biased toward whichever shard happened to spawn this tick.
+
+### The pattern: decide on the router, execute on the shards
+
+The architecture moves all *decision* work to the **router** process (which the shards library runs unscoped — it sees rows on every shard natively, no `shard_context(None)` wrap required) and dispatches the *execution* writes back to the owning shards via the cross-shard message bus.
+
+```
+┌────────────── ROUTER ────────────────┐         ┌───── SHARD0 ────────┐
+│                                      │         │                     │
+│  UnifiedSpawnScript (LoopingCall)    │         │  process_inbox      │
+│    Calculator.calculate()            │  bus    │    (LoopingCall)    │
+│      ↓ reads globally                │ ──────▶ │      ↓              │
+│    Distributor.distribute()          │         │  FCMMessageHandler  │
+│      ↓ decides target pks            │         │    .handle(msg)     │
+│    send_message per shard            │         │      ↓              │
+│                                      │         │  shard-local write  │
+└──────────────────────────────────────┘         │  via Evennia API    │
+                                                 └─────────────────────┘
+```
+
+- **Router:** reads all shards' rows for the headroom + saturation math (its unscoped tenant context makes `ObjectDB.objects.filter(...)` see everything). Computes the budget, picks targets, but does not write items directly into foreign-shard containers.
+- **Shard:** receives `spawn_into_container` (or similar) bus messages, looks up the named container in its own idmapper, calls `create_object(typeclass, location=container, ...)` through Evennia's normal flow. `at_object_creation` and `at_object_receive` fire naturally on the shard. Container's `contents_cache` updates through Evennia's signal path. Active references (combat loops, room scripts) stay valid.
+
+The library ships the bus substrate (`send_message`, `MessageHandler`, `process_inbox`, the polling LoopingCall). Consumer responsibility is the per-kind handler subclass.
+
+### Why not flush-from-cache after a router-side write
+
+The naive alternative — router writes via `with shard_context(target.shard_id): create_object(...)` then sends `flush_from_cache` to invalidate the target's cached view — has two problems:
+
+1. **Flushing an object evicts the whole instance from the idmapper.** Any active reference (a combat `LoopingCall` callback, a script tick, a puppeted session) holds the original instance; new lookups return a fresh-from-DB instance. Split-brain between the two, with writes to one not visible to the other. Combat in particular breaks because NDB state (threat tables, combat target, round timers) lives only on the original instance.
+2. **`at_object_receive` doesn't fire on the foreign side.** Hooks the consumer game has registered for "something arrived in this container" never run. For NFT loot drops with sparkle effects, achievement triggers, or reactive AI, this silently breaks gameplay.
+
+The bus-dispatched-create pattern sidesteps both: the shard's existing container instance is reused (no eviction, no split-brain) and the create goes through Evennia's full flow on the shard (all hooks fire).
+
+A *narrower* invalidation — flushing only the `contents_cache` without evicting the object — is viable for cases that specifically *want* the data update without the hook side-effects (e.g. `chain_sync`-style admin patches, batch corrections). That's a separate bus kind, not yet shipped. See `evennia-shards/DESIGN/cross-shard-message-bus.md` for the underlying primitives.
+
+### Receiver-side screening
+
+Bus delivery is **at-least-once**: a message may be processed twice (timeout race) or arrive after game state has moved on (target died between dispatch and receive). Handlers must screen:
+
+```python
+def _spawn_into_container(self, message):
+    payload = message.payload
+
+    # 1. Container still exists & still on this shard (auto-filter)
+    try:
+        container = ObjectDB.objects.get(pk=payload["container_pk"])
+    except ObjectDB.DoesNotExist:
+        return True  # moved off this shard or deleted — consume silently
+
+    # 2. Container is still valid for the operation (game-specific)
+    if hasattr(container, "is_dead") and container.is_dead:
+        return True  # mob died between router's decide and our process
+
+    # 3. Container is still where router expected (optional)
+    if payload.get("expected_location_pk") is not None:
+        if container.db_location_id != payload["expected_location_pk"]:
+            return True
+
+    # 4. Idempotency — deduplicate retries via client_message_id
+    msg_id = payload.get("client_message_id")
+    if msg_id and container.attributes.has(f"_spawn_seen_{msg_id}"):
+        return True
+    if msg_id:
+        container.attributes.add(f"_spawn_seen_{msg_id}", True)
+
+    # All checks passed — execute via normal Evennia flow
+    create_object(payload["typeclass"], location=container, **payload["kwargs"])
+    return True
+```
+
+For headroom-aware distributors specifically, the screening should also re-check that the target still has room. The router's `count_nfts()` view was computed seconds ago over a global queryset; by dispatch time another tick may have filled the slot. The handler's "skip if no headroom remaining" check is the final source of truth.
+
+### Compute-isolation property
+
+A meaningful side-benefit: the router runs all heavy background work (NFT saturation math, distribution decisions, chain sync, telemetry aggregation) and shards run pure gameplay (combat, ticks, scripts, commands). Bus messages are async and DB-mediated, so a router that's mid-30-second-saturation-recompute doesn't block any shard's reactor. Worst-case symptom of router load is "the OOC menu took an extra second to render"; combat lag from background services is structurally impossible.
+
+This is why the architecture is router-centric rather than electing-a-shard-as-coordinator: the role separation makes the latency-isolation property fall out for free.
+
+### What still runs per-shard
+
+The router-decides / shard-executes split applies to **global** services. Genuinely shard-local services stay where they are:
+
+| Service | Where it runs | Why |
+|---|---|---|
+| `UnifiedSpawnScript` (NFT/knowledge math) | Router | Needs global headroom view |
+| `NFTSaturationScript` | Router | Reads all characters' spellbooks/recipes |
+| `nft_distribution` (target selection) | Router | Picks across all shards |
+| Mob spawning (zone scripts) | Shard | Spawns into rooms the shard owns |
+| Corpse cleanup timers | Shard | Tracks corpses in shard-local rooms |
+| Combat ticks | Shard | Per-fight, never crosses shards |
+| `BudgetState` writes | Router | Single source of truth, no contention |
+
+Resource respawn is the ambiguous case worth deciding when implementation lands: harvestable nodes are shard-local objects, but the global-supply math (how much wheat the world *should* have) is a router-side concern. Likely splits as "router computes per-shard quotas → bus messages → shard does the local respawn writes."
+
+### Implementation path when this lands
+
+1. **Move service start-calls to the router branch** of `server/conf/at_server_startstop.py` (currently disabled in commit `4be262d shards (temporary): disable services that do global ObjectDB queries`).
+2. **Change each calculator/distributor's write step** from direct `create_object` to `send_message(kind="spawn_into_container", payload=..., to_shard=target.shard_id)`.
+3. **Add an `FCMMessageHandler` subclass** in `blockchain/xrpl/services/messaging.py` (or similar) implementing `_spawn_into_container`, `_patch_token_id`, `_resource_respawn`, etc.
+4. **Wire the handler into `process_inbox`** in each shard's `at_server_start`.
+5. **Add `client_message_id` to every dispatched payload** and screening helpers for the standard checks (still exists / still owned / still valid / dedup).
+
+Zero library changes required for the spawn-into-container case — consumer-defined message kinds inherit dispatch through `MessageHandler` automatically. The `flush_contents_cache` kind (narrow invalidation, no hook firing) is a useful library addition that can land when `chain_sync`'s token-patching path needs it.
 
 ---
 
