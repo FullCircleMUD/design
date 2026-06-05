@@ -22,7 +22,7 @@ New players feel hunger pressure most acutely because they have the least gold. 
 
 ## Rowan — The Handhold
 
-Rowan is the first character a new player meets. He tends bar at The Harvest Moon Inn — the room where new characters arrive — and is implemented as a state machine that responds to the player's current progress.
+Rowan is the first character a new player meets. He tends bar at The Harvest Moon Inn, which is where new characters land on their first `ic` — chargen creates the character stowed (no location), with the inn set as their `home`, and vanilla `at_pre_puppet` routes the first puppet to the home room. Rowan is implemented as a state machine that responds to the player's current progress.
 
 His role changes as the player advances:
 

@@ -288,7 +288,7 @@ Infrastructure rooms that support game mechanics. Not part of any zone — creat
 
 **Evennia default room** (`#2`, `settings.DEFAULT_HOME`)
 
-Global fallback location. Characters with no home end up here. Zone cleanup evacuates players to Limbo before deleting rooms. New characters start here before entering the tutorial or game world. Contains a one-way exit down to The Harvest Moon (game entry point, authored in the fcm-world YAML scaffold).
+Global fallback location. Characters with no home end up here. Zone cleanup evacuates players to Limbo before deleting rooms. Vanilla Evennia would also drop newly created characters here, but FCM chargen overrides `home` to The Harvest Moon (see `Account.create_character` in [accounts.py](../src/game/typeclasses/accounts/accounts.py)) so first `ic` lands a fresh character at the inn rather than in Limbo. Contains a one-way exit down to The Harvest Moon (game entry point, authored in the fcm-world YAML scaffold) as a manual recovery path for any character that does end up here.
 
 ### RoomPurgatory
 
