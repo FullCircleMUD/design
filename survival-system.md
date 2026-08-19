@@ -1,0 +1,184 @@
+# Survival System — Hunger & Thirst
+
+> Per-character upkeep meters that depleting over time and can kill via the regen system. Both meters tick on the same global cadence and live in the same Evennia script (`SurvivalService`). Designed so future meters (sleep, sanity, fatigue) can plug into the same loop body without architectural changes.
+
+---
+
+## Overview
+
+Survival meters are a deliberate friction tax on play — they exist to (a) give the resource economy a constant baseline demand, (b) anchor inn rooms and town fountains as load-bearing infrastructure, and (c) reward players for thinking ahead before leaving town. The design rules them by these constraints:
+
+- **Naggy is the failure mode.** A meter that pesters the player every few minutes feels worse than no meter at all. Wider numerical ranges are preferred over faster tick cadences.
+- **Death is real but slow.** Both meters can kill, but only after a long depletion + bleed window. Players can recover with food, water, healing, or fleeing back to town.
+- **One global tick.** All meters share `SURVIVAL_TICK_INTERVAL` (currently 1200s = 20 minutes). Different rates are achieved by giving each meter a different number of stages.
+- **Puppeted-only.** Meters tick only on characters that have an active session. Logged-out characters and superusers are exempt.
+
+---
+
+## SurvivalService
+
+`typeclasses/scripts/survival_service.py` — a global persistent Evennia script.
+
+- Started at boot by `server/conf/at_server_startstop.py`, which starts only the scripts declaring the current process's role. Designed for the shard and monolith roles — the router carries no puppets to tick. That file is authoritative for the roles actually declared.
+- **Under sharding it ticks once per process, by design.** The script holds no persistent state and walks only its own process's `SESSION_HANDLER`, so each shard independently ticks the characters puppeted on it and no shard can reach another's. It needs no shard scoping because it issues no query to scope. The general rule, and which scripts it does *not* hold for, is in [evennia-shards: global scripts run one instance per process](../libraries/evennia-shards/docs/shard-settings.md#global-scripts-run-one-instance-per-process).
+- Ticks every `settings.SURVIVAL_TICK_INTERVAL` seconds (20 min default).
+- On each tick, walks all puppeted characters via `SESSION_HANDLER.get_sessions()`.
+- For each character: skips superusers, then dispatches to one helper per meter — currently `_tick_hunger(char)` and `_tick_thirst(char)`. New meters drop in as additional helpers in the same loop.
+- Each helper is independent: it reads the meter's current state, applies its own decrement rules, and writes back. No cross-meter coupling at the tick layer.
+
+---
+
+## Hunger
+
+**Enum:** `HungerLevel` (`enums/hunger_level.py`) — 8 stages. Two intermediate no-penalty stages (NOURISHED, CONTENT) sit between SATISFIED and PECKISH to widen the pre-damage runway without accelerating the bleed phase.
+
+| Stage | Value | Effect |
+|---|---|---|
+| FULL | 8 | No effect; just-eaten state |
+| SATISFIED | 7 | Regen normal |
+| NOURISHED | 6 | Regen normal |
+| CONTENT | 5 | Regen normal |
+| PECKISH | 4 | Regen normal (last no-penalty stage) |
+| HUNGRY | 3 | **Regen halts** (no penalty otherwise) |
+| FAMISHED | 2 | **HP/MP/MV bleed** at ~30 min to death |
+| STARVING | 1 | **Faster bleed** at ~15 min to death |
+
+Death cause string: `"starvation"` (sent through `character.die()`).
+
+**Decrement model:** one stage per `SurvivalService` tick. The constant decrement is applied via `HungerLevel.get_level(value - 1)`. STARVING is the floor — death is delivered through `RegenerationService.degenerate`, not by the survival tick itself.
+
+**Free-pass-on-FULL:** when a character eats to FULL, `hunger_free_pass_tick` is set True. The next survival tick consumes the flag without decrementing — this prevents the awkward edge case where a player eats and immediately drops back to SATISFIED on the very next tick if the timing is unlucky.
+
+**Sources of food (player-facing):**
+- **Bread (resource ID 3)** — eaten directly via `eat` from inventory. The primary economic upkeep item.
+- **Stew at an inn** — `stew` command in a `RoomInn`. Buys 1 bread via the AMM pool at the current market price, immediately consumes it, raises hunger by ONE level. Stew is a thin wrapper around the bread economy — it pulls liquidity from the AMM pool.
+- **`forage`** (SURVIVALIST class skill, Druid/Ranger only) — restores hunger directly with no bread spend. Mastery scales yield (1–5 stages). 15-min cooldown matching the survival cycle. Deliberately does NOT set the free-pass tick, so bread retains its economic advantage. Requires forageable terrain (not urban/underground/dungeon/water). Forage ALSO tops up any water containers in the forager's inventory by N drinks — see Thirst → Sources of water below.
+- **`cast 'relieve hunger'`** (Divine Healing school, BASIC mastery, cleric/paladin) — steps the hunger meter up by N levels where N = mastery tier. BASIC through EXPERT are caster-only; MASTER and GM apply to the caster plus all same-room group members (same targeting as shadowcloak). Mana scales 5/8/12/16/20. Refunds mana if no one needs feeding. Does NOT create bread — restores the meter directly the way forage does, so the farming/milling/baking AMM is untouched. Does NOT set the free-pass tick. Gated by mana cost, not a cooldown.
+
+---
+
+## Thirst
+
+**Enum:** `ThirstLevel` (`enums/thirst_level.py`) — 12 stages, twice the range of hunger so the meter feels half as naggy at the same tick cadence.
+
+| Stage | Value | Effect |
+|---|---|---|
+| REFRESHED | 12 | No effect; just-drunk state |
+| HYDRATED | 11 | No effect |
+| QUENCHED | 10 | No effect |
+| SLAKED | 9 | No effect |
+| COMFORTABLE | 8 | No effect |
+| AWARE | 7 | No effect; first nag message |
+| DRY | 6 | **Regen halts** (parallel to HUNGRY) |
+| THIRSTY | 5 | Regen halted |
+| VERY_THIRSTY | 4 | Regen halted |
+| PARCHED | 3 | **HP/MP/MV bleed** at ~35 min to death |
+| DEHYDRATED | 2 | Bleed at ~25 min to death |
+| CRITICAL | 1 | **Faster bleed** at ~15 min to death |
+
+Death cause string: `"dehydration"`.
+
+**Decrement model:** identical to hunger — one stage per `SurvivalService` tick, CRITICAL is the floor. Same `thirst_free_pass_tick` flag for the just-drunk edge case.
+
+**Why 12 stages instead of 6:** keeps the tick cadence shared with hunger, but means a full container or a refresh from the inn buys the player twice as much real-time before they need to think about water again. Fewer interruptions.
+
+**Sources of water (player-facing):**
+- **Canteen** — small leather water container. Crafted by leatherworkers at BASIC mastery. Capacity: 5 drinks. Carried in inventory (not the HOLD slot — the player can drink while wielding a weapon and holding a torch). Refillable.
+- **Cask** — wooden water container, twice a canteen's capacity. Crafted by carpenters at SKILLED mastery. Capacity: 10 drinks. Heavier than a canteen. Carried in inventory.
+- **Fountain** in town — `FountainFixture` (`typeclasses/world_objects/fountain_fixture.py`). A `WorldFixture` with `is_water_source = True`. The `refill` command finds these in the room and tops up any held water container. First instance: Millholm Townsquare (sq_ne).
+- **`Create Water` spell** — Conjuration school, BASIC mastery. Targets a held water container. Adds N drinks where N = mastery tier (BASIC +1 → GM +5), capped at the container's `max_capacity`. Mana scales by tier (3/4/6/8/10). Refunds mana if the target is already full. Mirrors forage's water credit scaling so a BASIC mage can't keep up with a sustained thirst load, but a GM mage can. Cooldown: 0 (utility, spammable — gated by mana cost).
+- **Inn ale** — `ale` command in a `RoomInn`. Costs 1 gold (sink). Raises thirst by ONE stage per mug, parallel to how stew raises hunger by one level per bowl. Drink multiple ales to fully refresh. Sets the free-pass tick only when the drink lands the player at REFRESHED.
+- **Forage water credit** (SURVIVALIST, druid/ranger) — when the forager runs `forage`, the same N points that restore hunger ALSO add N drinks to any water containers the forager is carrying. Most-empty container fills first, spilling into the next-emptiest if any drinks remain. If the forager has no container, no water credit (silently). Drinks beyond total room are discarded — you can only carry what your containers hold. Other party members do NOT get water from a foraging druid; they must forage their own. This deliberate rule keeps the canteen/cask supply chain intact (a "find water" skill produces drinks-into-a-container, not direct meter restoration) and matches the symmetric "no-free-pass-on-bread" decision for hunger.
+
+**A drink restores one stage.** So a full canteen (5 drinks) carries the player from CRITICAL all the way to AWARE; a full cask (10 drinks) carries them from CRITICAL through to QUENCHED. Either is plenty for most ventures out of town.
+
+---
+
+## Container Mechanics — `WaterContainerMixin`
+
+`typeclasses/mixins/water_container.py` — the shared mixin all water containers compose with `BaseNFTItem`. Same shape as `LightSourceMixin`:
+
+- `max_capacity` (drinks)
+- `current` (drinks remaining)
+- `is_water_container` class flag — used by `drink`/`refill` to find containers
+- `drink_from(character)` — decrements current, steps the character's `thirst_level` up by one (capped at REFRESHED), sets the free-pass tick on REFRESHED, persists state
+- `refill_to_full()` — sets current = max_capacity, persists state
+- `is_empty` / `is_full` properties
+- `_persist_water_state()` — pushes `{current, max_capacity}` to `NFTGameState.metadata` via the standard `persist_metadata()` helper, so a half-full canteen survives bank/withdraw and chain export/import. Silently no-ops on non-NFT consumers. See `inventory-equipment.md` § NFT Metadata Persistence for the round-trip story.
+
+Concrete typeclasses live in `typeclasses/items/water_containers/` (a new folder, distinct from `containers/` which is for backpacks-holding-items, and `consumables/` which is for delete-on-use items):
+- `canteen_nft_item.py` — `CanteenNFTItem`, capacity 5, weight 0.5 kg
+- `cask_nft_item.py` — `CaskNFTItem`, capacity 10, weight 2 kg, requires SKILLED carpenter
+
+Both have `tracking_token` proxy tokens (`PCanteen`, `PCask`) registered in the NFTItemType migration alongside other proxy-tradeable items.
+
+---
+
+## Penalty Pipeline — `RegenerationService`
+
+`typeclasses/scripts/regeneration_service.py` — the global script that runs every 20s and combines hunger + thirst into a single regen/degen/bleed decision. Designed for the same roles as `SurvivalService`, and per-process safe for the same reason: its only script state is a tick counter on `ndb`, and it acts solely on this process's sessions.
+
+- **Both meters must permit regen** for healing to fire. If hunger says PECKISH-or-better AND thirst says AWARE-or-better, regen runs normally (HP/MP/MV recover at base rate × position multiplier). Sleeping in a `sleep_policy: super` room (e.g., an inn) grants 5x regen instead of the standard 3x.
+- **Either meter triggering degen** is enough to bleed. If hunger is FAMISHED-or-worse OR thirst is PARCHED-or-worse, the degen path runs once per minute (every 3rd 20s tick).
+- **Worst-meter wins** for the bleed rate and death cause. Each meter contributes a `(cycles_to_death, death_cause)` candidate; the smallest cycles_to_death (i.e., fastest death) is used. Hunger wins ties, so "starved while also parched at the same lethal rate" is recorded as starvation.
+- **Per-meter cycles_to_death:**
+
+| Meter stage | Cycles to death (minutes) |
+|---|---|
+| HungerLevel.FAMISHED | 30 |
+| HungerLevel.STARVING | 15 |
+| ThirstLevel.PARCHED | 35 |
+| ThirstLevel.DEHYDRATED | 25 |
+| ThirstLevel.CRITICAL | 15 |
+
+Bleed amounts: `max(1, round(stat_max / cycles_to_death))` per minute on each of HP, MP, MV. When HP hits zero, the character dies with the chosen cause string.
+
+**Messaging:** `send_hunger_messages` and `send_thirst_messages` push first-person nags to the affected character (once they cross the no-penalty threshold) and third-person observation messages to the room (once they enter the bleed zone). The first/third person message strings live in the enum modules.
+
+---
+
+## Design Constraints (intentional gotchas)
+
+- **Containers are inventory items, not held.** A canteen does NOT compete with weapons / torches for the HOLD slot. The model is "drink while you fight, like you eat bread while you fight" — friction without UX punishment.
+- **Containers are NFTs.** They participate in the full NFT lifecycle: bank/withdraw, give, export to XRPL, re-import. The mirror metadata persistence layer carries `current` through every round-trip, so a half-full canteen sold on a marketplace shows the buyer exactly how much water they're getting.
+- **Forage produces drinks-into-a-container, not a thirst free pass.** Forage gives a hunger free pass for druids/rangers (it restores hunger directly without needing bread), but its water credit explicitly does NOT bypass the canteen/cask supply chain — it tops up containers the forager is carrying, capped at their max_capacity, and silently no-ops if the forager has no container at all. This preserves the leatherworker/carpenter economy. The asymmetry is deliberate: hunger has a forager bypass because food is annoying to track on long expeditions and bread retains its economic dominance via the bread AMM; thirst has no bypass because containers are cheap, refills are everywhere, and the container itself is the gate.
+- **The three survival utilities share a BASIC+1 → GM+5 design shape.** Forage, Create Water, and Relieve Hunger all scale the same way: BASIC restores/adds 1 unit, each tier adds another unit, GM tops out at 5. Forage and Relieve Hunger are direct-to-meter (no resource produced); Create Water is into-a-container (the container is the gate). None of the three creates a tradeable resource (bread, water) so the farming/milling/baking and the leatherworker/carpenter economies are left alone. The symmetry is intentional — it keeps the three class archetypes (druid/ranger, mage, cleric) balanced on survival utility without favouring one.
+- **Create Water is fill-this-specific-container.** The shared `distribute_water_to_containers` helper in `water_container.py` walks inventory and fills most-empty first — used by forage and any future multi-container spell like Rain. Create Water deliberately does NOT use the walker because its `inventory_item` target type pins the player's choice of container.
+- **Relieve Hunger does not create bread.** Unlike stew (which buys bread from the AMM) or eat (which consumes inventory bread), Relieve Hunger directly steps `hunger_level`. The farming/milling/baking economy and the bread AMM remain the canonical food supply. The spell is gated by cleric class + mastery + mana, which is a different axis from the druid/ranger forage gate — if a party has both classes they can double-dip, but that's expected and symmetric with having a druid and a mage covering water.
+- **Stew is hunger only; ale is thirst only.** Inns serve both — the player chooses which meter to top up. Don't bundle them. Stew prices off the bread AMM; ale is a flat 1-gold sink (subject to change once a hops/ale resource exists).
+- **Death by either meter routes through `character.die()`.** No special-case bypass. A starved corpse and a dehydrated corpse drop their loot the same way.
+
+---
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `enums/hunger_level.py` | HungerLevel enum + first/third person message dicts |
+| `enums/thirst_level.py` | ThirstLevel enum + message dicts |
+| `typeclasses/scripts/survival_service.py` | The global tick dispatcher |
+| `typeclasses/scripts/regeneration_service.py` | Regen/degen/bleed pipeline; consumes both meters |
+| `typeclasses/mixins/water_container.py` | `WaterContainerMixin` shared by canteen / cask / future containers |
+| `typeclasses/items/water_containers/canteen_nft_item.py` | Canteen typeclass |
+| `typeclasses/items/water_containers/cask_nft_item.py` | Cask typeclass |
+| `typeclasses/world_objects/fountain_fixture.py` | `FountainFixture` (a WorldFixture with `is_water_source`) |
+| `commands/all_char_cmds/cmd_drink.py` | `drink [container]` command |
+| `commands/all_char_cmds/cmd_refill.py` | `refill [container]` command |
+| `commands/room_specific_cmds/inn/cmd_ale.py` | Ale (steps thirst up by one) |
+| `commands/room_specific_cmds/inn/cmd_stew.py` | Stew (steps hunger up by one) |
+| `world/recipes/leatherworking/canteen.py` | BASIC leatherworker recipe |
+| `world/recipes/carpentry/cask.py` | SKILLED carpenter recipe |
+| `world/prototypes/water_containers/` | Canteen + cask prototypes |
+| `world/spells/conjuration/create_water.py` | Create Water spell |
+| `blockchain/xrpl/migrations/0001_initial.py` | NFTItemType seed rows + PCanteen / PCask proxy tokens |
+
+---
+
+## Future Work
+
+- **Sleep / fatigue meter** — third survival meter. Same `SurvivalService` loop, same shape, different penalty curve (probably no death, just regen halts). Likely tied to inn rooms (rest at an inn to clear it). The `sleep_policy` room tag is already in place — `super` rooms (inns) grant 5x sleeping regen and `none` rooms (town streets) block sleep entirely. Future guard/urchin/gaol mechanics can layer on top.
+- **Climate-driven thirst rate** — desert zones tick thirst faster than temperate. Implementation: per-tick rate multiplier read from the room's terrain/climate before applying the decrement. Out of scope until desert content exists.
+- **Natural water sources** — rivers, springs, the spring-fed pool tile in southern woods, and wells should all set `is_water_source = True` so the `refill` command picks them up. Trivial to add in zone builders; deferred until the second town is built.
+- ~~**Find Water survival skill**~~ — landed as part of `forage` itself (not a separate skill). Forage now produces both hunger restoration and drinks-into-the-forager's-containers in one cast. See Thirst → Sources of water above.
+- **Ale economy** — once a hops/ale resource exists, the ale command should price off an AMM pool (mirroring stew's bread pool) instead of the flat 1-gold sink.
+- **Dehydration-specific death narrative** — the death system currently uses a generic cause string. A future pass could give dehydration its own dying-thoughts narrative the way starvation has flavour.
