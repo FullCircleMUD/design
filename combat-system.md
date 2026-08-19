@@ -770,7 +770,7 @@ if target.tags.get("undead", category="creature_type"):
 
 **XP:** `CombatMob` awards XP on death: `10 * mob.level`. The kill hook path is `CombatMob.die()` → `weapon.at_kill()` in `combat_utils.py` → `CombatMob.at_kill(victim)` (mob's own override for special abilities like Rampage).
 
-**Loot:** Common mobs (deleted on death) transfer contents to a `Corpse` object before deletion. Players use the `loot` command on the corpse. Corpses despawn after 300 seconds (default `corpse_despawn_delay`).
+**Loot:** Common mobs (deleted on death) transfer contents to a `Corpse` object before deletion. Players use the `loot` command on the corpse — which requires seeing it and standing at its height, so a corpse on the ground cannot be looted from the air, nor one at depth from the surface. Corpses despawn after 300 seconds (default `corpse_despawn_delay`).
 
 Corpse transfer follows the **loot tag rule**: fungibles (gold, resources) always transfer. NFT items only transfer if tagged `loot` (category `item`) — untagged NFTs (mob equipment like wielded weapons or worn armour) are deleted on death. The spawn system tags all NFT loot it places on mobs (scrolls, recipes, rare drops). Items created as mob equipment at spawn time are not tagged and do not drop. This allows humanoid mobs to wield real weapons for combat stats without those weapons entering the player economy. See **unified-item-spawn-system.md** and **npc-mob-architecture.md** for details.
 

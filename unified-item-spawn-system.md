@@ -1098,7 +1098,7 @@ Every line carries which process wrote it, so a placement can be followed across
 | Saturation script | `typeclasses/scripts/nft_saturation_service.py` — `NFTSaturationScript` |
 | Saturation service | `blockchain/xrpl/services/nft_saturation.py` — `NFTSaturationService.take_snapshot()` (hourly, at HH:05) |
 | Mob base (tags) | `typeclasses/actors/mob.py` — `CombatMob`, `_build_tier_max()` |
-| Mob spawn (tag sync) | `libraries/evennia-mob-spawner/src/evennia_mob_spawner/script.py` (the legacy `typeclasses/scripts/zone_spawn_script.py` is dormant) |
+| Mob spawn (tag sync) | `libraries/evennia-mob-spawner/src/evennia_mob_spawner/script.py` |
 | Quest debt hook | `world/quests/base_quest.py` — `FCMQuest._register_quest_debt()` |
 | Chest (gold tags) | `typeclasses/world_objects/chest.py` — `WorldChest` |
 | Tests | `tests/spawn_tests/` and `tests/quest_tests/` |

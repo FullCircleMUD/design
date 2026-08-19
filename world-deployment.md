@@ -11,8 +11,6 @@ World content is data, and data changes more often than the systems that interpr
 - **A file is the atomic redeploy unit.** Authors choose granularity by how they chunk YAML — one room per file means one-room redeploys; thirty rooms in one file means thirty-room redeploys. The library does no finer-grained partial clean within a file.
 - **Operator-driven, no orchestrator.** Operators broadcast a warning, wait for players to clear, then manually run the rebuild command. No scheduler, no lock state, no automated rollback.
 
-The pre-YAML era used Python `build_<zone>()` / `build_<district>()` functions, a planned `find_room` resolver, a district manifest, and an `@rebuild_district` command. That whole approach is superseded — `deploy_world.py` and every per-district Python builder have been retired.
-
 ## Three Repositories
 
 ```
@@ -236,11 +234,11 @@ The two pipelines are deliberately separated:
 - **Static content** (rooms, exits, fixtures, persistent NPCs that don't respawn) → `fcm-world`, deployed via `wb_build`.
 - **Respawning mob populations** → `fcm-mobs`, deployed via `ms_load`, finding rooms by `mob_area` tags that the world-builder side placed.
 
-The legacy `ZoneSpawnScript` + `world/spawns/*.json` pipeline that previously did this job has been retired; its class is dormant in the source tree pending future deletion.
+Mob populations are deployed only this way. There is no Python spawn-script path.
 
 ## What's Left in Python
 
-World content is no longer built from Python. The previous orchestrator `deploy_world.py` was deleted; the per-zone `soft_deploy.py` shells that used to handle `clean_zone()` and spawn-script creation were commented out in place once `wb_build` plus evennia-mob-spawner covered every previous use case. Those files (`world/game_world/zone_utils.py`, `world/game_world/zones/millholm/soft_deploy.py`, `world/game_world/zones/book_zones/hundred_acre_wood.py`) sit in the source tree behind dated `DEPRECATION NOTICE` docstrings, marked for future deletion pending live verification. `ZoneSpawnScript` is dormant in the same way.
+World content is not built from Python. `wb_build` and evennia-mob-spawner cover the job end to end, and the per-zone builder shells, the zone-cleaning helpers and the JSON spawn pipeline are gone from the source tree.
 
 What's still Python and load-bearing:
 
@@ -270,7 +268,6 @@ The world deployment model extends naturally to the multi-shard architecture in 
 - System room protection via `wb_build`'s file-scoped cleanup (system rooms in `shard0/scaffold/` only enter the delete set if explicitly scoped).
 - Parallel mob-spawn pipeline via [`evennia-mob-spawner`](https://github.com/FullCircleMUD/evennia-mob-spawner) reading [`fcm-mobs`](https://github.com/FullCircleMUD/fcm-mobs); operator-driven via `ms_load`.
 - The `main` / `test` content-branch split, with `shard0/test-world/` on `test` and a CI guard keeping it off `main`. See [Content Branches](#content-branches).
-- Legacy infrastructure (`deploy_world.py`, per-zone `soft_deploy.py`, `zone_utils.clean_zone()`, `ZoneSpawnScript`, `world/spawns/*.json`) retired or commented out behind dated DEPRECATION NOTICE blocks pending future deletion.
 
 **Possible future work (not on the immediate roadmap):**
 

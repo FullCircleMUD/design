@@ -208,15 +208,26 @@ For rules using `death_cooldown_seconds`, the library stamps `last_death_time` o
 
 ## ms_at_post_spawn — Per-Spawn Behaviour Reset
 
-The library calls `mob.ms_at_post_spawn()` after every fresh spawn IF the typeclass defines that method. Use it to reset state that needs to be clean at the start of each life — e.g. a boss's `db.has_rallied` flag that wouldn't be cleared by `at_object_creation` because its default is `None`:
+The library calls `mob.ms_at_post_spawn()` after every fresh spawn IF the typeclass defines that method — after it has created the object, stamped its tags and applied the rule's `attrs`. Use it for per-life setup that has to happen once the mob exists and its rule data has landed.
+
+FCM's use is on `StateMachineAIMixin`, which starts the AI ticker:
 
 ```python
-class KoboldChieftain(CombatMob):
-    def ms_at_post_spawn(self):
-        """Reset per-spawn combat state on every fresh spawn."""
-        self.db.has_rallied = False
-        # ... any other per-life setup
+def ms_at_post_spawn(self):
+    parent_hook = getattr(super(), "ms_at_post_spawn", None)
+    if parent_hook is not None:
+        parent_hook()
+
+    start_ai = getattr(self, "start_ai", None)
+    if start_ai is not None:
+        start_ai()
 ```
+
+Without it a spawner-created mob never starts its ticker at all — nothing else calls `start_ai()` for one. It sits inert until the next server restart adopts it, which is why the symptom reads as intermittent: mobs alive at boot behave, mobs spawned since do not.
+
+**Chain cooperatively.** The hook name is singular and the library calls it once, so if another mixin further along the MRO also defines one, only the leftmost would run. Each link calls the next before adding its own work. The `getattr` guard is required because `object` does not define the hook, so an unguarded `super()` call raises at the end of the chain.
+
+**Not for clearing flags that default to falsy.** A mob is deleted on death, so every spawn is a fresh object — an unset attribute reads `None`, which is already falsy. A `has_rallied`-style once-per-life flag needs no reset, and adding one implies a lifecycle problem that does not exist.
 
 Duck-typed protocol: one optional method name, no inheritance demands, no required base class. Validator's Tier 3 checks the signature is `mob.ms_at_post_spawn()` (zero required args after `self`) so typos like `def ms_at_post_spawn(self, foo):` are caught at load time, not runtime.
 
