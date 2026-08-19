@@ -742,6 +742,8 @@ Characters have a `position` AttributeProperty (standing/sitting/resting/sleepin
 - Combat end sets position to "standing"
 - Resting and sleeping affect regeneration multipliers
 - Movement is blocked unless position is "standing" or "fighting"
+- Commands that need a pose declare `required_position` on `FCMCommandMixin` — the gate runs in
+  `at_pre_cmd()`, before `func()`. See `src/game/CLAUDE.md` § Command Architecture.
 
 `ndb.combat_target` on the character tracks current target for room display ("Bob is here, fighting a gnoll.").
 
