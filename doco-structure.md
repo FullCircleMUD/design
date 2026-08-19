@@ -19,7 +19,7 @@ passer-by, a future contributor. No prior context.
 
 **Tone.** Big-picture, plain language, skim-friendly. One browser tab, no scrolling fatigue.
 
-**Does NOT belong here.** Architecture detail (→ `docs/`), implementation specifics, working notes,
+**Does NOT belong here.** Architecture detail (→ `design/`), implementation specifics, working notes,
 LLM agent instructions (→ `CLAUDE.md`).
 
 **Cadence.** Stable. Edit when something *user-facing* changes (status, positioning, install steps).
@@ -38,13 +38,13 @@ high-leverage**; bloat dilutes the signal and gets load-bearing rules missed.
 - load-bearing **principles** that constrain *every* task;
 - the **out-of-scope** list, so the agent never proposes deliberately-excluded things;
 - broad project-specific conventions;
-- **pointers** (not duplicated content) to `MEMORY` and `docs/` — including a **required-reading line
-  for [`docs/INDEX.md`](#4-docs--the-technical--knowledge-wiki)**. Unlike `MEMORY.md`, the docs index is
+- **pointers** (not duplicated content) to `MEMORY` and `design/` — including a **required-reading line
+  for [`design/INDEX.md`](#4-design--the-technical--knowledge-wiki)**. Unlike `MEMORY.md`, the docs index is
   **not** auto-injected each session, so the always-loaded `CLAUDE.md` must explicitly tell the agent to
   read it (then load the relevant doc on demand — the same index-then-load pattern as `MEMORY`).
 
 **Does NOT belong here.** Situational knowledge that isn't relevant every session (→ `MEMORY`),
-generic language/framework advice, deep detail (→ `docs/`), user-facing framing (→ `README`).
+generic language/framework advice, deep detail (→ `design/`), user-facing framing (→ `README`).
 
 **Cadence.** Stable. A rule lands here when it must bind **every** session — often by *graduating up*
 from `MEMORY` (see the split below). Don't let it grow into a wiki.
@@ -65,12 +65,12 @@ CLAUDE.md's always-on rules.
 
 **Does NOT belong here.** Universal rules that bind *every* session (→ `CLAUDE.md`); **ephemeral or
 repo-derivable state** — paths, "what's built", commit SHAs (git/code already holds it; it goes stale
-on creation); deep architectural rationale (→ `docs/`).
+on creation); deep architectural rationale (→ `design/`).
 
 **Cadence.** Living. Claude writes to it as decisions accrue — one focused topic file per memory, a
 one-line entry in `MEMORY.md` so it's discoverable.
 
-### 4. `docs/` — the technical / knowledge wiki
+### 4. `design/` — the technical / knowledge wiki
 
 **Audience.** Anyone working on the project's architecture, design, or substance — humans and agents
 alike.
@@ -85,19 +85,20 @@ substantive knowledge base; the role is identical even if the content isn't code
   auto-loaded; the pointer is what makes it reliably read). An un-indexed document is invisible.
 - **Content documents** — one focused topic per file, kebab-case (`schema-design.md`).
 
-**One docs surface, at the top level only.** In a multi-repo (umbrella) project, `docs/` lives **only at
-the umbrella** — a single shared documentation surface for the umbrella *and* every sub-repo. Sub-repos
-hold **no** `docs/` of their own (you always launch from the umbrella, so one surface serves all). In a
-single-repo project, `docs/` is at that repo's root. Either way there is exactly one `docs/`, at the top.
+**One wiki surface, at the top level only.** In a multi-repo (umbrella) project the wiki lives **only at
+the top level** — a single shared documentation surface for the umbrella *and* every sub-repo. In FCM
+that surface is the `design` repo, cloned into the umbrella root as `design/`. Sub-repos hold **no** wiki
+of their own (you always launch from the umbrella, so one surface serves all). In a single-repo project
+it is a `docs/` folder at that repo's root. Either way there is exactly one, at the top.
 
 **Exception — stand-alone-reusable sub-repos may self-document.** A sub-repo whose code could
 reasonably be used **outside this project** — for example a library a third party might install into an
 unrelated project — **may** (not must) carry its own internal `docs/` so the repo is understandable in
 isolation by someone who never sees the umbrella. The criterion is **stand-alone reusability**: a
 general-purpose library that stands on its own qualifies; a sub-repo that makes sense *only* within this
-project does not, so its documentation lives at the umbrella. A self-documenting sub-repo follows the
-same conventions as the umbrella `docs/` (an `INDEX.md` entry point, one kebab-case topic per file), and
-the umbrella `INDEX.md` should list it so it stays discoverable.
+project does not, so its documentation lives in `design/`. A self-documenting sub-repo follows the
+same conventions as `design/` (an `INDEX.md` entry point, one kebab-case topic per file), and
+`design/INDEX.md` should list it so it stays discoverable.
 
 **A self-documenting sub-repo carries a _reduced_ set, not the full suite.** Its internal docs are only
 what is needed to understand and use the repo in isolation: a `README` (for whoever lands on it),
@@ -135,14 +136,14 @@ situational detail, that **demotes down into `MEMORY`.** `CLAUDE.md` trends smal
 | Will a non-developer visitor want to see this? | `README.md` |
 | Is it a rule/constraint that must steer **every** agent session? | `CLAUDE.md` |
 | Is it a durable decision/agreement/fact to **recall when working on a specific thing**? | `MEMORY` (topic file + index line) |
-| Is it architectural detail, decision rationale, or a plan? | `docs/` (and indexed in `INDEX.md`) |
+| Is it architectural detail, decision rationale, or a plan? | `design/` (and indexed in `INDEX.md`) |
 | Is it ephemeral or derivable from the repo (paths, "what's built")? | Don't write it — git/code has it |
 | Useful for the *current task only*? | Don't write it — keep it in the conversation |
 
-If content seems to belong in two places, prefer the more durable/detailed surface (`docs/` or
+If content seems to belong in two places, prefer the more durable/detailed surface (`design/` or
 `MEMORY`) and **link** to it from the always-on ones (`README`, `CLAUDE.md`), which stay short.
 
-## Conventions for `docs/` documents
+## Conventions for `design/` documents
 
 - **Filename:** kebab-case, descriptive, stable (`schema-design.md`, not `notes-2026-04.md`).
 - **First line:** an `# H1 Title` matching the filename.
@@ -197,7 +198,7 @@ If content seems to belong in two places, prefer the more durable/detailed surfa
 
 A single `README` is too long for visitors or too shallow for contributors. `CLAUDE.md` alone either
 pulls in agent-irrelevant marketing or omits depth. `MEMORY` exists because an agent needs durable
-recall that *accumulates* without bloating the always-loaded rules. `docs/` without an entry point is
+recall that *accumulates* without bloating the always-loaded rules. `design/` without an entry point is
 invisible. Four surfaces, each focused on one audience and one cadence, linking where helpful: the
 cost is a little discipline about what goes where; the benefit is each surface stays useful for the
 long haul.

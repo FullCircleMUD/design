@@ -8,7 +8,7 @@ every session and load the relevant doc before related work** (it is not auto-lo
 
 | Document | Summary |
 |---|---|
-| [doco-structure.md](doco-structure.md) | The four documentation surfaces (`README` / `CLAUDE.md` / `MEMORY` / `docs/`) — what belongs where, the `CLAUDE.md`⇄`MEMORY` split, and the conventions that keep them coherent. |
+| [doco-structure.md](doco-structure.md) | The four documentation surfaces (`README` / `CLAUDE.md` / `MEMORY` / `design/`) — what belongs where, the `CLAUDE.md`⇄`MEMORY` split, and the conventions that keep them coherent. |
 | [library-standards.md](library-standards.md) | Conventions for the reusable libraries under `libraries/` — naming, src layout, `pyproject.toml`, test framework, the reduced sub-repo documentation set, and the bootstrap checklist. |
 | [new-machine-setup.md](new-machine-setup.md) | How to reconstitute a working FCM environment on a fresh machine: the nested-repo re-clone manifest (incl. which repos are private + the `FullCircleMUD` gh account), portable-memory first-launch, and git-crypt unlock for the game secrets. |
 | [progress.md](progress.md) | Running log of validated milestones — what has actually been proven, under what conditions, and what remains unproven. Keeps status out of the design docs; not a changelog (that's `git log`) and not a roadmap (that's `ops/DEVELOPMENT/`). |
@@ -18,8 +18,8 @@ every session and load the relevant doc before related work** (it is not auto-lo
 Some sub-repos — notably the reusable Evennia **libraries** — are meant to be understood **in
 isolation**: a third party reading just that repo should be able to learn how it works. By design
 **these document themselves internally** (their own `docs/` wiki) rather than here. This is a
-**deliberate exception** to the umbrella's "one docs surface" rule. Each follows the same conventions
-as this `docs/` (an `INDEX.md` entry point, one kebab-case topic per file).
+**deliberate exception** to the "one wiki surface" rule. Each follows the same conventions
+as this wiki (an `INDEX.md` entry point, one kebab-case topic per file).
 
 | Sub-repo | Internal docs | What it is |
 |---|---|---|

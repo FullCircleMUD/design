@@ -12,7 +12,7 @@ What belongs here is what neither of those can tell you: **that something was va
 conditions, and what remains unproven.** Environmental caveats, hard-won findings, and "we ran it and
 it worked" — the context a commit message has no room for.
 
-It also keeps status out of the design documents. A design doc in [docs/](INDEX.md) describes how the
+It also keeps status out of the design documents. A design doc in [design/](INDEX.md) describes how the
 game *works*, in present tense, with a short removable note where the code hasn't caught up — see
 [doco-structure.md](doco-structure.md#conventions-for-docs-documents). The same convention runs in
 each library's own `docs/progress.md`.

@@ -1,7 +1,7 @@
 # New-Machine Setup — re-cloning the FCM umbrella
 
 How to reconstitute a working FCM environment on a fresh machine. The umbrella repo carries the
-coordination layer (`.claude/`, `CLAUDE.md`, `docs/`, memory, the view-gamedir symlinks) but
+coordination layer (`.claude/`, `CLAUDE.md`, memory, the view-gamedir symlinks) but
 **gitignores the nested working repos** — so cloning the umbrella does *not* bring them down. Re-clone
 them with the manifest below.
 
@@ -32,6 +32,7 @@ Folder names must match the umbrella `.gitignore` entries exactly. All remotes a
 | Repo | Private? | Default branch |
 |---|---|---|
 | cosigner | public | main |
+| design | public | main |
 | fullcirclemud | public | main |
 | lore | public | main |
 | nft_api | public | main |
@@ -42,8 +43,8 @@ Folder names must match the umbrella `.gitignore` entries exactly. All remotes a
 | ops | **private** | main |
 | xrpl-tools | **private** | main |
 
-> `design` is intentionally **not** here — its content was migrated into this `docs/` surface and the
-> repo retired (the umbrella is now the source of truth for design documentation).
+> `design` is this wiki — the source of truth for FCM design documentation. Clone it before anything
+> else; the rest of the setup refers to it.
 
 ### `libraries/` (clone into `libraries/` — see `libraries/README.md`)
 
