@@ -21,7 +21,7 @@
 
 FullCircleMUD is built on Evennia (a Python/Django MUD framework). Like all Django applications, it uses a relational database to store game state — player accounts, characters, items, blockchain mirrors, NPC memories, and more.
 
-The game uses **four separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). In production on Railway, they're PostgreSQL (robust, handles concurrent connections). A single environment variable controls which backend is used — no code changes needed.
+The game uses **four separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). Deployed, they are PostgreSQL (robust, handles concurrent connections). Environment variables control both which backend is used and which alias lives on which instance — no code changes needed.
 
 For how this fits into the deployment pipeline, see the deployment runbook in the private ops repository.
 
@@ -61,46 +61,47 @@ SQLite uses file-level locking — only one process can write at a time. The gam
 
 ## How the Toggle Works
 
-A single environment variable called `DATABASE_URL` controls everything.
+Each alias resolves its own connection, in this order:
 
-```
-┌─────────────────────────────────────────────────┐
-│                  settings.py                     │
-│                                                  │
-│   if DATABASE_URL is set:                        │
-│       → use PostgreSQL (parse the URL)           │
-│   else:                                          │
-│       → use SQLite files (default, zero config)  │
-│                                                  │
-└─────────────────────────────────────────────────┘
-```
+| Order | Source | Meaning |
+|---|---|---|
+| 1 | `DATABASE_URL_<ALIAS>` | this alias has its own PostgreSQL instance |
+| 2 | `DATABASE_URL` | share the default's PostgreSQL instance |
+| 3 | SQLite file | local dev, one file per alias |
 
-- **Your laptop:** `DATABASE_URL` is not set. Django uses SQLite. No setup required.
-- **Railway staging:** Railway injects `DATABASE_URL` pointing to a staging PostgreSQL instance. Django uses PostgreSQL. You didn't change any code.
-- **Railway production:** Railway injects a different `DATABASE_URL` pointing to the production PostgreSQL instance. Same code, different database.
+Which gives three deployment shapes:
 
-The toggle lives in `server/conf/settings.py`. It uses `dj-database-url`, a standard Django library that parses a PostgreSQL connection string into the format Django expects.
+- **Your laptop:** nothing set. Four SQLite files, no setup required.
+- **Deployed, shared:** `DATABASE_URL` only. All four aliases are one PostgreSQL database. This is the current arrangement.
+- **Deployed, split:** `DATABASE_URL` plus one or more `DATABASE_URL_<ALIAS>` overrides. The named aliases move to their own instances; the rest stay with `default`.
 
-**In PostgreSQL mode, all four database aliases (default, xrpl, ai_memory, subscriptions) point to the same physical PostgreSQL database.** Table prefixes (`xrpl_*`, `ai_memory_*`, `subscriptions_*`) keep them separate within the single database. This is simpler and cheaper than running four separate PostgreSQL instances.
+`default` takes bare `DATABASE_URL` and has no `_DEFAULT` override — that variable is the contract every deploy already sets.
 
-### Routers are mode-dependent
+**Which alias lives where is a deployment decision, not a code one.** Moving one onto separate compute is one environment variable plus a dump/restore (or a fresh `migrate` on a new install). No application code names a database — see [What Developers Need to Know](#what-developers-need-to-know).
 
-The database routers in `blockchain/xrpl/db_router.py`, `ai_memory/db_router.py`, and `subscriptions/db_router.py` are **only active in SQLite (local dev) mode**. In `settings.py`:
+Resolution lives in `server/conf/db_config.py`, called from `server/conf/settings.py`, and uses `dj-database-url` to parse connection strings into the format Django expects. Behaviour is covered by `tests/server_tests/test_db_config.py`.
 
-```python
-if not _DATABASE_URL:
-    DATABASE_ROUTERS = [
-        "blockchain.xrpl.db_router.XRPLRouter",
-        "ai_memory.db_router.AiMemoryRouter",
-        "subscriptions.db_router.SubscriptionsRouter",
-    ]
-```
+### Spell hosts and ports consistently
 
-**Why?** Locally, each alias is a **separate SQLite file** (`evennia.db3`, `xrpl.db3`, `ai_memory.db3`, `subscriptions.db3`). The routers direct each app's models to the right file. Without them, all tables would land in `evennia.db3`.
+Two aliases count as the same database when engine, host, port and name all match. An omitted port is filled in from the engine's default before comparing, so `postgres://host/fcm` and `postgres://host:5432/fcm` match.
 
-**On Railway**, all aliases point to the **same** Postgres instance. Enabling routers here is actively harmful — their `allow_migrate()` method would block table creation for non-default apps during a single `migrate` call, leaving the `xrpl`, `ai_memory`, and `subscriptions` tables uncreated while still recording the migrations as applied.
+**Host spelling is not normalised.** Naming one alias `localhost` and another `127.0.0.1` reads as two different databases and will manufacture a router. Use the same host string across aliases.
 
-For how Railway injects `DATABASE_URL` and manages environments, see the deployment runbook in the private ops repository.
+A URL missing its host or database name raises `ImproperlyConfigured` at settings load rather than letting the server start against a misresolved alias.
+
+### Routers are derived from the connections
+
+A router is active for exactly those aliases that resolve to a physically different database from `default`. Nothing declares this — it falls out of the resolved connections:
+
+| Deployment | Aliases differing from `default` | Routers active |
+|---|---|---|
+| Local SQLite | all three | all three |
+| One shared PostgreSQL | none | none |
+| `ai_memory` split off | `ai_memory` | `ai_memory` only |
+
+**Why it has to work this way.** Locally each alias is a separate file (`evennia.db3`, `xrpl.db3`, `ai_memory.db3`, `subscriptions.db3`) and the routers direct each app's models to the right one; without them every table would land in `evennia.db3`. On a shared instance every alias *is* the same database, and a router there is actively harmful — its `allow_migrate()` would refuse to create the non-default tables while Django still recorded those migrations as applied, leaving a database that looks migrated and has none of the tables.
+
+**The corollary:** an alias with an active router is not reached by a bare `migrate` and needs `migrate --database <alias>`.
 
 ---
 
@@ -276,11 +277,12 @@ Once confident in the pgvector path after production validation:
 
 ## Summary
 
-The database architecture is designed around one principle: **the environment decides the backend, not the code.**
+The database architecture is designed around one principle: **the environment decides the backend and the placement, not the code.**
 
 - Develop locally with SQLite (zero setup)
-- Deploy to Railway with PostgreSQL (zero code changes)
-- A single environment variable (`DATABASE_URL`) controls the switch
+- Deploy with PostgreSQL (zero code changes)
+- `DATABASE_URL` chooses the backend; `DATABASE_URL_<ALIAS>` chooses where an individual alias lives
+- Routers follow from the resolved connections rather than being declared
 - Django handles schema differences, migrations, and SQL dialect translation
 - Same migration files run on both backends
-- Four logical databases, isolated by routers, sharing one physical PostgreSQL instance in production
+- Four logical databases, on one PostgreSQL instance or several, decided per deployment
