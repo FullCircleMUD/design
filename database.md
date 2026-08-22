@@ -124,28 +124,26 @@ SQLite database files appear in `server/`. They're in `.gitignore`. Each develop
 
 ### Running tests
 
-Tests always use SQLite regardless of `DATABASE_URL`. Django creates temporary test databases that are destroyed after the test run.
-
 ```bash
 evennia test --settings settings tests
 ```
 
-### If you want to test with PostgreSQL locally (optional)
+**[TBD — needs discussion: whether the test suite follows `DATABASE_URL` or is forced onto SQLite.]**
 
-This is rarely needed — the ORM ensures queries behave the same on both backends. But if you want to verify PostgreSQL-specific behavior:
+Nothing in the game repo pins it — there is no test-mode branch in `settings.py` and no override in
+`settings_test_shard0.py` — so a suite run from a shell that has loaded the Postgres environment will
+build its test databases on Postgres. Given the full suite runs a couple of hours and holds those
+databases, that is worth settling deliberately rather than discovering.
 
-1. Install Docker Desktop
-2. Start a PostgreSQL container:
-   ```bash
-   docker compose up -d
-   ```
-3. Set the environment variable:
-   ```bash
-   export DATABASE_URL=postgres://postgres:fcm@localhost:5432/fcm
-   ```
-4. Run migrations and start as normal
+### Testing against PostgreSQL locally
 
-This is entirely optional. Day-to-day development works fine on SQLite.
+Local Postgres is kept at the same version and configuration as the server, so a result on a laptop
+means the same thing on the box. Which backend a shell uses depends on whether it has loaded the
+environment file — a fresh shell is always SQLite.
+
+Commands, the encrypted environment file, and the two traps worth knowing (setting `DATABASE_URL` also
+disables `secret_settings.local`; the server is a daemon and does not follow a shell that changes mode)
+are in `ops/DEVELOPMENT/DEV_SETUP.md` § Choosing a database backend.
 
 ---
 
