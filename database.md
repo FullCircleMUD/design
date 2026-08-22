@@ -1,6 +1,6 @@
 # database.md
 
-> **THIS FILE covers database architecture** for FullCircleMUD — the four-database design, the SQLite/PostgreSQL toggle, how migrations work, and developer workflow. Deployment pipeline, CI/CD, Railway configuration, and branching strategy live in the private ops repository (`ops/DEPLOYMENT.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the three embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
+> **THIS FILE covers database architecture** for FullCircleMUD — the four-database design, the SQLite/PostgreSQL toggle, where each alias lives, how migrations work, and developer workflow. Server provisioning and the deployment runbook live in the private ops repository (`ops/fcmud-ec2-staging-runsheet.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the three embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
 
 ---
 
@@ -159,8 +159,6 @@ A migration is a Python file that describes a change to the database schema — 
 
 ### The developer workflow
 
-Local development and Railway deployment migrate differently because of the SQLite vs Postgres mode difference.
-
 ```
 1. Developer changes a model (e.g. adds a field to NpcMemory)
      ↓
@@ -169,26 +167,48 @@ Local development and Railway deployment migrate differently because of the SQLi
      → Generates a new migration file (e.g. 0003_add_mood_field.py)
      ↓
 3. Developer runs: evennia migrate --database ai_memory
-     → Routers are active (SQLite mode)
+     → Locally every alias is its own file, so its router is active
      → Migration applies to the local ai_memory.db3 file
-     → Must use --database flag because routers block cross-alias migrations
+     → The --database flag is required; the router blocks the bare call
      ↓
 4. Developer commits the migration file to Git
      ↓
-5. Code gets merged and deployed to Railway
+5. Code is merged and deployed
      ↓
-6. Railway runs deploy_migrate.py:
-     → Routers are DISABLED (DATABASE_URL is set)
-     → Single `migrate` call (no --database flag) applies ALL pending
-       migrations from every app to the shared Postgres instance
-     → Database schema now matches the code
+6. deploy_migrate.py runs on the server, before evennia start
 ```
 
-**Key distinction:**
-- **Local (SQLite, routers active):** Use `evennia migrate --database <alias>` for each custom database. The routers require this.
-- **Railway (Postgres, routers disabled):** A single `migrate` call handles everything. This is what `deploy_migrate.py` does automatically.
+**The rule is the same in both places:** an alias with an active router needs its own `migrate --database <alias>`; everything sharing `default`'s database is covered by the bare `migrate`. Only the *number* of split aliases differs — three locally, however many overrides are set on a server.
 
-For how Railway runs migrations automatically on deploy, see the deployment runbook in the private ops repository.
+### deploy_migrate.py
+
+Run by hand on the server before the first `evennia start` against a new database:
+
+```bash
+python deploy_migrate.py
+```
+
+It calls Django directly rather than going through `evennia migrate`, because Evennia's launcher has its own database initialisation path that does not reliably pick up `DATABASE_URL` for the non-default aliases. It reads `DJANGO_SETTINGS_MODULE` from the environment — it never sees a `--settings` argument, so that variable is what selects the settings module.
+
+What it does, in order:
+
+1. **Prints the resolved connections** — engine, host and name for every alias, which aliases share a database, and which are split off. The startup banner is the fastest way to confirm a deploy is pointed where you think it is.
+2. **Hard-gates the engine** — if `DATABASE_URL` is set but the resolved engine is not Postgres, it aborts rather than quietly migrating a throwaway SQLite file.
+3. **Probes every distinct database** — a bad host in an override fails here, before any migration runs.
+4. **Creates the `vector` extension** in each database that will hold embeddings. Extensions are per-database, so this is not necessarily `default`'s.
+5. **Counts tables before and after.**
+6. **Migrates** — one bare `migrate`, then `migrate --database <alias>` for each split alias.
+7. **Fails if any database ends up with zero tables.** This is the guard that matters: a router can block table creation while Django still records the migrations as applied, leaving a database that looks migrated and holds nothing. The census catches it instead of the game finding out at runtime.
+
+Any error aborts with exit code 1 rather than leaving you to start the server against a broken database.
+
+**Migrations are incremental and idempotent.** Django only applies what is not already in `django_migrations`, so running it on every deploy is safe and existing data is preserved.
+
+### pgvector
+
+The extension must exist before any migration that creates a vector column, which is why step 4 precedes step 6. `ai_memory.0002_pgvector` is marked `atomic = False` because HNSW index creation blocks when run inside a transaction on PostgreSQL.
+
+Vector searches also need `hnsw.iterative_scan` set, or a filtered search returns only the candidates that survive its `WHERE` clause — see [Vector search settings](#vector-search-settings) below.
 
 ### Why this is safe
 
@@ -216,7 +236,7 @@ The main risk is **destructive migrations** — dropping a column or table that 
 2. Run `evennia makemigrations <app_label>`
 3. Run `evennia migrate --database <alias>`
 4. Commit the migration file
-5. Push — Railway runs the migration automatically on deploy
+5. Push, then run `deploy_migrate.py` on the server as part of the deploy
 
 ### "I changed a field on an existing model"
 
@@ -231,7 +251,7 @@ Use a data migration — a migration file that runs Python code to insert rows. 
 This is rare because the ORM abstracts backend differences. When it happens, it's usually:
 - A raw SQL query that uses SQLite-specific syntax (avoid raw SQL)
 - A timing/concurrency issue that only surfaces with real PostgreSQL (SQLite serializes all writes)
-- An environment variable that's set locally but missing on Railway
+- An environment variable that's set locally but missing on the server
 
 ---
 
@@ -242,7 +262,7 @@ The NPC memory system uses **dual-backend embedding storage** that automatically
 | Backend | Field | Search Method | Index |
 |---------|-------|---------------|-------|
 | **SQLite** (local dev) | `embedding` (`BinaryField`, numpy binary blob) | Python loop with numpy cosine similarity — O(n) | None |
-| **PostgreSQL** (Railway) | `embedding_vector` (`VectorField(1536)`, pgvector native) | Single SQL query with `<=>` cosine distance operator | HNSW (`m=16, ef_construction=64`) |
+| **PostgreSQL** (deployed) | `embedding_vector` (`VectorField(1536)`, pgvector native) | Single SQL query with `<=>` cosine distance operator | HNSW (`m=16, ef_construction=64`) |
 
 Both fields coexist on the `NpcMemory` model. Backend detection is automatic — `_is_postgres()` in `ai_memory/services.py` checks `settings.DATABASES["ai_memory"]["ENGINE"]`, which follows the existing `DATABASE_URL` toggle. No configuration, feature flags, or manual switching required.
 
@@ -253,6 +273,21 @@ Both fields coexist on the `NpcMemory` model. Backend detection is automatic —
 **Search (`search_memories()`):** On Postgres, uses pgvector's `CosineDistance` ORM annotation — a single indexed SQL query replaces the Python loop. On SQLite, the existing numpy cosine similarity loop runs unchanged.
 
 **Migration (`0002_pgvector.py`):** Conditionally enables the `vector` extension, adds the column, creates the HNSW index, and back-fills existing binary embeddings into the vector column. All conditional steps check `connection.vendor == "postgresql"` and are no-ops on SQLite.
+
+### Vector search settings
+
+A filtered vector search — `WHERE npc_id = X ORDER BY embedding <=> ...`, which is what `search_memories()` and the lore search both do — asks HNSW for `ef_search` candidates and applies the filter *afterwards*. Only the survivors come back. As the table grows and any one NPC's share of it shrinks, the query returns fewer rows than asked for while the relevant memories sit untouched in the table. Measured on 100k rows across 500 NPCs: **1 row returned of a requested 5**.
+
+`hnsw.iterative_scan = relaxed_order` fixes it — the index keeps producing candidates until the filter yields enough. Requires pgvector 0.8.0 or later.
+
+It is set in two places, deliberately:
+
+| Where | Covers |
+|---|---|
+| `OPTIONS` on every Postgres connection, from `server/conf/db_config.py` | The application. Travels with the connection, so it follows a database to another cluster or to RDS, where there is no `postgresql.conf` to edit |
+| `postgresql.conf` on the server | Manual `psql` sessions, so hand-run diagnostics behave the way the app does |
+
+The connection setting is the one that matters. The server setting only stops a `psql` session quietly misleading you.
 
 ### Performance
 
