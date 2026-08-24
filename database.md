@@ -231,12 +231,19 @@ SQLite database files appear in `server/`. They're in `.gitignore`. Each develop
 evennia test --settings settings tests
 ```
 
-**[TBD — needs discussion: whether the test suite follows `DATABASE_URL` or is forced onto SQLite.]**
+**Tests run on SQLite.** That is the working assumption, not something the code enforces — nothing
+pins it, so a suite launched from a shell that has loaded the Postgres environment would build its
+test databases there instead. Local development is SQLite, so in practice that is what runs.
 
-Nothing in the game repo pins it — there is no test-mode branch in `settings.py` and no override in
-`settings_test_shard0.py` — so a suite run from a shell that has loaded the Postgres environment will
-build its test databases on Postgres. Given the full suite runs a couple of hours and holds those
-databases, that is worth settling deliberately rather than discovering.
+Staging is the only environment where the game runs on Postgres, and it is not somewhere to tie up
+the databases for the two to three hours the full suite takes. Postgres on the current development
+machine does not work against the same code that runs on staging; the difference has not been chased.
+
+The cost of that is worth knowing: SQLite reports no `select_for_update` support, so Django skips both
+the lock and its checks. A green suite says nothing about row locking or about a transaction being
+opened on the wrong connection — staging is where that class of thing is confirmed.
+
+Revisit when the infrastructure grows a dedicated test environment. Not before.
 
 ### Testing against PostgreSQL locally
 
