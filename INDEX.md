@@ -114,7 +114,7 @@ and the cross-cutting invariants) that no single doc holds.
 
 | Document | Summary |
 |---|---|
-| [database.md](database.md) | Django app layout, four-database architecture, model overview, migrations. |
+| [database.md](database.md) | Django app layout, five-database architecture, transactions across aliases, model overview, migrations. |
 | [website.md](website.md) | Web frontend pages, geo-detection infrastructure, page inventory, implementation status. |
 | [connection-transport.md](connection-transport.md) | Why FCM is WebSocket-only — Cloudflare, `cf-ipcountry`, telnet/SSH limitations, decision rationale. |
 | [scaling.md](scaling.md) | Scaling strategy for the initial era — capacity and growth approach. |

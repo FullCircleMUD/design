@@ -1,19 +1,24 @@
 # database.md
 
-> **THIS FILE covers database architecture** for FullCircleMUD — the four-database design, the SQLite/PostgreSQL toggle, where each alias lives, how migrations work, and developer workflow. Server provisioning and the deployment runbook live in the private ops repository (`ops/fcmud-ec2-staging-runsheet.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the three embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
+> **THIS FILE covers database architecture** for FullCircleMUD — the five-database design, the SQLite/PostgreSQL toggle, how transactions work across them, where each alias lives, how migrations work, and developer workflow. Server provisioning and the deployment runbook live in the private ops repository (`ops/fcmud-ec2-staging-runsheet.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the three embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [The Four Databases](#the-four-databases)
+- [The Five Databases](#the-five-databases)
 - [Why Two Database Backends](#why-two-database-backends)
 - [How the Toggle Works](#how-the-toggle-works)
+- [Transactions and Split Aliases](#transactions-and-split-aliases)
+  - [Work that spans two databases](#work-that-spans-two-databases)
+  - [Rolling back does not roll back Evennia's caches](#rolling-back-does-not-roll-back-evennias-caches)
+  - [What the ledger changes](#what-the-ledger-changes)
+  - [NFT moves](#nft-moves)
 - [What Developers Need to Know](#what-developers-need-to-know)
 - [How Database Migrations Work](#how-database-migrations-work)
 - [Common Scenarios](#common-scenarios)
-- [Future: pgvector for AI Memory](#future-pgvector-for-ai-memory)
+- [pgvector for AI Memory](#pgvector-for-ai-memory)
 
 ---
 
@@ -21,27 +26,29 @@
 
 FullCircleMUD is built on Evennia (a Python/Django MUD framework). Like all Django applications, it uses a relational database to store game state — player accounts, characters, items, blockchain mirrors, NPC memories, and more.
 
-The game uses **four separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). Deployed, they are PostgreSQL (robust, handles concurrent connections). Environment variables control both which backend is used and which alias lives on which instance — no code changes needed.
+The game uses **five separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). Deployed, they are PostgreSQL (robust, handles concurrent connections). Environment variables control both which backend is used and which alias lives on which instance — no code changes needed.
 
 For how this fits into the deployment pipeline, see the deployment runbook in the private ops repository.
 
 ---
 
-## The Four Databases
+## The Five Databases
 
 | Database | Local File | Purpose | Key Models |
 |----------|-----------|---------|------------|
 | **default** | `evennia.db3` | Evennia core — accounts, characters, rooms, scripts, attributes | AccountDB, ObjectDB, all typeclasses |
-| **xrpl** | `xrpl.db3` | Blockchain mirror — XRPL asset tracking, economy telemetry | CurrencyType, FungibleGameState, NFTGameState, transfer logs, snapshots |
+| **xrpl** | `xrpl.db3` | XRPL asset ownership and economy telemetry | CurrencyType, FungibleGameState, NFTGameState, transfer logs, snapshots |
 | **ai_memory** | `ai_memory.db3` | NPC memory — conversation history with vector embeddings | NpcMemory |
 | **subscriptions** | `subscriptions.db3` | Subscription plans and payment records | SubscriptionPlan, SubscriptionPayment |
+| **archive** | `archive.db3` | Clone of Evennia's schema holding archived accounts and characters | ArchiveRecord, plus Evennia's own tables |
 
-Each database has its own **router** — a small Python class that tells Django "models with this app label go to this database." The routers work identically regardless of whether the underlying database is SQLite or PostgreSQL. They're purely about directing traffic, not about what kind of database is at the other end.
+Each non-default alias has a **router** — a small Python class that tells Django "models with this app label go to this database." The routers work identically regardless of whether the underlying database is SQLite or PostgreSQL. They're purely about directing traffic, not about what kind of database is at the other end.
 
 **Why separate databases?**
 
 - **ai_memory** survives game database wipes. If we reset the game world during development, NPCs keep their memories. This is intentional — NPC personalities and relationships persist across resets.
-- **xrpl** isolates blockchain state from game state. The XRPL database is the game's mirror of on-chain reality. Keeping it separate makes reconciliation, backup, and debugging cleaner.
+- **xrpl** is the record of who owns what. On chain, an imported asset sits in the game's wallet; which character holds it inside the game exists only here. That makes this database the single source of truth for in-game ownership, and the one that must survive a world rebuild. See [Transactions and Split Aliases](#transactions-and-split-aliases) for what follows from that.
+- **archive** cannot share `default`'s database — it is a clone of Evennia's schema, so the table names collide. `DATABASE_URL_ARCHIVE` is therefore not optional on a deployed box.
 - **subscriptions** isolates payment records from game state. Subscription payments are financial records that must never be lost in a game database reset. The `tx_hash` unique constraint provides replay protection for on-chain payment verification.
 - **default** is Evennia's standard database. It holds everything the framework expects — accounts, objects, scripts, channels, configuration.
 
@@ -71,9 +78,9 @@ Each alias resolves its own connection, in this order:
 
 Which gives three deployment shapes:
 
-- **Your laptop:** nothing set. Four SQLite files, no setup required.
-- **Deployed, shared:** `DATABASE_URL` only. All four aliases are one PostgreSQL database. This is the current arrangement.
-- **Deployed, split:** `DATABASE_URL` plus one or more `DATABASE_URL_<ALIAS>` overrides. The named aliases move to their own instances; the rest stay with `default`.
+- **Your laptop:** nothing set. Five SQLite files, no setup required.
+- **Deployed, shared:** `DATABASE_URL` only. Every alias is one PostgreSQL database — except `archive`, which cannot share it.
+- **Deployed, split:** `DATABASE_URL` plus one or more `DATABASE_URL_<ALIAS>` overrides. The named aliases move to their own instances; the rest stay with `default`. Staging runs this way, with all four overrides set.
 
 `default` takes bare `DATABASE_URL` and has no `_DEFAULT` override — that variable is the contract every deploy already sets.
 
@@ -95,13 +102,92 @@ A router is active for exactly those aliases that resolve to a physically differ
 
 | Deployment | Aliases differing from `default` | Routers active |
 |---|---|---|
-| Local SQLite | all three | all three |
+| Local SQLite | all four | all four |
 | One shared PostgreSQL | none | none |
 | `ai_memory` split off | `ai_memory` | `ai_memory` only |
 
 **Why it has to work this way.** Locally each alias is a separate file (`evennia.db3`, `xrpl.db3`, `ai_memory.db3`, `subscriptions.db3`) and the routers direct each app's models to the right one; without them every table would land in `evennia.db3`. On a shared instance every alias *is* the same database, and a router there is actively harmful — its `allow_migrate()` would refuse to create the non-default tables while Django still recorded those migrations as applied, leaving a database that looks migrated and has none of the tables.
 
 **The corollary:** an alias with an active router is not reached by a bare `migrate` and needs `migrate --database <alias>`.
+
+---
+
+## Transactions and Split Aliases
+
+**A transaction covers one connection, not one process.** `transaction.atomic()` with no argument opens a transaction on `default`. When an alias is split, its router sends that app's queries out on a different connection — one the transaction does not cover. Writes there are not rolled back with it, and `select_for_update()` raises `TransactionManagementError`, because it would be issued in autocommit where the row lock would be released immediately.
+
+So the transaction and the queries have to be on the same connection. **Derive the alias from the router** — ask it the same question the ORM asks itself:
+
+```python
+with transaction.atomic(using=router.db_for_write(FungibleGameState)):
+    FungibleGameState.objects.select_for_update().get(...)
+```
+
+The querysets inside need nothing added: the router is already sending them to that alias, which is the point of deriving rather than naming. `db_for_write()` returns `None` when no router claims the model — the shared configuration — and `atomic(using=None)` means `default`, so the one line is right in every deployment shape.
+
+Naming the literal works too, but only if *every* queryset in the block is pinned with `.using()` as well. `chain_sync.py` and `reallocation.py` do exactly that. Miss one and it goes to `default`: harmless where the alias is split, and a `TransactionManagementError` where it is not. Deriving has nothing to keep in sync, so nothing to forget.
+
+A model with two homes is the exception. Evennia's own models live in both `default` and `archive`, so the router answers `default` and the archive code names its alias explicitly — `evennia_archive` pins every queryset with `.using(ARCHIVE_ALIAS)`.
+
+### Work that spans two databases
+
+No transaction can span two databases. PostgreSQL binds a connection to one database, and Django has no two-phase commit. Cross-boundary work uses nested blocks on the two connections:
+
+```python
+with transaction.atomic():                    # default
+    ...game-side writes...
+    with transaction.atomic(using="xrpl"):    # separate connection, separate transaction
+        ...ownership writes...
+```
+
+Two rules make that safe:
+
+- **The inner block goes last.** No writes on `default` after it — once it commits, nothing can undo it. Reads are fine.
+- **The inner block is the ownership write.** The game-side object is derivable from the xrpl row; the reverse is not.
+
+Which gives:
+
+| Failure | `default` | `xrpl` |
+|---|---|---|
+| Inner block raises | rolled back | rolled back |
+| Outer fails after the inner commits | rolled back | durable |
+| Process dies between the two commits | rolled back | durable |
+
+Rows two and three are the residual this design accepts: ownership recorded, the game world not yet updated. It is repairable, because the world can be re-derived from the xrpl row.
+
+### Rolling back does not roll back Evennia's caches
+
+A rollback restores the rows and nothing else. Evennia's `AttributeHandler` still holds the `Attribute` instances it wrote, so the object keeps reporting a balance the database no longer has, and nothing raises to say so. `reset_cache()` does not help — the re-fetch goes through the idmapper and gets the same instances back.
+
+So every failure path following a transaction over Evennia state calls `discard_cached_attributes()` (`utils/attribute_cache.py`), which evicts the attributes from the idmapper first. Without it a failed transfer leaves the player looking at gold they do not have until the object is evicted or the server restarts.
+
+### What the ledger changes
+
+The XRPL ledger sits outside every transaction — no rollback reaches it. Two consequences shape the code:
+
+- **A transaction cannot be held open across a swap.** The on-chain call runs first, outside the block, and only the recording goes inside it. `AMMService` splits into a swap half and a recording half for exactly this, so the mixin, the shopkeeper and the stew command can each place the seam correctly. Where the work is already split across a `deferToThread` boundary, the swap belongs to the worker thread and the transaction to the reactor callback.
+- **A failure after the chain has moved needs a person, not a retry.** For deposits and withdrawals the chain has moved a player's own assets, so the four methods in `FungibleInventoryMixin` carry a TODO for a failure record — a row in the xrpl database listing what needs manual reconciliation. **[TBD — needs discussion: that model and the command that lists it are agreed but not built.]**
+
+An AMM swap that happens without its recording is deliberately left alone. It moves assets the game already owns between its own vault and its own pool, so the only effect is a nudge to the next price. Nobody would unwind it by hand, and the player's balances are untouched on both sides — which is the pair that has to stay consistent.
+
+### NFT moves
+
+An NFT's ownership write already runs in the right place. Evennia calls `at_post_move()` as the last step of `move_to()`, and nothing writes after it returns, so `NFTMirrorMixin.move_to()` only has to wrap the call.
+
+The rollback keys off the return value rather than an exception: `move_to()` never raises, because every step inside it is wrapped in Evennia's own `try/except`, which logs and returns `False`. A `False` return marks the transaction for rollback, which leaves the caller contract intact — a move that does not happen returns `False` rather than exploding. `False` also covers the ordinary refusals, where nothing was written and the rollback costs nothing.
+
+`at_object_delete()` is not covered by this: deletion does not go through `move_to()`, so a failed despawn is still logged rather than raised. **[TBD — needs discussion: whether a failed mirror write should be able to veto a delete, and what unwinds a half-done one.]**
+
+### Proof of concept
+
+Run 2026-08-24 on staging via `evennia shell`, against PostgreSQL with `xrpl` split:
+
+| Check | Result |
+|---|---|
+| Bare `atomic()` + a routed queryset | raised, reproducing the production error |
+| `atomic(using=X)` + `.using(X)` | `select_for_update` accepted |
+| Inner block raises | both sides rolled back |
+| Outer raises after the inner commits | `default` rolled back, `xrpl` durable |
 
 ---
 
@@ -117,6 +203,7 @@ evennia migrate
 evennia migrate --database xrpl
 evennia migrate --database ai_memory
 evennia migrate --database subscriptions
+evennia migrate --database archive
 evennia start
 ```
 
@@ -176,7 +263,7 @@ A migration is a Python file that describes a change to the database schema — 
 6. deploy_migrate.py runs on the server, before evennia start
 ```
 
-**The rule is the same in both places:** an alias with an active router needs its own `migrate --database <alias>`; everything sharing `default`'s database is covered by the bare `migrate`. Only the *number* of split aliases differs — three locally, however many overrides are set on a server.
+**The rule is the same in both places:** an alias with an active router needs its own `migrate --database <alias>`; everything sharing `default`'s database is covered by the bare `migrate`. Only the *number* of split aliases differs — four locally, however many overrides are set on a server.
 
 ### deploy_migrate.py
 
@@ -318,4 +405,5 @@ The database architecture is designed around one principle: **the environment de
 - Routers follow from the resolved connections rather than being declared
 - Django handles schema differences, migrations, and SQL dialect translation
 - Same migration files run on both backends
-- Four logical databases, on one PostgreSQL instance or several, decided per deployment
+- Five logical databases, on one PostgreSQL instance or several, decided per deployment
+- A transaction covers one connection — see [Transactions and Split Aliases](#transactions-and-split-aliases)
