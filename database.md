@@ -14,7 +14,8 @@
   - [Work that spans two databases](#work-that-spans-two-databases)
   - [Rolling back does not roll back Evennia's caches](#rolling-back-does-not-roll-back-evennias-caches)
   - [What the ledger changes](#what-the-ledger-changes)
-  - [NFT moves](#nft-moves)
+  - [NFT moves and deletions](#nft-moves-and-deletions)
+  - [Pets](#pets)
 - [What Developers Need to Know](#what-developers-need-to-know)
 - [How Database Migrations Work](#how-database-migrations-work)
 - [Common Scenarios](#common-scenarios)
@@ -166,17 +167,32 @@ So every failure path following a transaction over Evennia state calls `discard_
 The XRPL ledger sits outside every transaction — no rollback reaches it. Two consequences shape the code:
 
 - **A transaction cannot be held open across a swap.** The on-chain call runs first, outside the block, and only the recording goes inside it. `AMMService` splits into a swap half and a recording half for exactly this, so the mixin, the shopkeeper and the stew command can each place the seam correctly. Where the work is already split across a `deferToThread` boundary, the swap belongs to the worker thread and the transaction to the reactor callback.
-- **A failure after the chain has moved needs a person, not a retry.** For deposits and withdrawals the chain has moved a player's own assets, so the four methods in `FungibleInventoryMixin` carry a TODO for a failure record — a row in the xrpl database listing what needs manual reconciliation. **[TBD — needs discussion: that model and the command that lists it are agreed but not built.]**
+- **A failure after the chain has moved needs a person, not a retry.** For deposits and withdrawals the chain has moved a player's own assets, so a failure there writes a `ReconciliationFailure` row — the exceptions list, read with the superuser `failures` command and closed out with `failures done <id> = <note>`. Only failures someone could act on are recorded; see `blockchain/xrpl/services/reconciliation.py`.
 
 An AMM swap that happens without its recording is deliberately left alone. It moves assets the game already owns between its own vault and its own pool, so the only effect is a nudge to the next price. Nobody would unwind it by hand, and the player's balances are untouched on both sides — which is the pair that has to stay consistent.
 
-### NFT moves
+### NFT moves and deletions
 
-An NFT's ownership write already runs in the right place. Evennia calls `at_post_move()` as the last step of `move_to()`, and nothing writes after it returns, so `NFTMirrorMixin.move_to()` only has to wrap the call.
+A move's ownership write already runs in the right place. Evennia calls `at_post_move()` as the last step of `move_to()`, and nothing writes after it returns, so `NFTMirrorMixin.move_to()` only has to wrap the call.
 
 The rollback keys off the return value rather than an exception: `move_to()` never raises, because every step inside it is wrapped in Evennia's own `try/except`, which logs and returns `False`. A `False` return marks the transaction for rollback, which leaves the caller contract intact — a move that does not happen returns `False` rather than exploding. `False` also covers the ordinary refusals, where nothing was written and the rollback costs nothing.
 
-`at_object_delete()` is not covered by this: deletion does not go through `move_to()`, so a failed despawn is still logged rather than raised. **[TBD — needs discussion: whether a failed mirror write should be able to veto a delete, and what unwinds a half-done one.]**
+Deletion needed an override for the opposite reason. Evennia calls `at_object_delete()` *first*, so the ownership write cannot live there — it has to happen once the object is destroyed, which is only reachable from `delete()`. That override holds the destruction and the write in one transaction, the write last. `at_object_delete()` keeps only what belongs before the deletion: an item's container cleanup.
+
+Two seams make that work for both branches of the mixin:
+
+- `_resolve_delete_disposition()` — where ownership is read from. An item uses its location chain; a pet is always standing in a room, so the chain would call every pet unowned and it answers from `owner_key` instead.
+- `_mirror_on_delete()` — the write itself. Everything it needs is passed in, because the object no longer exists by the time it runs. `token_id` is an `AttributeProperty`: reading one off a deleted object raises, and then tries to write a default back to rows that are gone.
+
+A rolled-back deletion restores the rows but not the Python instance — Django clears its pk and the idmapper has already evicted it. The failure path re-fetches by the pk captured beforehand and rebuilds the location's `contents_cache`, which is in-memory and untouched by the rollback. Whoever called `delete()` still holds the discarded instance and should not keep using it.
+
+### Pets
+
+A pet is an actor standing in a room, not an object in a character's inventory, which changes two things.
+
+Ownership comes from `owner_key`, not from where the pet is — hence the `_resolve_delete_disposition()` override, and `_resolve_owner()` being disabled outright for pets.
+
+And a pet changes hands without moving: `transfer_ownership()` updates `owner_key` and re-points who it follows, all in the same room. No move hook fires, so that method is the only record of the change and carries its own transaction. It returns `True` or `False` rather than raising, so a command can report the outcome. What the pet does next — following its new owner or waiting for them — is settled afterwards by reading `owner_key` back rather than assuming the write worked: a rolled-back transfer restores the pet to the state it was already in, so a pet told to wait beside its owner does not come back following them.
 
 ### Proof of concept
 
