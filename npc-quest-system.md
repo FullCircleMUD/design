@@ -137,7 +137,7 @@ Dispensing runs synchronously on the reactor rather than in a worker thread, unl
 
 The CI guard matches the dotted module path `typeclasses.actors.npcs.test_dispenser` rather than the class names, so it keeps working as dispensers are added — which makes the module path load-bearing. **Renaming or moving the module silently disables that guard.**
 
-One operational note: each NFT dispense consumes a blank token from a finite reserve pool. A token returns to the pool — location back to `RESERVE`, item type cleared — when its Evennia object is deleted, via whichever branch of `NFTMirrorMixin.at_object_delete` matches where the item was: `NFTService.craft_input` for an item held by a character, `NFTService.despawn` for one lying in a room. Bulk dispensing without deleting what you dispensed will exhaust the pool, and `assign_to_blank_token` then raises rather than silently failing.
+One operational note: each NFT dispense consumes a blank token from a finite reserve pool. A token returns to the pool — location back to `RESERVE`, item type cleared — when its Evennia object is deleted, via whichever branch of `NFTMirrorMixin.delete()` matches where the item was: `NFTService.craft_input` for an item held by a character, `NFTService.despawn` for one lying in a room. Bulk dispensing without deleting what you dispensed will exhaust the pool, and `assign_to_blank_token` then raises rather than silently failing.
 
 **Moderator commands:**
 - `amm_check` / `amm_check <resource>` — query AMM pool states (reserves, fees). Read-only, no trades

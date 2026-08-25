@@ -136,11 +136,15 @@ No Xaman flow on the export side for fungibles — the trust line *is* the playe
 
 1. Gate stack passes
 2. Look up the NFT by token ID in the bank's contents — must be present and owned via the bank
-3. Y/N confirmation
-4. Vault server-signs an NFT sell offer (vault → player, price 0)
-5. Game returns the offer ID and a Xaman accept-offer deeplink to the player
-6. Player signs the accept in Xaman; game polls until resolved
-7. On accepted: the NFT object is deleted from the bank, the `at_object_delete` hook fires the `ACCOUNT → ONCHAIN` mirror transition with the accept tx hash stashed on `obj.ndb.pending_tx_hash`
+3. **Frozen check** — an item whose token already left the game is refused (see below)
+4. **Container check** — a container must be empty. On chain the NFT is the container itself, so nothing inside it can travel with it; exporting a full one would destroy the contents. The player is shown what is in it and told to empty it first
+5. Y/N confirmation
+6. Vault server-signs an NFT sell offer (vault → player, price 0)
+7. Game returns the offer ID and a Xaman accept-offer deeplink to the player
+8. Player signs the accept in Xaman; game polls until resolved
+9. On accepted: `nft_item.delete(tx_hash=accept_tx_hash)` — the deletion makes the `ACCOUNT → ONCHAIN` write itself, so the record changing and the game copy going away are one transaction
+
+**Why the deletion owns the write.** `NFTMirrorMixin.delete()` calls `NFTService.withdraw_to_chain()` for an item in a bank, because a banked object being destroyed means an export and nothing else — see [database.md](database.md) § NFT moves and deletions. Passing the hash is what marks the deletion as an export rather than a destruction; only this command knows one. Doing it here rather than calling the service separately is what makes the two halves atomic.
 
 ### Failure modes
 
@@ -148,19 +152,31 @@ No Xaman flow on the export side for fungibles — the trust line *is* the playe
 - **Insufficient bank balance** — "Your bank only has X gold." / "Your bank only has X <unit> of <name>."
 - **Tx broadcast failure** — surfaces the error message and the partial tx hash if any (admin follow-up)
 - **Player rejects the NFT accept** — "NFT accept was rejected." (NFT stays with the vault since the offer was vault-signed; vault later cleans up the offer)
+- **Player never signs** — the sell offer is left on the ledger unaccepted. Nothing cancels or records it. **[TBD — needs discussion: cancelling or recording a dangling sell offer.]**
+
+### When the token leaves but the game copy will not
+
+The transfer cannot be undone — by the time the game removes its copy, the token is already in the player's wallet. So that removal is retried three times, two seconds apart, before anything is escalated. The deletion is all-or-nothing, so a failed attempt leaves everything as it was.
+
+If it still fails, two things happen:
+
+- The item is marked `export_incomplete`. `at_pre_move()` then refuses to move it, so it cannot be withdrawn from the bank and used, sold or given away while the player also owns it on chain. `export` refuses a second attempt too — the vault no longer holds the token, so another sell offer could not succeed.
+- A `ReconciliationFailure` row is written, which is the only trace that the disagreement exists. Every check inside the game still agrees with itself; only the ledger disagrees, and nothing routinely reads back from it.
+
+There is nothing to repair. The correct end state is that the game object does not exist, so an admin deletes it, which clears the flag with it.
 
 ---
 
 ## Mirror State Transitions
 
-Every successful import/export call triggers a mirror state transition through Evennia's `at_post_move` / `at_object_delete` hooks. The chain-boundary transitions are a subset of the full state machine documented in [inventory-equipment.md](inventory-equipment.md) § NFT Ownership Model.
+Every successful import/export call triggers a mirror state transition through `NFTMirrorMixin`'s `move_to()` and `delete()` overrides, each of which holds the game-side change and the ownership write in one transaction. The chain-boundary transitions are a subset of the full state machine documented in [inventory-equipment.md](inventory-equipment.md) § NFT Ownership Model.
 
 | Action | Source | Destination | Service call | Mirror flow |
 |---|---|---|---|---|
 | `import gold/resource` | wallet | bank | `bank.deposit_gold_from_chain` / `deposit_resource_from_chain` | n/a (fungible — handled by GoldService / FungibleService) |
 | `import nft` | wallet | bank | `BaseNFTItem.spawn_into(token_id, bank, tx_hash=...)` | `ONCHAIN → ACCOUNT` |
 | `export gold/resource` | bank | wallet | `bank.withdraw_gold_to_chain` / `withdraw_resource_to_chain` | n/a (fungible) |
-| `export nft` | bank | wallet | `obj.delete()` (with `obj.ndb.pending_tx_hash` stashed) | `ACCOUNT → ONCHAIN` |
+| `export nft` | bank | wallet | `obj.delete(tx_hash=...)` | `ACCOUNT → ONCHAIN` |
 
 For NFTs the in-game object's lifecycle and the on-chain ownership are kept in lockstep by the hook dispatch — there is no separate "blockchain sync" step that the import/export commands have to call manually.
 
@@ -239,7 +255,7 @@ The compliance positions belong in `ops/COMPLIANCE_LEGAL.md`. The runtime gate s
 | `blockchain/xrpl/xrpl_tx.py` | `verify_fungible_payment`, `get_wallet_balances`, `get_wallet_nfts`, `accept_nft_sell_offer`, `_extract_offer_id`, `_check_trust_line`, server-signed payment helpers |
 | `blockchain/xrpl/xaman.py` | `create_payment_payload`, `create_nft_sell_offer_payload`, `get_payload_status` — Xaman API client |
 | `blockchain/xrpl/memo.py` | Memo builders (`MEMO_IMPORT`, `MEMO_EXPORT`, `MEMO_NFT_IMPORT`, `MEMO_NFT_EXPORT`) — provenance trail on every chain transaction |
-| `typeclasses/items/base_nft_item.py` | `BaseNFTItem.spawn_into()`, `at_post_move`, `at_object_delete` — drives the mirror state transitions on import/export of NFTs |
+| `typeclasses/items/base_nft_item.py` | `BaseNFTItem.spawn_into()`, and `move_to()` / `delete()` via `NFTMirrorMixin` — drives the mirror state transitions on import/export of NFTs |
 | `typeclasses/mixins/fungible_inventory.py` | `deposit_gold_from_chain`, `withdraw_gold_to_chain`, `deposit_resource_from_chain`, `withdraw_resource_to_chain` — bank-side fungible service entry points |
 
 ---

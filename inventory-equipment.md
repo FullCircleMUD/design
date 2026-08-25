@@ -372,7 +372,7 @@ Transitions are dispatched automatically by `BaseNFTItem.at_post_move()` based o
 
 **tx_hash for import:** Pass via `move_to(bank, tx_hash="0x...")` — Evennia forwards kwargs to `at_post_move`.
 
-### at_object_delete Dispatch (by current location)
+### delete() Dispatch (by location at the time of deletion)
 
 | Location | Service call | Flow |
 |---|---|---|
@@ -380,7 +380,11 @@ Transitions are dispatched automatically by `BaseNFTItem.at_post_move()` based o
 | `CHARACTER` | `NFTService.craft_input()` | CHARACTER → RESERVE |
 | `ACCOUNT` (bank) | `NFTService.withdraw_to_chain()` | ACCOUNT → ONCHAIN |
 
-**tx_hash for export:** Stash on `obj.ndb.pending_tx_hash` before calling `obj.delete()` — ndb is still alive when the hook fires.
+The write lives in `NFTMirrorMixin.delete()`, not in `at_object_delete()`. Evennia calls that hook *before* anything is destroyed, and the ownership write has to happen after — so the override is the only place it can go, and it holds the destruction and the write in one transaction. See [database.md](database.md) § NFT moves and deletions.
+
+**The bank row means export, not "destroyed while banked".** Nothing in the game destroys a banked item; a player withdraws it to use it, and the only other way it leaves is an export.
+
+**tx_hash for export:** `obj.delete(tx_hash="0x...")`. Only the command that performed the on-chain transfer knows one, and passing it is what marks the deletion as an export. It is also the replay guard, so a missing hash fails the write rather than recording a phantom export.
 
 ### Factory Methods (spawn/despawn lifecycle)
 
@@ -389,7 +393,7 @@ Transitions are dispatched automatically by `BaseNFTItem.at_post_move()` based o
 2. `BaseNFTItem.spawn_into(token_id, location, chain_id, contract_address)` — creates Evennia object from NFTMirror data using `spawn()` for prototype application, applies metadata as attributes, calls `move_to(location)` to trigger hooks.
 
 **Despawning** (game object → reserve):
-- `obj.delete()` triggers `at_object_delete` → service dispatch → `NFTService._reset_token_identity(nft)` wipes `item_type=None`, `metadata={}` on all RESERVE return paths (despawn, craft_input, account_to_reserve).
+- `obj.delete()` → service dispatch → `NFTService._reset_token_identity(nft)` wipes `item_type=None`, `metadata={}` on all RESERVE return paths (despawn, craft_input, account_to_reserve).
 
 ### Mob Item Spawning (non-NFT path)
 
@@ -441,7 +445,8 @@ The NFT mirror state machine (ownership transitions, service call dispatch) is e
 The mixin provides:
 - `token_id`, `chain_id`, `contract_address` — NFT identity attributes
 - `at_post_move()` override — dispatches mirror transitions (spawn, pickup, drop, transfer, bank, unbank)
-- `at_object_delete()` override — dispatches destruction transitions (despawn, craft_input, withdraw)
+- `delete()` override — dispatches destruction transitions (despawn, craft_input, withdraw) and holds them in one transaction with the destruction
+- `at_object_delete()` override — container cleanup only
 - `_resolve_owner()`, `_classify()`, `_is_same_owner()` — location classification helpers
 - `_handle_creation()`, `_execute_transition()` — transition dispatch
 - `_cascade_container_transition()` — container content cascade
@@ -460,7 +465,7 @@ NFTMirrorMixin (typeclasses/mixins/nft_mirror.py)
 
 Inherits from `NFTMirrorMixin` but overrides the core dispatch logic because pets live in rooms (not `character.contents`). NFTMirrorMixin resolves ownership by classifying LOCATIONS — a room is always WORLD. Pets need ownership resolved via `owner_key` attribute on the pet itself.
 
-Overrides: `at_post_move()`, `at_object_delete()`, `_handle_creation()`, `_execute_transition()`, `_resolve_owner()` (raised NotImplementedError), `_is_same_owner()` (raised NotImplementedError). No-ops cascade methods.
+Overrides: `at_post_move()`, `_resolve_delete_disposition()`, `_mirror_on_delete()`, `_handle_creation()`, `_execute_transition()`, `_resolve_owner()` (raises NotImplementedError), `_is_same_owner()` (raises NotImplementedError). No-ops cascade methods. Ownership comes from `owner_key`, not the location chain — a pet standing in a room is still owned.
 
 Adds: `owner_key`, `transfer_ownership()`, `spawn_pet()`, `_get_owner_character()`, `_get_owner_wallet()`, `_classify_location()`, `at_pre_move` guard (blocks character.contents), `at_pre_get` guard.
 
