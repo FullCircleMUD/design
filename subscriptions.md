@@ -78,7 +78,7 @@ Prices are stored in the database, not settings. Adjustable via Django admin or 
 
 ### SubscriptionPayment
 
-Every payment transaction, for audit and replay protection.
+Every payment transaction, for audit and replay protection. Also the durable record of a granted trial — see [One trial per wallet](#one-trial-per-wallet).
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -99,7 +99,7 @@ Indexes on `account_id`, `wallet_address`, and `created_at`.
 
 ## Subscription Lifecycle
 
-1. **Account creation** → `grant_trial()` sets expiry to now + 48 hours (configurable)
+1. **Account creation** → `grant_trial()` sets expiry to now + 48 hours (configurable) and records a zero-amount trial row against the wallet
 2. **Active subscription** → player can use all commands normally
 3. **Warning zone** (< 48h remaining) → OOC menu shows red warning with countdown
 4. **Expiry** → immediate lockout of gated commands. No grace period.
@@ -134,7 +134,9 @@ The `subscribe` command follows the same Xaman payment pattern as `import`:
 Two helpers in `subscriptions/utils.py` drive every subscription check in the codebase:
 
 - **`is_subscribed(account)`** — True while the account's `subscription_expires_date` is in the future (also True if the subscription system is disabled, or the account is exempt).
-- **`has_paid(account)`** — True if the account has *ever* recorded a `SubscriptionPayment` row. Free-trial-only accounts return False. Exempt accounts return True.
+- **`has_paid(account)`** — True if the wallet has ever recorded a *paid* `SubscriptionPayment` row. Trial rows are written to the same table and are excluded by `plan_key`. Exempt accounts return True.
+
+`has_paid` keys on `wallet_address`, not `account_id`. A world rebuild re-issues every primary key, so an account-id lookup would report a player who has paid for a year as never having paid, and silently close export to them. See [account-recovery.md](account-recovery.md).
 
 ### Character entry gates (`is_subscribed`):
 
@@ -175,15 +177,26 @@ Built by `Account._build_subscription_line()` using `get_subscription_status()`.
 
 ## Trial Period
 
-New accounts receive a free trial on creation (in `at_account_creation()`, after bank creation). The trial sets `subscription_expires_date` to `now + SUBSCRIPTION_TRIAL_HOURS`.
+New accounts receive a free trial, granted from the tail of `Account.create()`. The trial sets `subscription_expires_date` to `now + SUBSCRIPTION_TRIAL_HOURS`.
 
 - Default: 48 hours
 - Configurable via `SUBSCRIPTION_TRIAL_HOURS` in settings
 - Set to 0 to disable trials entirely
-- No-op if account already has an expiry set
+- No-op if the account already has an expiry set
 - No message at creation time (no session yet) — the OOC menu shows status on first look
 
-Exempt accounts don't receive trials (they're exempt from subscription checks entirely).
+Exempt accounts don't receive trials (they're exempt from subscription checks entirely). The superuser guard sits at the call site: `grant_trial` does not check exemption itself.
+
+### One trial per wallet
+
+A trial is recorded as a zero-amount `SubscriptionPayment` row with `plan_key="trial"` and a synthetic `tx_hash` of `trial:<wallet>`. Because `tx_hash` is unique, a second trial for the same wallet is impossible at the database level, not merely refused by a check.
+
+Two things follow:
+
+- **The trial survives a world rebuild.** `subscription_expires_date` on the account is destroyed with the account; the payment row is not. Recovery can read the later of the two.
+- **Trials cannot be farmed.** Deleting an account and signing in again with the same wallet gets no second trial.
+
+This is why `grant_trial` runs from `create()` rather than `at_account_creation` — `wallet_address` is assigned *after* `create_account()` returns, so inside the hook there is no wallet to key on.
 
 ---
 
@@ -223,7 +236,7 @@ Currency code and issuer are environment-variable driven.
 | File | Change |
 |------|--------|
 | `server/conf/settings.py` | INSTALLED_APPS, DATABASES, DATABASE_ROUTERS, subscription settings |
-| `typeclasses/accounts/accounts.py` | `ooc_appearance_template` + `_build_subscription_line()` + `at_look()` subscription display + `at_account_creation()` trial grant |
+| `typeclasses/accounts/accounts.py` | `ooc_appearance_template` + `_build_subscription_line()` + `at_look()` subscription display + the trial grant at the tail of `create()` |
 | `commands/account_cmds/cmdset_account_custom.py` | Register CmdSubscribe |
 | `commands/account_cmds/cmd_override_ic.py` | Subscription gate (`is_subscribed`) |
 | `commands/account_cmds/cmd_override_charcreate.py` | Subscription gate (`is_subscribed`) |
@@ -241,6 +254,6 @@ evennia test --settings settings tests.command_tests.test_subscription_gating
 evennia test --settings settings tests.command_tests.test_cmd_subscribe
 ```
 
-- **test_subscription_utils** — `is_subscribed`, `get_subscription_status`, `extend_subscription`, `grant_trial`, `has_paid`, feature flag disabled behaviour
+- **test_subscription_utils** — `is_subscribed`, `get_subscription_status`, `extend_subscription`, `grant_trial`, `has_had_trial`, `has_paid`, the trial payment row, one-trial-per-wallet across accounts, feature flag disabled behaviour
 - **test_subscription_gating** — `ic`, `charcreate`, `chardelete` blocked when expired; allowed when subscribed or for exempt accounts; bypass when disabled. Also covers the `import` and `export` chain-boundary gates (asymmetric `is_subscribed` / `has_paid` model — see [import-export.md](import-export.md))
 - **test_cmd_subscribe** — early-return paths (no wallet, exempt, status display, disabled message)

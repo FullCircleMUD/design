@@ -55,10 +55,13 @@ Folder names must match the umbrella `.gitignore` entries exactly. All remotes a
 ### `src/`
 
 - `src/game` (public; **git-crypt'd** — see §4). Default branch `main`; active working branch is
-  `shards-rework`.
+  `archive-integration`.
 - `src/game-router/` and `src/game-shard1/` are **tracked by the umbrella** (Unix view gamedirs of
   symlinks back to `../game`) — they arrive with the umbrella clone, no separate clone needed. They
   are a Unix-only multi-shard dev convenience; Windows runs all roles directly from `src/game`.
+  Every database file is symlinked back, `archive.db3` included — a missing one is created as an
+  empty SQLite file with no tables, and the failure reads as "the archive is unreachable" rather
+  than "the symlink is absent".
 - `src/venv` is **not** tracked — recreate it from the game repo's `requirements.txt`.
 
 For the private repos, ensure the `FullCircleMUD` gh account is active first (§0).

@@ -239,6 +239,22 @@ evennia migrate --database archive
 evennia start
 ```
 
+**Migrate every alias before the first `evennia start`.** Evennia's `server.0002` is a data migration
+that reads `ServerConfig.objects.all()` without pinning the alias, so migrating `archive` reads the
+rows in `default` and tries to re-encode them. Before the first start those rows do not exist and the
+migration is a no-op; after it, it fails with `UnpicklingError: pickle data was truncated`.
+
+If you hit it on an already-running game, fake past it and continue:
+
+```bash
+evennia migrate server 0002_auto_20190128_2311 --database archive --fake
+evennia migrate --database archive
+```
+
+Safe because the archive's own `server_serverconfig` is empty, so the data migration has nothing to
+convert. The `AlterField` skipped alongside it is a no-op on SQLite; re-check before relying on this
+on PostgreSQL.
+
 SQLite database files appear in `server/`. They're in `.gitignore`. Each developer has their own local data.
 
 ### Running tests

@@ -78,6 +78,8 @@ The subscription gate is the only place where `import` and `export` diverge.
 
 **The `has_paid` gate alone is enough to close the free-trial recycling exploit.** A player who creates a brand-new account, plays the 48-hour trial, and tries to export their earnings is blocked because they have never recorded a payment. They can keep playing the game, but they cannot move tokens out. To unlock export they have to pay at least once. This is the minimum gate that closes "spam new accounts → play trial → export earnings → repeat" while still honouring the no-trap promise to anyone who's actually paid.
 
+The loop is now closed a second time, at the other end: a trial is recorded against the **wallet** as a zero-amount payment row with a unique `tx_hash`, so a wallet gets one trial ever. Spamming accounts no longer yields a second trial to play. See [subscriptions.md § One trial per wallet](subscriptions.md#one-trial-per-wallet).
+
 ---
 
 ## Import Pipeline

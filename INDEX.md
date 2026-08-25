@@ -25,6 +25,7 @@ as this wiki (an `INDEX.md` entry point, one kebab-case topic per file).
 |---|---|---|
 | [evennia-world-builder](../libraries/evennia-world-builder/docs/INDEX.md) | `docs/` | Declarative YAML world authoring for Evennia. |
 | [evennia-shards](../libraries/evennia-shards/docs/INDEX.md) | `docs/` | Split deployment & horizontal sharding for Evennia. |
+| [evennia-archive](../libraries/evennia-archive/docs/INDEX.md) | `docs/` | Archive accounts and characters so a world can be rebuilt without losing players. |
 | [evennia-mob-spawner](../libraries/evennia-mob-spawner/docs/INDEX.md) | `docs/` | Declarative YAML mob spawn system for Evennia. |
 | [evennia-targeting](../libraries/evennia-targeting/docs/INDEX.md) | `docs/` | Composable targeting predicates & content filters. |
 | [evennia-yaml-reader](../libraries/evennia-yaml-reader/docs/INDEX.md) | `docs/` | Source-agnostic YAML reader for the Evennia ecosystem. |
@@ -115,6 +116,7 @@ and the cross-cutting invariants) that no single doc holds.
 | Document | Summary |
 |---|---|
 | [database.md](database.md) | Django app layout, five-database architecture, transactions across aliases, model overview, migrations. |
+| [account-recovery.md](account-recovery.md) | Surviving a world rebuild — what is archived and when, wallet sign-in restoring an account and its characters, items and balances recovered from the XRPL mirror, name reservation, shard stamping. |
 | [website.md](website.md) | Web frontend pages, geo-detection infrastructure, page inventory, implementation status. |
 | [connection-transport.md](connection-transport.md) | Why FCM is WebSocket-only — Cloudflare, `cf-ipcountry`, telnet/SSH limitations, decision rationale. |
 | [scaling.md](scaling.md) | Scaling strategy for the initial era — capacity and growth approach. |
