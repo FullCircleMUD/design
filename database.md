@@ -15,6 +15,7 @@
   - [Rolling back does not roll back Evennia's caches](#rolling-back-does-not-roll-back-evennias-caches)
   - [What the ledger changes](#what-the-ledger-changes)
   - [NFT moves and deletions](#nft-moves-and-deletions)
+  - [Sweeps that run unattended](#sweeps-that-run-unattended)
   - [Pets](#pets)
 - [What Developers Need to Know](#what-developers-need-to-know)
 - [How Database Migrations Work](#how-database-migrations-work)
@@ -193,6 +194,21 @@ A pet is an actor standing in a room, not an object in a character's inventory, 
 Ownership comes from `owner_key`, not from where the pet is — hence the `_resolve_delete_disposition()` override, and `_resolve_owner()` being disabled outright for pets.
 
 And a pet changes hands without moving: `transfer_ownership()` updates `owner_key` and re-points who it follows, all in the same room. No move hook fires, so that method is the only record of the change and carries its own transaction. It returns `True` or `False` rather than raising, so a command can report the outcome. What the pet does next — following its new owner or waiting for them — is settled afterwards by reading `owner_key` back rather than assuming the write worked: a rolled-back transfer restores the pet to the state it was already in, so a pet told to wait beside its owner does not come back following them.
+
+### Sweeps that run unattended
+
+A command has a player waiting on it and can say what went wrong. Four paths destroy objects in batches with nobody watching, and each one has work queued behind the loop that matters more than any single item in it:
+
+| Sweep | What sits behind the loop |
+|---|---|
+| `Corpse.despawn()` | Returning the corpse's gold and resources, then deleting the corpse — whose despawn timer has already fired and is never rescheduled |
+| `RoomBase.at_object_delete()` | Deleting the room itself; a raise here leaves a stale duplicate behind on the next `wb_build` |
+| `DungeonInstanceScript.collapse_instance()` | Reaching `state = "done"`; short of that the script keeps ticking and every room, exit and mob in the instance leaks |
+| `TutorialInstanceScript.collapse_instance()` | Restoring the player's balances, granting the reward, returning them to the hub, releasing the instance |
+
+So each loop guards **per item**, not per sweep, and always completes. Whatever survives stays alive and still owned, and Evennia's own `clear_contents()` relocates it when its container goes.
+
+These log rather than record. An ownership write that fails has already written its own `ReconciliationFailure` row inside `NFTMirrorMixin.delete()`, so a second one at the sweep is a duplicate. A fungible return that fails leaves the amount parked at WORLD with the game and the mirror agreeing and no player out of pocket — noise on the exceptions list, not an entry for it. Same for a graduation reward that cannot be granted: the player is short a reward, not holding assets the ledger disagrees about.
 
 ### Proof of concept
 

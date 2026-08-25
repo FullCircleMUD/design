@@ -333,7 +333,7 @@ This is a core design decision: procedural areas are permanently dangerous. No s
 
 When a dungeon instance collapses, all fungibles (gold, resources) in dungeon rooms are returned to RESERVE via `return_gold_to_reserve()` and `return_resource_to_reserve()`. This prevents gold/resources from being lost when rooms are deleted.
 
-Player corpses created on defeat in a dungeon room are loot-bearing — they hold the defeated player's full inventory, gold, and resources. The dungeon instance stays alive until the corpse is recovered or its standard 10-minute despawn timer elapses (see [Death and Corpse Recovery](#death-and-corpse-recovery)). If the corpse despawns or the instance collapses while it still contains items, fungibles are returned to RESERVE alongside other dungeon fungibles. NFT items inside an unrecovered corpse follow the standard `Corpse.at_object_delete` cleanup — see [inventory-equipment.md](inventory-equipment.md) for the unrecovered-NFT path.
+Player corpses created on defeat in a dungeon room are loot-bearing — they hold the defeated player's full inventory, gold, and resources. The dungeon instance stays alive until the corpse is recovered or its standard 10-minute despawn timer elapses (see [Death and Corpse Recovery](#death-and-corpse-recovery)). If the corpse despawns or the instance collapses while it still contains items, fungibles are returned to RESERVE alongside other dungeon fungibles. NFT items inside an unrecovered corpse are deleted by `Corpse.despawn()`, which makes each item's ownership write through `NFTMirrorMixin.delete()` — see [inventory-equipment.md](inventory-equipment.md) for the unrecovered-NFT path.
 
 ## Combat Integration
 
