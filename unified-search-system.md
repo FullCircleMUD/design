@@ -69,7 +69,9 @@ Cataloging what `DefaultObject.search()` (in `evennia/objects/objects.py`) does 
 
 This override predates the targeting library. The library's helpers delegate to `caller.search()` and therefore inherit the FCMCharacter extension automatically.
 
-**Both kwargs filter the results, not the candidates**, and that ordering is a defect: a worn item can win the name match and then be filtered out, leaving nothing — so a carried item sharing that name becomes unreachable, and the caller is told to remove something it did not ask about. `p_not_worn` / `p_worn` express the same filter at candidate selection, which is where it belongs. `deposit` and the NFT shop's sell path use the predicates. `drop`, `give`, `wield` and the `items_inventory` / `items_equipped` building blocks still use the kwargs and still carry the defect.
+**Both kwargs filter the results, not the candidates**, and that ordering is a defect: a worn item can win the name match and then be filtered out, leaving nothing — so a carried item sharing that name becomes unreachable, and the caller is told to remove something it did not ask about. `only_worn` fails the same way mirrored, hiding a worn item behind a carried one.
+
+`p_not_worn` / `p_worn` express the same filter at candidate selection, which is where it belongs, and the `items_inventory` / `items_equipped` building blocks use them — so nothing routed through targeting touches these kwargs. `wield` is the exception: it calls `caller.search(exclude_worn=True)` directly and still carries the defect.
 
 ### Evennia helpers for predicate bodies
 
@@ -346,7 +348,7 @@ Building blocks are singular target types — each searches one scope with one p
 | Building block | Scope | Structural predicates | Notes |
 |---|---|---|---|
 | `items_inventory` | `caller.contents` | `p_not_worn` | Actors/exits/fixtures can't exist in inventory. **Returns the matched list, not one object** — see below. |
-| `items_equipped` | `caller.contents` | none | `only_worn=True` via search kwarg. Not yet migrated to `p_worn`. |
+| `items_equipped` | `caller.contents` | `p_worn` | The mirror of `items_inventory`. **Returns the matched list, not one object** — see below. |
 | `items_room_all` | `room.contents` | `p_not_actor` | Broadest room scope — includes exits, fixtures, loose items, containers, doors. |
 | `items_room_exits` | `room.exits` | none (Evennia's native exit filter) | Name-based exit lookup. Uses Evennia's `room.exits` filtered view. |
 | `items_room_exit_by_direction` | `room.exits` filtered by `direction` kwarg | direction match | Direction-based exit lookup. Requires `direction` kwarg from `parse_direction()`. |
@@ -355,10 +357,11 @@ Building blocks are singular target types — each searches one scope with one p
 | `items_room_fixed` | `room.contents` | `p_not_actor`, inverse of `p_passes_lock("get")` | Non-gettable objects including exits/doors. Inverse of `items_room_gettable`. |
 | `items_room_fixed_nonexit` | `room.contents` | `p_not_actor`, `p_not_exit`, inverse of `p_passes_lock("get")` | Non-gettable objects excluding exits. Fixtures only. |
 
-#### `items_inventory` returns a list
+#### The two inventory blocks return a list
 
-Every other target type returns a single object. This one returns the matched list, because collapsing
-to the first match inside the resolver destroys two things the command needs:
+`items_inventory` and `items_equipped` are mirrors of one another — same walk, same search, opposite
+worn predicate — and both return the matched list where every other target type returns a single
+object. Collapsing to the first match inside the resolver destroys two things the command needs:
 
 - **Ambiguity.** `drop pants` with leather pants beside corduroy pants silently drops whichever came
   first. The resolver cannot know that identical copies are an answer while two different items are a
@@ -366,8 +369,10 @@ to the first match inside the resolver destroys two things the command needs:
 - **The reason.** A shop that filters damaged goods out of the candidate set can only say "you don't
   have that". Keeping the list lets it evaluate each item and report *why* the sale was refused.
 
-Callers wanting one object write `matches[0] if matches else None`. `drop` and `give` pass the list
-straight to `make_iter` and act on every entry, which is how `stacked=N` reaches them.
+Callers wanting one object write `matches[0] if matches else None`. `drop` and `give` pass the
+`items_inventory` list straight to `make_iter` and act on every entry, which is how `stacked=N`
+reaches them; their `items_equipped` fallback, which exists only to word "remove it first", takes the
+first match like everyone else.
 
 `cmd_cast` and `cmd_zap` dispatch whatever `target_type` a spell declares, so they guard with
 `isinstance` — Create Water is the only spell that declares `items_inventory`.
@@ -726,7 +731,7 @@ Every command migration runs the command's existing test suite as the regression
 - **[spell-skill-design.md](spell-skill-design.md)** — all spell target types route through `resolve_target` with `actor_*` / `items_*` flags. `requires_sight`, `out_of_reach_message`, `too_close_message` attributes on spell base class.
 - **[combat-system.md](combat-system.md)** — `combat.combat_utils.get_sides()` rebuilt on `bucket_contents`. `cmd_attack` routes through `resolve_target`. Priority-bucketed resolvers used by combat commands and hostile spells.
 - **[exit-architecture.md](exit-architecture.md)** — exit commands (open, close, lock, unlock, picklock, disarm_trap) use `parse_direction()` + `items_room_exit_by_direction` for directional input, falling back to `items_room_all_then_inventory` (or `items_room_all_then_room` for disarm_trap).
-- **[inventory-equipment.md](inventory-equipment.md)** — `items_inventory` and `items_equipped` building blocks. `exclude_worn` / `only_worn` kwargs forwarded to `caller.search`.
+- **[inventory-equipment.md](inventory-equipment.md)** — `items_inventory` and `items_equipped` building blocks, gated by `p_not_worn` / `p_worn` at candidate selection.
 - **[vertical-movement.md](vertical-movement.md)** — height predicates (`p_same_height`, `p_different_height`, `p_same_height_value`) enforce vertical-position rules. Room barrier system (`visibility_up_barrier` / `visibility_down_barrier` on `RoomBase`) + object `size` attribute enforced via `p_height_visible_to`.
 
 ---
@@ -763,9 +768,13 @@ Corpses are NOT containers — they use `FungibleInventoryMixin` and their own `
 
 `resolve_item_in_source`, `resolve_container`, `resolve_character_in_room`, `_resolve_world_item`, `_resolve_all_room` still exist. Some are still used by `cmd_get`, `cmd_put`, `cmd_give`. Retirement pending as those commands complete their building-block migration.
 
-### `exclude_worn` as a predicate
+### `wield` still resolves its own items
 
-`exclude_worn=True` is currently a `caller.search()` kwarg, not a predicate. A future `p_not_worn` predicate could make the filter stack visible at call sites. Low priority — the existing mechanism works.
+`cmd_wield` calls `caller.search(location=caller, exclude_worn=True)` inline rather than routing through `items_inventory`, so it keeps the result-stage worn filter and Evennia's raw multimatch error. Two identical carried daggers make `wield dagger` unanswerable: both render under the same name, and no phrasing narrows it.
+
+### Composites still filter worn at the result stage
+
+`items_room_all_then_inventory`, `items_inventory_then_room_all` and `items_inventory_then_room_nonexit` have their own inventory step rather than calling `items_inventory`, and still pass `exclude_worn=True`. They carry the shadowing defect the building blocks no longer have.
 
 ### Broaden give to pets and mounts
 
