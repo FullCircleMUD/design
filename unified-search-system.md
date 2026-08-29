@@ -64,10 +64,12 @@ Cataloging what `DefaultObject.search()` (in `evennia/objects/objects.py`) does 
 
 [FCMCharacter.search](../src/game/typeclasses/actors/character.py#L495) extends Evennia's search with a **substring fallback** (matches anywhere in the key, not just prefix), and two custom kwargs:
 
-- `exclude_worn=True` — filters equipped items out of results. Used by drop/give/deposit.
+- `exclude_worn=True` — filters equipped items out of results. Used by drop/give/wield.
 - `only_worn=True` — restricts to equipped items. Used by remove.
 
-This override predates the targeting library and is still the right place for those behaviours — they are extensions to the STRING MATCHING layer, not the semantic filter layer. The library's helpers delegate to `caller.search()` and therefore inherit the FCMCharacter extension automatically.
+This override predates the targeting library. The library's helpers delegate to `caller.search()` and therefore inherit the FCMCharacter extension automatically.
+
+**Both kwargs filter the results, not the candidates**, and that ordering is a defect: a worn item can win the name match and then be filtered out, leaving nothing — so a carried item sharing that name becomes unreachable, and the caller is told to remove something it did not ask about. `p_not_worn` / `p_worn` express the same filter at candidate selection, which is where it belongs. `deposit` and the NFT shop's sell path use the predicates. `drop`, `give`, `wield` and the `items_inventory` / `items_equipped` building blocks still use the kwargs and still carry the defect.
 
 ### Evennia helpers for predicate bodies
 
@@ -132,6 +134,10 @@ Each predicate is a pure `(obj, caller) -> bool` function, 3–8 lines long, wit
 | `p_is_openable` | `hasattr(obj, "is_open")` — type check for `CloseableMixin`. Does NOT check current open/closed state. |
 | `p_is_open` | `getattr(obj, "is_open", False)` — state check, True if currently open. |
 | `p_is_open_exit` | Is this exit barred by its own door? Unlocked *and* open. Defaults to True where `p_is_open` defaults to False — an exit with no door bars nothing. Movement paths only; see Sight lines vs routes below. |
+| `p_not_worn` | True unless `caller.is_worn(obj)`. Worn gear stays in `caller.contents`, so commands acting on carried items must exclude it **at candidate selection**, before name matching — filtering afterwards lets a worn item win the match and leave an eligible spare unreachable. A caller with no wearslots (chest, corpse, mob) wears nothing, so everything it holds passes. |
+| `p_worn` | The inverse. Used by `remove`, and by the second pass of any command that must explain why the carried walk found nothing ("remove it first"). |
+| `p_at_full_durability` | `durability >= max_durability` (`DurabilityMixin`). `max_durability == 0` means unbreakable, so it passes trivially; `durability` is `None` until `at_durability_init` runs, which likewise means undamaged. An object with neither attribute passes. |
+| `p_not_gem_inset` | `not obj.is_inset` (`WeaponMechanicsMixin`). Anything that cannot be inset passes. |
 | `p_is_typeclass(*typeclasses)` | **Factory** — `isinstance(obj, typeclasses)`. The general form of the named type predicates, for checks the library has no name for. The caller supplies the classes, so targeting imports no typeclasses and stays a leaf package. Prefer a named predicate where one exists: `p_is_character` carries meaning `p_is_typeclass(FCMCharacter)` does not. |
 | `p_not_typeclass(*typeclasses)` | **Factory** — the inverse of `p_is_typeclass`. Its use is carving an exception out of a positive type check, which one positive predicate cannot express: `p_is_typeclass(FCMCharacter, CombatMob)` + `p_not_typeclass(Rabbit)` is "any actor but my own kind". |
 | `p_excluding(*excluded)` | **Factory** — rejects specific objects by **identity**, not equality, so a typeclass defining `__eq__` cannot smuggle one past. "Everything but these": the on-kill chain attack excludes the victim it just killed. Dropping the caller is not its job — helpers that must never return their own caller do that themselves. |
@@ -339,8 +345,8 @@ Building blocks are singular target types — each searches one scope with one p
 
 | Building block | Scope | Structural predicates | Notes |
 |---|---|---|---|
-| `items_inventory` | `caller.contents` | none | Actors/exits/fixtures can't exist in inventory. `exclude_worn=True` via search kwarg. |
-| `items_equipped` | `caller.contents` | none | `only_worn=True` via search kwarg. |
+| `items_inventory` | `caller.contents` | `p_not_worn` | Actors/exits/fixtures can't exist in inventory. **Returns the matched list, not one object** — see below. |
+| `items_equipped` | `caller.contents` | none | `only_worn=True` via search kwarg. Not yet migrated to `p_worn`. |
 | `items_room_all` | `room.contents` | `p_not_actor` | Broadest room scope — includes exits, fixtures, loose items, containers, doors. |
 | `items_room_exits` | `room.exits` | none (Evennia's native exit filter) | Name-based exit lookup. Uses Evennia's `room.exits` filtered view. |
 | `items_room_exit_by_direction` | `room.exits` filtered by `direction` kwarg | direction match | Direction-based exit lookup. Requires `direction` kwarg from `parse_direction()`. |
@@ -348,6 +354,23 @@ Building blocks are singular target types — each searches one scope with one p
 | `items_room_gettable` | `room.contents` | `p_not_actor`, `p_not_exit`, `p_passes_lock("get")` | Narrowest non-exit scope — only loose, takeable items. |
 | `items_room_fixed` | `room.contents` | `p_not_actor`, inverse of `p_passes_lock("get")` | Non-gettable objects including exits/doors. Inverse of `items_room_gettable`. |
 | `items_room_fixed_nonexit` | `room.contents` | `p_not_actor`, `p_not_exit`, inverse of `p_passes_lock("get")` | Non-gettable objects excluding exits. Fixtures only. |
+
+#### `items_inventory` returns a list
+
+Every other target type returns a single object. This one returns the matched list, because collapsing
+to the first match inside the resolver destroys two things the command needs:
+
+- **Ambiguity.** `drop pants` with leather pants beside corduroy pants silently drops whichever came
+  first. The resolver cannot know that identical copies are an answer while two different items are a
+  question — that judgement is the command's.
+- **The reason.** A shop that filters damaged goods out of the candidate set can only say "you don't
+  have that". Keeping the list lets it evaluate each item and report *why* the sale was refused.
+
+Callers wanting one object write `matches[0] if matches else None`. `drop` and `give` pass the list
+straight to `make_iter` and act on every entry, which is how `stacked=N` reaches them.
+
+`cmd_cast` and `cmd_zap` dispatch whatever `target_type` a spell declares, so they guard with
+`isinstance` — Create Water is the only spell that declares `items_inventory`.
 
 ### Actor building blocks
 
@@ -378,6 +401,21 @@ An important boundary the library intentionally does not cross:
 Bulk-action patterns like `get all`, `drop all`, and `loot all` are filter-and-act loops, not targeting. They happen to share predicates with the targeting library (a `get all` wants the same living/non-exit/visible/gettable filter as `get sword`), but their loop structure is different. Forcing them into the resolver pattern would add a second pass, blur the boundary, and fragment the library.
 
 For now, bulk-action commands keep their inline filter loops. Predicates from this library are available for reuse, but the loop structure stays with the command.
+
+### Evaluating one object at a time
+
+A third shape, used where the *reason* an object was rejected has to reach the player. A filter
+discards failures and can only say "nothing matched"; a shop must say "I don't buy damaged goods".
+
+So the command walks the matched list one object at a time, puts each through the predicates it
+cares about, and records the first failure. The first object to pass everything is the answer; the
+recorded reason is the message when none do. Same predicates, same `(obj, caller) -> bool` contract
+— evaluated per object rather than per list, keeping the failure instead of dropping it.
+
+Checks that are not predicates go in this same loop, ordered last so the cheap predicate failures
+short-circuit before them. The NFT shop's type resolution is the worked example: it leaves the
+object to query the mirror and consult the shop's stock list, which is why it is not a predicate,
+and it runs only on the one or two items that already matched by name.
 
 ## `resolve_target` — Universal Entry Point
 
