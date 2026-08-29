@@ -39,7 +39,7 @@ Both commands are OOC, account-level, and operate only on the player's `AccountB
 
 **Why fungibles export server-signed but NFTs need a player signature:** A trust-line on the player's wallet is sufficient permission for the vault to push fungible balances at them — no per-transfer signature required. NFTs use the standard XRPL sell-offer flow because there's no equivalent push mechanism: somebody has to actively accept the offer, and for export that has to be the player.
 
-All XRPL/Xaman calls run in worker threads (`twisted.internet.threads.deferToThread`) so the reactor stays responsive for other players during the 2-minute Xaman polling window.
+All XRPL/Xaman calls run in worker threads (`utils.db_threads.defer_to_db_thread`) so the reactor stays responsive for other players during the 2-minute Xaman polling window.
 
 ---
 
