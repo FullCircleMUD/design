@@ -157,21 +157,25 @@ Key points:
 
 ### Test-first
 
-Libraries are built test-first. The order is: **agree the cases, write the tests, write the
-implementation to pass them.**
+Libraries follow the project's test-first order — see
+[test-first-process.md](test-first-process.md) for the process and the rationale. What is
+library-specific is where the plan lives and what it carries.
 
 The cases live in `docs/test-plan.md` before any test is written. It carries:
 
 - **Stable case IDs**, prefixed by the function or surface they cover (`WC-01`, `PL-05`). Never
   renumber — retire an ID rather than reuse it.
 - **A `Test function` column**, filled in as each test lands. An empty cell means the case is agreed
-  but not yet covered; that column is the coverage trail an auditor reads.
+  but not yet covered; that column is the coverage trail an auditor reads, and it is checked **both
+  ways** — see [test-first-process.md](test-first-process.md) for the rules and what counts as a test.
 - **A fixtures table** — the fake objects the suite needs, named and purposed.
 - **`[TBD — needs discussion: …]` against the specific case** whose behaviour is unresolved, plus an
-  **Open decisions** section collecting them. A case with open behaviour is still listed; it just
-  isn't written yet.
+  **Open decisions** section collecting them. A case with open behaviour is still listed, but it does
+  not pass: an unresolved case is an error until the decision is made.
 
-The plan is a commitment, not a wishlist: a case in the table is a case the library will cover.
+The plan is a commitment, not a wishlist: a case in the table is a case the library will cover. The
+`library-standards-linter` checks it by delegating to the `test-plan-linter`, so a library's plan is
+held to the same rules as any other.
 
 [evennia-targeting's test plan](../libraries/evennia-targeting/docs/test-plan.md) is the reference
 shape.
@@ -244,7 +248,8 @@ Standard sections, in order:
 1. **What this project is** — one paragraph + tagline.
 2. **Project status** — link to `docs/progress.md` for current state. Don't duplicate status content
    here; it ages badly.
-3. **Where to read first** — numbered reading order.
+3. **Where to read first** — numbered reading order. `docs/test-plan.md` is always in it, high, marked
+   as where a behavioural change starts.
 4. **Load-bearing architectural principles** — numbered. Constraints every implementation decision must
    respect.
 5. **Out of scope** — concrete rulings *or* "decided as questions arise" depending on project maturity.
@@ -254,10 +259,12 @@ Standard sections, in order:
 8. **Repository layout** — current ASCII tree.
 9. **Tools and environment** — Python version, runtime deps, test framework.
 
-**Two principles every library's section 4 should include:**
+**Three principles every library's section 4 should include:**
 
 - *The library does not own game concepts.*
 - *No FCM-specific assumptions.*
+- *Test-first* — a case lands in `docs/test-plan.md`, then the test, then the code. Points at
+  [test-first-process.md](test-first-process.md).
 
 Other principles are library-specific.
 
