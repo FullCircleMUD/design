@@ -106,8 +106,13 @@ src/game/utils/targeting/
     __init__.py          — empty exports (no API surface at the package level)
     predicates.py        — (obj, caller) -> bool filters
     helpers.py           — walk_contents, bucket_contents, building blocks,
-                           composites, priority-bucketed actor resolvers,
+                           composites, resource_inventory, all_inventory,
+                           priority-bucketed actor resolvers,
                            resolve_target entry point
+
+src/game/utils/item_parse.py
+    split_quantity()     — splits "5 wheat" → (5, "wheat")
+                           Counts lead. Used before any inventory lookup
 
 src/game/utils/direction_parser.py
     parse_direction()    — splits "door south" → ("door", "south")
@@ -290,6 +295,68 @@ Combat hardened its own path: the repeating-attack retarget re-checks
 
 `[TBD — needs discussion: what corrupts the cache, and whether other resolvers/scopes
 should validate location the way combat now does. Observed in play; cause not established.]`
+
+### `resource_inventory` and `all_inventory`
+
+```python
+def resource_inventory(caller, name)         # a fungible the caller holds
+def all_inventory(caller, name, *predicates) # fungible first, items second
+```
+
+`items_inventory` resolves objects, and resources are not objects — they live in
+`caller.db.resources`, not `caller.contents`. So a command accepting either kind used to decide for
+itself which one a name meant, and every one of them decided it slightly differently.
+
+`resource_inventory` answers "is this name a fungible the caller actually holds?" The hold check is
+what makes the decision possible: **"leather" is the resource to someone carrying leather, and a
+leather cap to everyone else.** A string parser cannot make that call, because it never sees the
+character. The whole typed string must be the fungible name or a prefix of it — "leat" matches
+Leather, "leather cap" matches nothing, because a name that runs past the fungible is an item name
+that happens to start with a resource word.
+
+The hold check also settles ambiguity. "iron" fits both Iron Ore and Iron Ingot, but only counts as
+ambiguous when the caller holds both — someone with only ore has said enough. An exact name is never
+ambiguous, however much else starts the same way.
+
+`all_inventory` composes the two: fungible first, items second, never back again. A name that runs
+past a fungible does not fall back to it when the item search finds nothing — the extra words stated the
+intent, and quietly dropping leather when the player asked for a leather cap is worse than
+saying nothing was found.
+
+Returns `("gold", None)`, `("resource", info)`, `("ambiguous", [info, ...])`, `("items", [objects])`,
+or `(None, None)`. Both list-shaped answers are questions for the command to put to the player: which
+resource, or which item.
+
+Consumers: the commands that accept either kind — `drop`, `give`, `deposit`, `put`. Commands that can
+only mean an object (`wear`, `remove`, `hold`, `wield`) want `items_inventory` directly.
+
+### Splitting the count from the name
+
+```python
+def split_quantity(args)  # utils/item_parse.py
+```
+
+Before any of the above runs, a command with a countable argument has to work out how many were asked
+for. That question is identical whatever the command searches afterwards — `get all gold`,
+`drop 5 wheat` and `deposit all wheat` differ in scope, not in shape — so it lives in one general
+helper, outside targeting, and needs no character to test.
+
+**Counts lead.** `5 wheat`, never `wheat 5`. One order across every command, so a player who learns it
+once has learned it everywhere. A trailing number is part of the name, which also keeps an item called
+"key 3" reachable. Commands still using a trailing count are to be refactored to the leading form.
+
+| Typed | `quantity` | `subject` |
+|---|---|---|
+| `cap` | `None` | `"cap"` |
+| `5 wheat` / `5.wheat` | `5` | `"wheat"` |
+| `all wheat` / `all.wheat` | `ALL` | `"wheat"` |
+| `all` | `ALL` | `None` |
+| `gold 50` | `None` | `"gold 50"` |
+
+It judges nothing — not what stacks, not what the caller holds, not whether the command accepts a
+count. A count on something that cannot be counted is rejected downstream, where the answer is known.
+Only fungibles stack: every NFT carries its own `token_id`, so `2.cap` is not a request any command
+can honour.
 
 ### Direction parser
 
