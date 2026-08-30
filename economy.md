@@ -418,6 +418,15 @@ When a player kills a mob and finds a scroll, the scroll is there because the sp
 - **Basic, Skilled, some Expert items** → AMM economy (commodity market, high volume, liquid)
 - **Master and Grandmaster items** → Auction economy (player-driven, scarcity-based, prestigious)
 
+**Material tiers follow the same cutoff.** Shopkeepers sell **wood and bronze tier** goods only — enough
+to get a new player started. Iron, steel and adamantine gear is acquired through gameplay: mob drops or
+player crafting, never bought from an NPC. This is a **pay-to-win guard**: gold alone must not buy the
+better item. A player-to-player auction/market system is planned so players can trade what they make or
+find; it does not change this rule, because the supply still comes from gameplay.
+
+In data terms this rule is enforced by the `tracking_token` field on `NFTItemType` — no proxy token means
+no AMM price, so no shopkeeper can list or trade the item.
+
 This creates a natural economic progression: new players enter a stable, liquid market. As they progress, the economy becomes increasingly player-driven and speculative. Master/GM crafters become known names — their reputation IS their brand.
 
 ---
