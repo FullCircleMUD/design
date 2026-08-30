@@ -7,11 +7,12 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [The Five Databases](#the-five-databases)
+- [The Databases](#the-databases)
 - [Why Two Database Backends](#why-two-database-backends)
 - [How the Toggle Works](#how-the-toggle-works)
 - [Transactions and Split Aliases](#transactions-and-split-aliases)
   - [Work that spans two databases](#work-that-spans-two-databases)
+  - [Why the split is worth that residual](#why-the-split-is-worth-that-residual)
   - [Rolling back does not roll back Evennia's caches](#rolling-back-does-not-roll-back-evennias-caches)
   - [What the ledger changes](#what-the-ledger-changes)
   - [NFT moves and deletions](#nft-moves-and-deletions)
@@ -34,7 +35,7 @@ For how this fits into the deployment pipeline, see the deployment runbook in th
 
 ---
 
-## The Five Databases
+## The Databases
 
 | Database | Local File | Purpose | Key Models |
 |----------|-----------|---------|------------|
@@ -156,6 +157,22 @@ Which gives:
 | Process dies between the two commits | rolled back | durable |
 
 Rows two and three are the residual this design accepts: ownership recorded, the game world not yet updated. It is repairable, because the world can be re-derived from the xrpl row.
+
+### Why the split is worth that residual
+
+The residual is the price of splitting, so the obvious question is why not keep one database and pay nothing.
+
+**The split is what makes the capabilities possible at all.** Each alias exists because something could not be done inside the game database:
+
+- `archive` holds accounts and characters on a schema of its own, so the world can be rebuilt from source without the players going with it. Inside `evennia.db3` there is nothing to survive the rebuild.
+- `xrpl` holds ownership apart from game state, so a mirror of the ledger is not entangled with whatever the world happens to look like.
+- A message bus shared between separate Evennia instances cannot live in any one instance's game database, because the instances do not share one. Separation is the entire mechanism.
+
+Collapsing these back into `evennia.db3` does not simplify the design; it removes the features.
+
+**The split is also the only scaling move available later.** The game host scales vertically for a while, and then stops. At that point the aliases with no game-latency requirement — the ledger mirror, the archive, the bus — can move to RDS while the game database stays local to the process that needs it. A single database has no such move: everything is latency-critical because everything is the same file.
+
+The crash-between-commits window cannot be closed without two-phase commit, which Django does not have. It costs one unit of work inside a window measured in milliseconds, in the rare case that a process dies inside it. That is accepted, deliberately, in exchange for the above.
 
 ### Rolling back does not roll back Evennia's caches
 
