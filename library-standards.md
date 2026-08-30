@@ -153,7 +153,30 @@ Key points:
 - **BSD-3-Clause** for all libraries in this folder. The LICENSE file at repo root contains the full text.
 - **Source files carry an SPDX header** on the first line: `# SPDX-License-Identifier: BSD-3-Clause`.
 
-## Test framework
+## Testing
+
+### Test-first
+
+Libraries are built test-first. The order is: **agree the cases, write the tests, write the
+implementation to pass them.**
+
+The cases live in `docs/test-plan.md` before any test is written. It carries:
+
+- **Stable case IDs**, prefixed by the function or surface they cover (`WC-01`, `PL-05`). Never
+  renumber — retire an ID rather than reuse it.
+- **A `Test function` column**, filled in as each test lands. An empty cell means the case is agreed
+  but not yet covered; that column is the coverage trail an auditor reads.
+- **A fixtures table** — the fake objects the suite needs, named and purposed.
+- **`[TBD — needs discussion: …]` against the specific case** whose behaviour is unresolved, plus an
+  **Open decisions** section collecting them. A case with open behaviour is still listed; it just
+  isn't written yet.
+
+The plan is a commitment, not a wishlist: a case in the table is a case the library will cover.
+
+[evennia-targeting's test plan](../libraries/evennia-targeting/docs/test-plan.md) is the reference
+shape.
+
+### Test framework
 
 **Django's test runner** via a standalone `runtests.py`. Not pytest. Modelled on evennia-shards:
 
@@ -244,6 +267,8 @@ Required:
 
 - **`INDEX.md`** — lists every design document with a one-line description, organised by category.
 - **`progress.md`** — reverse-chronological milestone log with links to evidence.
+- **`test-plan.md`** — every test case the library commits to covering, and the test function
+  covering it. See [Testing](#testing).
 - **`interoperability.md`** — this library against every sibling library. See below.
 - **`archive/`** — historical context. Material here is preserved per the "don't delete; supersede" rule.
 
@@ -314,6 +339,8 @@ When creating a new library in this folder:
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
 - [ ] Adapt `runtests.py`, `tests/test_settings.py`, `tests/urls.py` from a sibling.
+- [ ] Create `docs/test-plan.md` with the fixtures table and the first surface's cases (IDs assigned,
+      `Test function` column empty).
 - [ ] Add `src/<library_name>/tests.py` with one smoke test that proves install + runner work end-to-end.
 - [ ] Create dedicated venv: `python -m venv venv` at repo root, activate it, then `pip install evennia`.
 - [ ] Verify `pip install -e .` and `python runtests.py` both succeed.
