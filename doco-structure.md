@@ -139,9 +139,44 @@ situational detail, that **demotes down into `MEMORY`.** `CLAUDE.md` trends smal
 | Is it architectural detail, decision rationale, or a plan? | `design/` (and indexed in `INDEX.md`) |
 | Is it ephemeral or derivable from the repo (paths, "what's built")? | Don't write it — git/code has it |
 | Useful for the *current task only*? | Don't write it — keep it in the conversation |
+| Is it a comparison, ranking, or self-assessment of our own work? | Don't write it — see *the reader test* |
 
 If content seems to belong in two places, prefer the more durable/detailed surface (`design/` or
 `MEMORY`) and **link** to it from the always-on ones (`README`, `CLAUDE.md`), which stay short.
+
+## The reader test
+
+Every sentence on every surface has to answer one of two questions:
+
+1. **How does this work?**
+2. **How do I use this in my project?**
+
+A reader — human or LLM — arrives wanting to understand the thing or integrate it. Content that serves
+neither purpose is noise, however true it is.
+
+What this rules out:
+
+- **Comparisons between our own repos.** "The lighter library", "unlike the other libraries", "more
+  capable than X". A reader of one repo's docs does not need a league table of the others, and a
+  comparative only means anything to someone already holding both in their head — precisely the reader
+  who didn't need telling.
+- **Rankings and self-assessment.** Whether something is clean, elegant, robust, or better than what it
+  replaced. None of it changes what the reader types.
+- **Justification aimed at the reader's approval** rather than at their understanding.
+
+What survives, and why the distinction is not "drop all rationale": the **why behind a constraint
+passes the test**, because it tells a later session what must not be undone. The difference is whether
+the sentence states a fact about *this* thing or a fact about some other thing's relative standing:
+
+| Fails | Passes | Because |
+|---|---|---|
+| "Keeps the heavy dependency out of the lighter library" | "Depends on Django, pgvector and numpy — a consumer wanting only chat never installs them" | The second is what it costs to install |
+| "A cleaner design than owning the provider" | "Holds no API key or base URL; the consumer injects the embedder" | The second is how you wire it up |
+| "Our most mature library" | "The reference for the test-runner pattern" | The second tells you why to open it |
+
+Apply the test to a sentence you are about to write, not only to one you are reviewing. When it fails,
+the usual fix is not deletion — it is restating the same point as a fact about the thing being
+documented.
 
 ## Conventions for `design/` documents
 
@@ -160,6 +195,19 @@ If content seems to belong in two places, prefer the more durable/detailed surfa
   counts, line/file counts, coverage percentages. They go stale the moment the code changes, and anyone
   who needs the number can run the tool in seconds. State the *capability* ("covered by a test suite"),
   not the *tally* ("390 tests").
+
+  Better still, **link to the document that cannot drift**. A library's `docs/test-plan.md` lists every
+  case and the test covering it, and the linter fails if the two disagree in either direction — so a
+  link to it stays true for free, while a count is wrong the next time a case lands. Prefer "every case
+  the suite covers is listed in `docs/test-plan.md`" — as a link — over any sentence carrying a number.
+- **No counts of things, anywhere — including headings.** The rule above extends past derived metrics
+  to any tally a doc states as fact: how many databases, how many surfaces, how many public functions,
+  how many message types. Every one of them is correct until the day something is added, and then it is
+  wrong in a heading, in a table of contents, and in whatever else linked to it. Frame around *the set*
+  rather than its size — "The databases", not "The five databases"; "exports the public functions", not
+  "exports all ten public functions". Where the plurality itself matters, say "multiple" or "several".
+  The exception is a number that is part of a decision rather than a description: "two database
+  backends, SQLite and PostgreSQL" is naming a deliberate choice, not counting a collection.
 - **No volatile state.** Don't record what is currently enabled, disabled, running, or switched
   off — it can flip within hours, and a later reader has no way to tell whether the doc or the
   code is right. Describe how the thing is *designed* to work; if it isn't built or isn't
