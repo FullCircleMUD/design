@@ -1,6 +1,6 @@
 # database.md
 
-> **THIS FILE covers database architecture** for FullCircleMUD — the five-database design, the SQLite/PostgreSQL toggle, how transactions work across them, where each alias lives, how migrations work, and developer workflow. Server provisioning and the deployment runbook live in the private ops repository (`ops/fcmud-ec2-staging-runsheet.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the three embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
+> **THIS FILE covers database architecture** for FullCircleMUD — the split-database architecture, the SQLite/PostgreSQL toggle, how transactions work across them, where each alias lives, how migrations work, and developer workflow. Server provisioning and the deployment runbook live in the private ops repository (`ops/fcmud-ec2-staging-runsheet.md`). For technical implementation details and code patterns, see **src/game/CLAUDE.md**. For economic design, see **economy.md**. For the embedding memory systems, see **combat-ai-memory.md** (combat), **lore-memory.md** (world knowledge), and **npc-mob-architecture.md** § Three Memory Systems (overview). For subscription payment system, see **subscriptions.md**.
 
 ---
 
@@ -29,7 +29,7 @@
 
 FullCircleMUD is built on Evennia (a Python/Django MUD framework). Like all Django applications, it uses a relational database to store game state — player accounts, characters, items, blockchain mirrors, NPC memories, and more.
 
-The game uses **five separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). Deployed, they are PostgreSQL (robust, handles concurrent connections). Environment variables control both which backend is used and which alias lives on which instance — no code changes needed.
+The game uses **separate databases** to keep concerns isolated. Locally, these are SQLite files (zero setup, instant). Deployed, they are PostgreSQL (robust, handles concurrent connections). Environment variables control both which backend is used and which alias lives on which instance — no code changes needed.
 
 For how this fits into the deployment pipeline, see the deployment runbook in the private ops repository.
 
@@ -79,11 +79,11 @@ Each alias resolves its own connection, in this order:
 | 2 | `DATABASE_URL` | share the default's PostgreSQL instance |
 | 3 | SQLite file | local dev, one file per alias |
 
-Which gives three deployment shapes:
+Which gives these deployment shapes:
 
-- **Your laptop:** nothing set. Five SQLite files, no setup required.
+- **Your laptop:** nothing set. One SQLite file per alias, no setup required.
 - **Deployed, shared:** `DATABASE_URL` only. Every alias is one PostgreSQL database — except `archive`, which cannot share it.
-- **Deployed, split:** `DATABASE_URL` plus one or more `DATABASE_URL_<ALIAS>` overrides. The named aliases move to their own instances; the rest stay with `default`. Staging runs this way, with all four overrides set.
+- **Deployed, split:** `DATABASE_URL` plus one or more `DATABASE_URL_<ALIAS>` overrides. The named aliases move to their own instances; the rest stay with `default`. Staging runs this way, with an override set for every non-default alias.
 
 `default` takes bare `DATABASE_URL` and has no `_DEFAULT` override — that variable is the contract every deploy already sets.
 
@@ -456,7 +456,7 @@ The SQLite path works fine at a few thousand memories per NPC. The pgvector path
 | `CombatMemory` | Combat encounter tactical history | [combat-ai-memory.md](combat-ai-memory.md) |
 | `LoreMemory` | Embedded world knowledge | [lore-memory.md](lore-memory.md) |
 
-All three share the same dual-backend infrastructure, HNSW indexing, and `_is_postgres()` branching. See [npc-mob-architecture.md](npc-mob-architecture.md) § Three Memory Systems for how they compose at prompt time.
+They share the same dual-backend infrastructure, HNSW indexing, and `_is_postgres()` branching. See [npc-mob-architecture.md](npc-mob-architecture.md) § Three Memory Systems for how they compose at prompt time.
 
 ### Future cleanup
 
