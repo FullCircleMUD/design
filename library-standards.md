@@ -190,6 +190,71 @@ should stay that way — a difference between two copies is a defect, not a vari
 copied into each library. Copying is deliberate for now — the shim is small, it has no reason to
 change, and a shared logging package would be a dependency every library carries for thirty lines.]`
 
+## Database aliases and routers
+
+A library that owns tables puts them on **an alias of its own, behind its own router**, rather than in
+the consuming game's database. The reason is the same one every time: a game database gets rebuilt, and
+what the library stored should survive that. It also means a consumer can move the library's data onto
+separate hardware without the library knowing.
+
+### The router
+
+Three rules, all load-bearing:
+
+- **Answer only for your own app label.** Return `None` for every model you do not own. Django consults
+  routers in order and takes the first non-`None` answer, so a router that answers for a foreign model
+  silently captures its queries and sends them to the wrong database. A consumer running two of our
+  libraries has two routers in the list; each must leave the other's models alone.
+- **`allow_migrate` returns `False` for your app on every other alias.** Without it a plain
+  `evennia migrate` creates your tables in the game database as well, and the separation you just built
+  exists only on paper.
+- **`allow_relation` expresses no opinion unless both models are yours.** A library holding no foreign
+  key to anything should return `None` throughout; one with relations between its own models may return
+  `True` for that case and `None` otherwise.
+
+### How a consumer installs it
+
+The setup a library documents must survive being pasted into a gamedir that has never had a router.
+**Evennia's default settings do not define `DATABASE_ROUTERS`**, so the obvious form fails:
+
+```python
+DATABASE_ROUTERS += ["your_library.db_router.YourRouter"]     # NameError on a fresh gamedir
+```
+
+Document this instead, and copy it verbatim between libraries so a consumer running several sees one
+familiar shape:
+
+```python
+_YOUR_ROUTER = "your_library.db_router.YourRouter"
+DATABASE_ROUTERS = list(globals().get("DATABASE_ROUTERS", []))
+if _YOUR_ROUTER not in DATABASE_ROUTERS:
+    DATABASE_ROUTERS.append(_YOUR_ROUTER)
+```
+
+It builds the list whether or not one exists, appends rather than replacing — so it cannot silently
+drop a router another library added — and the membership check makes re-running it harmless.
+
+### Resolving the alias
+
+A library that needs an alias should ship a helper the consumer calls in their settings, rather than
+making them hand-write a `DATABASES` entry:
+
+```python
+DATABASES["your_alias"] = your_library_database(os.path.join(GAME_DIR, "your_library.db3"))
+```
+
+Three rungs, in order: a `DATABASE_URL_<LIBRARY>` environment variable naming a database of its own,
+then `DATABASE_URL` to share the game's, then the SQLite path passed in. Which rung is *right* depends
+on something no single instance can see, so the helper does not guess and does not warn — it ships a
+companion `describe_*_database()` that names the resolved database and the rung that produced it, and
+the library writes that line to its log at startup. Two instances that should share a database are then
+confirmed by reading two log lines rather than by reasoning about where each variable was set.
+
+That description must carry the database name and host only. The configuration holds credentials parsed
+out of a URL, and they must never reach a log file.
+
+`evennia-message-bus` and `evennia-ai-memory` both implement this; copy from either.
+
 ## Licensing
 
 - **BSD-3-Clause** for all libraries in this folder. The LICENSE file at repo root contains the full text.
@@ -388,6 +453,8 @@ When creating a new library in this folder:
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
 - [ ] Copy `log.py` from a sibling; rename the function and the log filename. See *Logging*.
+- [ ] If the library owns tables: add its alias, router and resolution helper, and document the
+      append-don't-assign setup form. See *Database aliases and routers*.
 - [ ] Adapt `runtests.py`, `tests/test_settings.py`, `tests/urls.py` from a sibling.
 - [ ] Create `docs/test-plan.md` with the fixtures table and the first surface's cases (IDs assigned,
       `Test function` column empty).
