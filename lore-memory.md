@@ -93,7 +93,7 @@ class LoreMemory(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        app_label = "ai_memory"
+        app_label = "evennia_ai_memory"
         indexes = [
             models.Index(fields=["scope_level"]),
             models.Index(fields=["scope_level", "created_at"]),
@@ -102,7 +102,7 @@ class LoreMemory(models.Model):
 
 **Design decisions:**
 
-- **Same `ai_memory` app and database** — shares the pgvector infrastructure, router, and dual-backend pattern. One migration adds the table.
+- **Same app and database as interaction memory** — shares the pgvector infrastructure, the router and the dual-backend pattern.
 - **`scope_tags` as JSON list** — flexible multi-tagging without a join table. Access uses AND semantics (see below).
 - **`source` field** — tracks where the lore came from. When `world.md` is updated, you can find and re-embed all lore entries sourced from it.
 - **`title`** — human-readable label for admin/debugging. Not embedded or searched.
@@ -116,7 +116,7 @@ Example: an entry tagged `["millholm", "mages_guild"]` is accessible **only** to
 
 This is intentional — it prevents a thief in another city from knowing Millholm-specific guild secrets, and prevents a Millholm townsperson from knowing guild secrets. If you want a piece of lore to reach two distinct audiences, author two entries (one per scope) rather than combining tags.
 
-Implementation: `_npc_can_access_lore()` in `ai_memory/services.py` performs the AND check after the database pre-filter.
+Implementation: `evennia-ai-memory` expresses the rule in SQL on PostgreSQL, where `contained_by` *is* the subset test, and applies it in Python on SQLite, which has no JSON containment lookup. Either way it filters **before** ranking: post-filtering a ranked window lets inadmissible entries occupy every candidate slot and starve a result that qualifying ones would have filled.
 
 ---
 
@@ -246,39 +246,42 @@ entries:
 
 ### Importing lore
 
-The importer is a **standalone Python tool** that lives in the lore repo at [`FCM/lore/tools/import_lore.py`](../lore/tools/import_lore.py). It connects to the game's `ai_memory` database directly via psycopg (Postgres) or sqlite3 (local SQLite) — no Django, no Evennia dependency. Same script runs locally for development and on Railway in production.
+A superuser runs `lore import` in game. The command ships with
+[evennia-ai-memory](https://github.com/FullCircleMUD/evennia-ai-memory), which reads the lore repository
+through `evennia-yaml-reader` — a local checkout in development, GitHub in a deployment, selected by the
+`AI_MEMORY_READER` settings.
 
-**Why standalone:** the Railway game container does not include the lore repo files, so an in-game management command can't see them. The standalone tool deploys as a separate Railway service in the same project as the game, sharing `DATABASE_URL` and `OPENAI_API_KEY` via service references. Each push to the lore repo auto-deploys the service, runs the import, and exits.
+**The repository is the source of truth.** The import brings the table into line with it: new entries
+created, edited ones re-embedded, unchanged ones left alone, and **entries no longer in the YAML
+removed**. An `index.yaml` manifest at the repository root names the content files; a file it does not
+name is not read, and a file it names but which is absent stops the run.
 
-```bash
-# Local
-cd FCM/lore/tools
-pip install -r requirements.txt
-cp .env.example .env   # set OPENAI_API_KEY
-set -a; source .env; set +a
-python import_lore.py
-python import_lore.py --dry-run    # preview, no DB writes, no embedding calls
-python import_lore.py --prune      # delete DB entries no longer in YAML (off by default)
+```
+lore import dry     # read, validate, report what would change — no writes, no embedding calls
+lore import         # do it
+lore wipe           # empty the table; asks for confirmation, restored by an import
 ```
 
-The default lore directory is the parent of `tools/` (the lore repo root). The game server does not need to be running. See [`FCM/lore/tools/README.md`](../lore/tools/README.md) for full usage including Railway deployment.
+Nothing is written unless every entry validates, so a malformed entry refuses the whole run and reports
+each problem with its file and title. A run that resolves *no* entries is refused as well, rather than
+taken to mean the lore was deleted.
 
-**Idempotent:** Entries are matched on `(source, title)`. A unique constraint on those columns (added by `ai_memory/migrations/0005_lorememory_unique_source_title.py`) makes the upsert atomic via Postgres `INSERT ... ON CONFLICT`. Re-running the import:
+**Idempotent:** entries are matched on `(source, title)`, with a unique constraint on those columns.
 - **New entry** → created and embedded
-- **Content changed** → updated and re-embedded
-- **Content unchanged** → skipped (no wasted embedding calls)
-
-**Schema dependency:** the standalone tool writes directly to the `ai_memory_lorememory` table by column name. If you change the `LoreMemory` Django model, update the column list in `import_lore.py` to match. The script's top-of-file comment calls this out.
+- **Content, scope level or tags changed** → updated and re-embedded
+- **Unchanged** → skipped, with no embedding call
 
 ### Adding new lore
 
-1. Add or edit entries in the YAML files in the lore repo
-2. Push to the lore repo — Railway auto-deploys the importer service, which runs and exits
-3. All NPCs with `llm_use_lore=True` immediately have access to the new knowledge
+1. Add or edit entries in the YAML files in the lore repo, and list any new file in `index.yaml`.
+2. Push.
+3. A superuser runs `lore import`.
 
-For local dev: run `python tools/import_lore.py` from the lore repo after editing.
+Every NPC then has access to the new knowledge immediately — no code changes, no game-side migrations,
+no server restart.
 
-No code changes, no game-side migrations, no server restart required.
+The third step is deliberate rather than automatic: lore reaching players is a decision someone makes,
+not a side effect of a push.
 
 ### Chunk sizing
 
@@ -378,17 +381,16 @@ Knowledge gating happens naturally through scope tags. Rowan doesn't awkwardly k
 
 | Component | Status | Location |
 |---|---|---|
-| `LoreMemory` model | Built | `ai_memory/models.py` |
-| pgvector dual-backend | Built | `ai_memory/services.py` — `_is_postgres()` branching |
-| `store_lore()` | Built | `ai_memory/services.py` — idempotent upsert with embedding |
-| `search_lore()` | Built | `ai_memory/services.py` — scope-filtered semantic search |
-| `get_recent_lore()` | Built | `ai_memory/services.py` — fallback without embeddings |
-| `_build_lore_scope_filter()` | Built | `ai_memory/services.py` — `scope_tags__contains` (both backends) |
+| `LoreMemory` model | Built | `evennia-ai-memory` |
+| pgvector dual-backend | Built | `evennia-ai-memory` — `_is_postgres()` branching |
+| `store_lore()` | Built | `evennia-ai-memory` — idempotent upsert with embedding |
+| `search_lore()` | Built | `evennia-ai-memory` — scope-filtered semantic search |
+| Scope filtering | Built | `evennia-ai-memory` — expressed in SQL on PostgreSQL, applied before ranking on both backends |
 | `llm_use_lore` attribute | Built | `typeclasses/mixins/llm_mixin.py` — per-NPC toggle |
 | `_get_lore_scope_tags()` | Built | `typeclasses/mixins/llm_mixin.py` — room tags + faction tags |
 | `{lore_context}` prompt variable | Built | `typeclasses/mixins/llm_mixin.py` — `_get_context_variables()` |
 | Prompt templates | Built | NPC personality templates in `llm/prompts/` accept `{lore_context}` |
-| Standalone `import_lore.py` | Built | `FCM/lore/tools/import_lore.py` (in the lore repo, runs on Railway as its own service) |
-| Lore YAML repo | Built | `FCM/lore/` — separate git repo, organised by scope (continental, regional, factions) |
+| `lore import` / `lore wipe` | Built | `evennia-ai-memory` — superuser commands, reading the lore repo through `evennia-yaml-reader` |
+| Lore YAML repo | Built | `FCM/lore/` — content only: YAML organised by scope, plus the `index.yaml` manifest |
 | Faction tags on NPCs | Built | Faction tags applied to NPCs across multiple guilds (mages, temple, thieves, warriors) |
 | Evennia tag system | Built | Zone + district tags on all rooms |
