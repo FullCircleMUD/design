@@ -214,12 +214,18 @@ Three rules, all load-bearing:
 
 ### How a consumer installs it
 
-The setup a library documents must survive being pasted into a gamedir that has never had a router.
-**Evennia's default settings do not define `DATABASE_ROUTERS`**, so the obvious form fails:
+A library's setup snippet is pasted into a settings file whose prior state the library cannot see. It
+might be the first router the consumer has ever added, or the fourth. **The documented form has to be
+correct in both cases**, and the obvious one is not:
 
 ```python
-DATABASE_ROUTERS += ["your_library.db_router.YourRouter"]     # NameError on a fresh gamedir
+DATABASE_ROUTERS += ["your_library.db_router.YourRouter"]
 ```
+
+Evennia's default settings do not define `DATABASE_ROUTERS`, so that works only when something else has
+already created the list. Install this library first and it raises `NameError` before the server
+starts; install it third and it works — which is worse, because the instruction then looks correct
+until the day someone follows it on a clean gamedir.
 
 Document this instead, and copy it verbatim between libraries so a consumer running several sees one
 familiar shape:
