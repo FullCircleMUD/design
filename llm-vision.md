@@ -176,7 +176,7 @@ The harness exists because these are gameplay concerns, not code-correctness con
 
 ## Current Status
 
-As of 2026-04-23, the picture across the three systems is:
+As of 2026-04-23, the picture across the memory systems is:
 
 | System | Model & storage | Retrieval & integration | Emergent behaviour |
 |---|---|---|---|
@@ -205,7 +205,7 @@ This doc is the narrative summary. The authoritative specifications live in:
 | Interaction memory (`NpcMemory`) schema | [database.md](database.md) | § pgvector for AI Memory |
 | Interaction memory prompt integration | `src/game/CLAUDE.md` | § LLM NPC system |
 | Combat memory schema and summary format | [combat-ai-memory.md](combat-ai-memory.md) | §§ Combat Memory Schema |
-| Three-layer architecture (persistence → strategy → execution) | [combat-ai-memory.md](combat-ai-memory.md) | § Three-Layer Architecture |
+| Layered architecture (persistence → strategy → execution) | [combat-ai-memory.md](combat-ai-memory.md) | § Layered Architecture |
 | Pre-fight timing (approach room triggers, async LLM call) | [combat-ai-memory.md](combat-ai-memory.md) | § Early Warning Pattern |
 | Unified briefing (interaction + combat memory merged) | [combat-ai-memory.md](combat-ai-memory.md) | § Unified Briefing |
 | Per-type vs per-instance memory scope | [combat-ai-memory.md](combat-ai-memory.md) | § Memory Scope |

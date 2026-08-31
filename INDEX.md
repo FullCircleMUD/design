@@ -116,7 +116,7 @@ and the cross-cutting invariants) that no single doc holds.
 
 | Document | Summary |
 |---|---|
-| [database.md](database.md) | Django app layout, five-database architecture, transactions across aliases, model overview, migrations. |
+| [database.md](database.md) | Django app layout, the split-database architecture, transactions across aliases, model overview, migrations. |
 | [account-recovery.md](account-recovery.md) | Surviving a world rebuild — what is archived and when, wallet sign-in restoring an account and its characters, items and balances recovered from the XRPL mirror, name reservation, shard stamping. |
 | [website.md](website.md) | Web frontend pages, geo-detection infrastructure, page inventory, implementation status. |
 | [connection-transport.md](connection-transport.md) | Why FCM is WebSocket-only — Cloudflare, `cf-ipcountry`, telnet/SSH limitations, decision rationale. |

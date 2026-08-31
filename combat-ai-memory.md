@@ -7,9 +7,9 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [Two Memory Systems, Two Purposes](#two-memory-systems-two-purposes)
+- [Interaction Memory vs Combat Memory](#interaction-memory-vs-combat-memory)
 - [Combat Memory Schema](#combat-memory-schema)
-- [Three-Layer Architecture](#three-layer-architecture)
+- [Layered Architecture](#layered-architecture)
   - [Layer 1: Combat Memory (Persistence)](#layer-1-combat-memory-persistence)
   - [Layer 2: Strategy Bot (Pre-Fight Planning)](#layer-2-strategy-bot-pre-fight-planning)
   - [Layer 3: Execution (In-Fight)](#layer-3-execution-in-fight)
@@ -33,7 +33,7 @@ The system is built on the same `ai_memory` infrastructure as NPC dialogue memor
 
 ---
 
-## Two Memory Systems, Two Purposes
+## Interaction Memory vs Combat Memory
 
 | | Interaction Memory (`NpcMemory`) | Combat Memory (`CombatMemory`) |
 |---|---|---|
@@ -108,7 +108,7 @@ class CombatMemory(models.Model):
 
 ---
 
-## Three-Layer Architecture
+## Layered Architecture
 
 ### Layer 1: Combat Memory (Persistence)
 

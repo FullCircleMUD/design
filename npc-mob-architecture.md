@@ -543,7 +543,7 @@ An LLM agent that reasons about the situation and generates command strings. The
 
 Extends `LLMAIMixin` with embedding-based persistent memory. The full vision for boss and important mobs.
 
-> **Full design:** See [combat-ai-memory.md](combat-ai-memory.md) for the complete combat memory and strategy bot architecture — three-layer system (persistence, pre-fight planning, in-fight execution), early warning pattern, unified briefings, memory scope, and ML training data.
+> **Full design:** See [combat-ai-memory.md](combat-ai-memory.md) for the complete combat memory and strategy bot architecture — layered system (persistence, pre-fight planning, in-fight execution), early warning pattern, unified briefings, memory scope, and ML training data.
 
 **Used for:** Named bosses, important encounters, key story mobs. Creates emergent gameplay through adaptive behavior.
 

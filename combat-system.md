@@ -185,7 +185,7 @@ All 24 weapon types are implemented with unique mastery mechanics:
 
 Weapon mechanics are extracted into shared mixins so both player NFT weapons and mob non-NFT weapons use identical combat behaviour from a single source of truth.
 
-**Three layers of composition:**
+**The layers of composition:**
 
 1. **WeaponMechanicsMixin** (`typeclasses/items/weapons/weapon_mechanics_mixin.py`) — defines all weapon AttributeProperties, `get_damage_roll()`, mastery helpers, the weapon combat hooks (default to no-op), and the mastery-scaled query methods (default to 0/False). This is the combat interface that `execute_attack()` calls.
 

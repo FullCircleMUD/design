@@ -1,13 +1,13 @@
 # Documentation Structure
 
-This project uses **four distinct documentation surfaces**. Each has a different audience, lifespan,
+This project uses **several distinct documentation surfaces**. Each has a different audience, lifespan,
 and update cadence. Putting content in the wrong place is a slow-burning cost: the wrong people read
 it (or miss it), it goes stale, or it crowds out what the surface is actually for.
 
 This document explains what belongs where, when to update each, and the conventions that keep them
 coherent.
 
-## The four surfaces
+## The surfaces
 
 ### 1. `/README.md` — for humans landing on the repo
 
@@ -206,8 +206,11 @@ documented.
   wrong in a heading, in a table of contents, and in whatever else linked to it. Frame around *the set*
   rather than its size — "The databases", not "The five databases"; "exports the public functions", not
   "exports all ten public functions". Where the plurality itself matters, say "multiple" or "several".
-  The exception is a number that is part of a decision rather than a description: "two database
-  backends, SQLite and PostgreSQL" is naming a deliberate choice, not counting a collection.
+  The default is no number. An exception needs a compelling reason, and "it happens to be accurate
+  today" is not one — the bar is that the number is load-bearing to an argument the text is making,
+  not merely true. "Two database backends, SQLite and PostgreSQL" clears it: the sentence is naming a
+  deliberate choice between alternatives, and the count is the point. A heading heading up a list does
+  not.
 - **No volatile state.** Don't record what is currently enabled, disabled, running, or switched
   off — it can flip within hours, and a later reader has no way to tell whether the doc or the
   code is right. Describe how the thing is *designed* to work; if it isn't built or isn't
@@ -242,11 +245,11 @@ documented.
   counter-argument. The *why* is what makes it durable.
 - **Don't delete; supersede.** Leave a superseded doc in place with a note linking forward.
 
-## Why four surfaces and not one
+## Why several surfaces and not one
 
 A single `README` is too long for visitors or too shallow for contributors. `CLAUDE.md` alone either
 pulls in agent-irrelevant marketing or omits depth. `MEMORY` exists because an agent needs durable
 recall that *accumulates* without bloating the always-loaded rules. `design/` without an entry point is
-invisible. Four surfaces, each focused on one audience and one cadence, linking where helpful: the
+invisible. Several surfaces, each focused on one audience and one cadence, linking where helpful: the
 cost is a little discipline about what goes where; the benefit is each surface stays useful for the
 long haul.

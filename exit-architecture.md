@@ -57,7 +57,7 @@ The foundation for all game exits. Provides a single enhancement over Evennia's 
 **File:** `typeclasses/terrain/exits/exit_vertical_aware.py`
 **Inherits:** `ExitBase`
 
-The standard exit for the game world. Provides two systems:
+The standard exit for the game world. Provides these systems:
 
 **Direction system:**
 - `direction` AttributeProperty stores the compass direction (north, south, up, down, etc.)
@@ -236,7 +236,7 @@ Exits participate in the game's visibility system at multiple levels:
 | `p_object_visible_to` | `get_display_exits()` | Auto-exit line `[ Exits: ]` |
 | `p_object_visible_to` | `CmdExits.func()` | Verbose `exits` command |
 | `p_object_visible_to` | `ExitDoor.at_traverse()` | A door you can't see can't be walked through |
-| `p_can_perceive` | `resolve_target` in `open` | Finding a door by feel — see [the three shapes](unified-search-system.md#sightlessness--the-three-shapes) |
+| `p_can_perceive` | `resolve_target` in `open` | Finding a door by feel — see [the shapes](unified-search-system.md#sightlessness--the-shapes) |
 | `p_can_see` | `resolve_target` in `close`, `lock`, `unlock`, `picklock` | A keyway needs eyes |
 | `looker_is_blind` | `CmdLook._look_direction()` | `look <direction>` answers as if there were nothing there |
 | `is_open` | `get_display_exits()` | Closed doors hidden from auto-exits |

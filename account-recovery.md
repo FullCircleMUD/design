@@ -21,9 +21,9 @@ intact. That is what makes invited playtesting viable — a rebuild costs a test
 
 ---
 
-## The two sources
+## The sources
 
-Nothing about a player is reconstructed from one place. Two databases survive a rebuild and each owns
+Nothing about a player is reconstructed from one place. The databases that survive a rebuild each own
 a different half.
 
 | | Holds | Written |

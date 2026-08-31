@@ -540,7 +540,7 @@ Height filtering has been **removed from `resolve_target`**. There is no `range`
 
 This keeps the targeting library free of range semantics — it identifies, the command gates.
 
-### Sightlessness — the three shapes
+### Sightlessness — the shapes
 
 **Darkness without darkvision and blindness are one state.** `looker_is_blind(caller)`
 (`utils/visibility.py`) is the whole test: it is true when the caller holds `BLINDED`, *or* when
@@ -705,7 +705,7 @@ These will be retired as remaining consumers migrate to building blocks.
 Every migrated command follows the same pattern: sightlessness handling → `resolve_target` with
 building block + `extra_predicates` → command-layer state/type checks → action.
 
-The **Shape** column is the one from [Sightlessness](#sightlessness--the-three-shapes), and it
+The **Shape** column is the one from [Sightlessness](#sightlessness--the-shapes), and it
 determines the predicate: *fumble* commands keep `p_can_perceive` and charge time, *refuse*
 commands take `p_can_see` and return early.
 
@@ -720,7 +720,7 @@ commands take `p_can_see` and return early.
 | cmd_drop | `items_inventory` | `p_can_perceive` | Fumble |
 | cmd_give | `items_inventory` + `resolve_character_in_room` | `p_can_see` | Refuse — no point finding the item if you cannot find who to give it to |
 | cmd_put | `items_inventory` + `items_inventory_then_room_nonexit` | `p_can_perceive` | Fumble — one search covers both targets. A room container is the same chest `open` works by touch |
-| cmd_get | `items_room_nonexit` | `p_object_visible_to` | Broad targeting, get-lock check at command layer. **Object axis only** — not reviewed against the three shapes yet |
+| cmd_get | `items_room_nonexit` | `p_object_visible_to` | Broad targeting, get-lock check at command layer. **Object axis only** — not reviewed against the shapes yet |
 | cmd_look (target) | quiet search | `p_can_perceive` | Reduced fidelity — unseen renders as "Someone is there, but it's too dark to make out any detail." |
 | cmd_look (container) | `items_inventory_then_room_nonexit` | `p_can_perceive` | "look in" path. The container is sensed; its contents are not listed |
 | cmd_quaff | `items_inventory` | `p_can_perceive` | Fumble |

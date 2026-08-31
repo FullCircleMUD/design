@@ -228,7 +228,7 @@ Conventions:
 
 ## Documentation surfaces
 
-A library's documentation follows the umbrella's four-surface model — see
+A library's documentation follows the umbrella's documentation-surface model — see
 [doco-structure.md](doco-structure.md) — and carries only the **reduced set** appropriate to a
 stand-alone-reusable sub-repo:
 
