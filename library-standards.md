@@ -51,6 +51,7 @@ development, which catches packaging bugs early.
 ├── src/
 │   └── <library_name>/       # the package
 │       ├── __init__.py
+│       ├── log.py            # the logging shim — see below
 │       ├── contrib/          # ONLY if contrib modules exist — see below
 │       └── tests.py          # tests live inside the package (Django convention)
 ├── tests/                    # standalone test infrastructure
@@ -147,6 +148,47 @@ Key points:
 - **License declaration must match the LICENSE file** (BSD-3-Clause).
 - **`requires-python = ">=3.10"`** is the minimum (matches Evennia). Raise per library only if there's a
   reason.
+
+## Logging
+
+**Every library logs to a file of its own, through a shim in `src/<library_name>/log.py`.** A library
+that writes into the main server log makes an operator search for its lines among everything else the
+game emitted; one that uses stdlib `logging` with no handler configured emits records nobody ever sees.
+Neither is acceptable, and neither is a per-library judgement call — this is the pattern, and a session
+bootstrapping a new library copies it rather than choosing again.
+
+The shim is small and its shape is fixed:
+
+- **One public function**, named for the library — `bus_log`, `ai_memory_log`. Signature
+  `(message: str, level: str = "INFO", trace: bool = False) -> None`.
+- **A lazy `from evennia.utils import logger` inside a `try`.** Outside an Evennia engine — the test
+  suite, a standalone tool — an `ImportError` is swallowed and the call is a silent no-op. It does not
+  fall back to stderr or to a local file: a library that logs somewhere unexpected is worse than one
+  that stays quiet.
+- **`logger.log_file(f"[{level}] {message}", filename="<library>.log")`.** The file lands in the running
+  instance's `settings.LOG_DIR` beside `server.log`.
+- **No timestamp of its own.** `log_file` already prefixes `<timestamp> [-] ` in UTC, the same format
+  the rest of the server logs use, so a library line and a `server.log` line can be read against each
+  other. Adding another would stamp every line twice.
+- **Levels are `INFO` / `WARN` / `ERROR`**, and anything else coerces to `INFO`. A log call must never
+  raise into its caller, so an unknown level degrades rather than rejecting.
+- **`trace=True` appends `traceback.format_exc()`**, for calls made from inside an `except` block.
+  Outside one, `format_exc()` returns `"NoneType: None"` and the shim suppresses it rather than logging
+  noise.
+
+The shim is internal — not part of the consumer-facing API, and not re-exported from `__init__.py`.
+
+**This is the one place a library may import Evennia when it otherwise has no need to.** A library
+whose logic is framework-neutral still logs through the shim; it asserts the narrow rule (only `log.py`
+imports Evennia) as a test case rather than the broad one.
+
+Copy [evennia-message-bus's `log.py`](../libraries/evennia-message-bus/src/evennia_message_bus/log.py)
+and change the function name and the filename. It is verbatim across the libraries that have it, and
+should stay that way — a difference between two copies is a defect, not a variation.
+
+`[TBD — needs discussion: whether the shim eventually becomes a shared dependency rather than a file
+copied into each library. Copying is deliberate for now — the shim is small, it has no reason to
+change, and a shared logging package would be a dependency every library carries for thirty lines.]`
 
 ## Licensing
 
@@ -345,6 +387,7 @@ When creating a new library in this folder:
 - [ ] Write `README.md` answering: what is it, status, is it for me, install, learn more.
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
+- [ ] Copy `log.py` from a sibling; rename the function and the log filename. See *Logging*.
 - [ ] Adapt `runtests.py`, `tests/test_settings.py`, `tests/urls.py` from a sibling.
 - [ ] Create `docs/test-plan.md` with the fixtures table and the first surface's cases (IDs assigned,
       `Test function` column empty).
