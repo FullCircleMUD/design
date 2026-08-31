@@ -24,8 +24,43 @@ These standards apply to libraries developed in `libraries/<library-name>/`. Suc
 If a future library has materially different framing (a pure-Python library with no Evennia coupling,
 say), some standards may relax. State the deliberate divergence in that library's `CLAUDE.md`.
 
+## Two families — `evennia-` and `fcm-`
+
+The prefix on a library's name is a claim about who can use it, and the two claims are different.
+
+**`evennia-*` libraries are game-agnostic.** They extend Evennia and know nothing about FCM. Anyone
+running Evennia could install one and it would work. **Everything else in this document is written for
+them** — where a rule below says "the library", read "an `evennia-*` library" unless the text says
+otherwise.
+
+**`fcm-*` libraries embed FCM's game concepts, deliberately.** Some of what FCM does cannot be
+abstracted into a general library without abstracting away the thing itself — the XRPL ownership layer
+and the telemetry-driven spawn economy are both like that. The prefix is the claim being withdrawn: an
+`fcm-*` library does not offer itself as something that drops into an arbitrary Evennia install, so it
+is free to name FCM concepts in its own code. `fcm-xrpl` and `fcm-telemetry-spawn` are the two.
+
+The reason for the family is *why* it exists rather than the volume of coupling: a library goes in it
+when abstracting the game concepts out would destroy the library, not when doing so would merely be
+work.
+
+**Everything structural and procedural is identical across both families.** Src layout, `pyproject.toml`
+shape, the logging shim, database aliases and routers, the test framework, test-first and its test plan,
+the documentation surfaces, the `CLAUDE.md` shape, `docs/` structure, interoperability — all the same.
+The family decides what the code is allowed to *know*, and nothing else.
+
+Two consequences, both narrow:
+
+- **The two scope principles do not apply to an `fcm-*` library.** See *CLAUDE.md structure* below.
+- **Licensing and distribution.** `fcm-xrpl` is not licensed: no `LICENSE`, no SPDX headers,
+  `pyproject.toml` declares `Proprietary`, and it is pip-installable through a private provider —
+  probably GitHub — rather than PyPI. `[TBD — needs discussion: whether that is a rule for the `fcm-*`
+  family or a per-library call. The `library-standards-linter` encodes BSD-3-Clause either way, so an
+  unlicensed library reports two errors and a warning until this is settled and the linter taught.]`
+
 ## Naming
 
+- **Prefix**: `evennia-` or `fcm-`, per *Two families* above. The prefix is chosen when the library is
+  created and states what the code is allowed to know.
 - **Repo name and PyPI distribution name**: hyphenated, lowercase, descriptive — `evennia-world-builder`,
   `evennia-shards`.
 - **Python import name**: underscored equivalent — `evennia_world_builder`, `evennia_shards`. Required
@@ -148,6 +183,48 @@ Key points:
 - **License declaration must match the LICENSE file** (BSD-3-Clause).
 - **`requires-python = ">=3.10"`** is the minimum (matches Evennia). Raise per library only if there's a
   reason.
+
+## Reading settings — always through an accessor in `config.py`
+
+**A library never reads `settings.SOMETHING` directly.** Every setting it consumes gets a named accessor
+in `src/<library_name>/config.py`, and both library code and consumer code call that rather than the
+setting. Six libraries do it this way — `evennia-shards`, `evennia-ai-memory`, `evennia-message-bus`,
+`evennia-mob-spawner`, `evennia-world-builder`, `fcm-xrpl` — and the shape is the same in all of them:
+
+```python
+SETTING_TICK_SECONDS = "MOB_SPAWNER_TICK_SECONDS"
+DEFAULT_TICK_SECONDS = 60
+
+
+def get_tick_seconds() -> int:
+    """Return ``MOB_SPAWNER_TICK_SECONDS``, defaulting to 60."""
+    from django.conf import settings
+
+    return int(getattr(settings, SETTING_TICK_SECONDS, DEFAULT_TICK_SECONDS))
+```
+
+Four things are load-bearing:
+
+- **A direct read raises `AttributeError` for the consumer who declared nothing**, which is the common
+  case. The accessor is what makes a setting genuinely optional.
+- **The default is a module-level constant, named and next to its accessor.** It is the single source of
+  truth for that fallback, and a comment there is where the *reason* for the default lives — which is
+  the thing a consumer deciding whether to override actually needs.
+- **The `from django.conf import settings` is inside the function**, not at module scope. A settings
+  import at module level runs when the library is first imported, which can be while the consumer's
+  settings module is still executing.
+- **The setting name is prefixed with the library's own vocabulary** — `SHARDS_`, `MOB_SPAWNER_`,
+  `XRPL_` — because a consumer running several of our libraries has one settings namespace.
+
+**A setting a helper reads at settings-import time must be declared above the call.** Where a consumer
+calls a library helper from their own settings module — a `DATABASES` entry, say — a setting declared
+*below* that call does not exist yet, and the accessor quietly returns the default rather than raising.
+Document the ordering next to the accessor; do not engineer around it.
+
+Where a setting is **required** rather than defaulted, the accessor raises `ImproperlyConfigured` naming
+the setting and where to put it, and `AppConfig.ready()` calls it so an unconfigured consumer cannot
+boot. `evennia-message-bus`'s `check_instance_id` and `evennia-ai-memory`'s `validate_settings` are the
+two worked examples.
 
 ## Logging
 
@@ -372,12 +449,17 @@ Standard sections, in order:
 8. **Repository layout** — current ASCII tree.
 9. **Tools and environment** — Python version, runtime deps, test framework.
 
-**Three principles every library's section 4 should include:**
+**Three principles every `evennia-*` library's section 4 should include:**
 
 - *The library does not own game concepts.*
 - *No FCM-specific assumptions.*
 - *Test-first* — a case lands in `docs/test-plan.md`, then the test, then the code. Points at
   [test-first-process.md](test-first-process.md).
+
+**An `fcm-*` library carries the third and not the first two**, and says so — a principle stating that
+FCM concepts belong in it, and that the two sibling principles deliberately do not apply. Adding them
+back later, on the reasonable-looking grounds that every other library has them, would break the
+library; the principle exists to stop that. See *Two families* above.
 
 Other principles are library-specific.
 
