@@ -7,6 +7,12 @@ not carry or reference a copy of it. Where a convention has a deeper authoritati
 points there rather than duplicating (e.g. [doco-structure.md](doco-structure.md) for the documentation
 surfaces).
 
+**These are rules for LLMs, not constraints on the developer.** They exist so a session building a
+library arrives at something consistent with its siblings instead of choosing afresh each time. The
+human developer overrides any of them at their own discretion, without justifying it here — an
+instruction from them outranks this document. Where a decision they made departs from a rule, record
+what was decided in the library's `CLAUDE.md`, not an argument for why the rule should have won.
+
 The `libraries/` folder may also contain **auxiliary repos directly required for library development** —
 test-content and fixture repos (e.g. `evennia-world-builder-test-yaml/` holds private YAML fixtures for
 world-builder's tests). These standards apply only to the libraries themselves; auxiliary repos are not
@@ -269,10 +275,20 @@ change, and a shared logging package would be a dependency every library carries
 
 ## Database aliases and routers
 
-A library that owns tables puts them on **an alias of its own, behind its own router**, rather than in
-the consuming game's database. The reason is the same one every time: a game database gets rebuilt, and
-what the library stored should survive that. It also means a consumer can move the library's data onto
-separate hardware without the library knowing.
+**A library that owns tables puts them on an alias of its own, behind its own router, when its data
+has to outlive the game database or be reachable from more than one instance.** Either alone is enough:
+
+- **It must survive a rebuild.** A game database gets wiped and rebuilt from source; anything the
+  library is holding that matters afterwards cannot be in there. It also means a consumer can move that
+  data onto separate hardware without the library knowing.
+- **More than one instance reads it.** A game database belongs to one instance. Data that has to cross
+  between them needs somewhere both can see.
+
+**A library whose data is scoped to one instance and worth nothing after a wipe puts its tables in the
+game database.** An alias would cost a database, a router and a migration step a consumer has to
+configure, to protect rows that are stale within seconds and meaningless after a restart. Say so in the
+library's `CLAUDE.md` and pin it with a case, so it is not later "fixed" into an alias by someone
+applying the first rule without reading the reason.
 
 ### The router
 
@@ -580,8 +596,10 @@ When creating a new library in this folder:
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
 - [ ] Copy `log.py` from a sibling; rename the function and the log filename. See *Logging*.
-- [ ] If the library owns tables: add its alias, router and resolution helper, and document the
-      append-don't-assign setup form. See *Database aliases and routers*.
+- [ ] If the library owns tables: decide where they go. Its own alias if the data must outlive the game
+      database or be read by more than one instance — then add the router and resolution helper, and
+      document the append-don't-assign setup form. Otherwise the game database, said so in `CLAUDE.md`
+      and pinned by a case. See *Database aliases and routers*.
 - [ ] Adapt `runtests.py`, `tests/test_settings.py`, `tests/urls.py` from a sibling.
 - [ ] Create `docs/test-plan.md` with the fixtures table and the first surface's cases (IDs assigned,
       `Test function` column empty).
