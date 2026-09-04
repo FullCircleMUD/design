@@ -180,6 +180,10 @@ documented.
 
 ## Conventions for `design/` documents
 
+- **Short, plain, and to the point — every surface, not just this one.** State what the thing is, how
+  it works, and how to use it. Nothing else. No hedging, no options weighed and discarded, no record of
+  what was tried first, no restating what the thing is *not*. A human should not need an LLM to
+  interpret documentation an LLM wrote. If a paragraph can be a sentence, make it a sentence.
 - **Filename:** kebab-case, descriptive, stable (`schema-design.md`, not `notes-2026-04.md`).
 - **First line:** an `# H1 Title` matching the filename.
 - **Second block:** a one-paragraph summary — what shows in a preview pane and gets quoted in `INDEX.md`.
