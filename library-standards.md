@@ -478,6 +478,45 @@ Conventions for new design documents are the umbrella's — see [doco-structure.
 kebab-case filename; first line an `# H1 Title` matching the filename; a one-paragraph summary as the
 second block; index every document in `INDEX.md` (an un-indexed document is invisible).
 
+## Describing a process — the step list comes first
+
+Wherever a document explains how something works — a boot sequence, a request through the layers, a
+handoff between components — **a step-by-step list comes before the prose that explains it.** Not
+instead of: the prose still carries the reasoning. The list is what a reader can hold in their head,
+and it is what they came for.
+
+**Every step is attributed.** Each one says who does it — this library, Evennia, or a named sibling
+library. That is usually the question being asked: *which of these is mine to change?* Attribution
+turns a description into a map of responsibility.
+
+**Plain language, one step per line.** What happens, in the order it happens. A step that needs a
+paragraph to justify it gets the paragraph below, not on the line.
+
+**Say where the gaps are.** A process that is not finished marks the steps that do not exist yet, so
+the list doubles as the work queue. Say plainly when there are none.
+
+```markdown
+## A Server booting, step by step
+
+Every step from starting a Server to it being reachable, and who owns each one — **[library]** for
+this library, **[Evennia]** for Evennia or Twisted. No gaps: this part is complete.
+
+- **[Evennia]** `django.setup()` runs, which runs every installed app's `ready()`
+- **[library]** `ready()` repoints the class settings Evennia resolves later
+- **[Evennia]** the AMP client dials the Portal, retrying with backoff if it cannot
+- **[library]** the Server asks the Portal whether its announcement was recorded
+- **[gap]** <a step that does not exist yet, named as such>
+```
+
+**One list per process, not per document.** Distinct processes get distinct lists, each with its own
+prose below it, however many of them a document holds. They interrelate; they are still separate
+things a reader follows one at a time. When a document carries so many that it stops being readable,
+split it into a document per process rather than merging the lists.
+
+Tags are whatever names the parties — `[library]`, `[Evennia]`, `[gap]`, or a sibling's name where two
+libraries share a flow. Use the same vocabulary throughout a document, so two lists can be read
+against each other.
+
 ## Library interoperability
 
 Every library carries `docs/interoperability.md`, covering **all** the libraries in `libraries/` —
