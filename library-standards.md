@@ -227,10 +227,24 @@ calls a library helper from their own settings module — a `DATABASES` entry, s
 *below* that call does not exist yet, and the accessor quietly returns the default rather than raising.
 Document the ordering next to the accessor; do not engineer around it.
 
-Where a setting is **required** rather than defaulted, the accessor raises `ImproperlyConfigured` naming
-the setting and where to put it, and `AppConfig.ready()` calls it so an unconfigured consumer cannot
-boot. `evennia-message-bus`'s `check_instance_id` and `evennia-ai-memory`'s `validate_settings` are the
-two worked examples.
+### Required settings are checked at boot
+
+**A setting with no safe default is checked in `AppConfig.ready()`, and an instance missing it does not
+start.** The accessor raises `ImproperlyConfigured` naming the setting and where to put it; `ready()`
+calls the accessor so that raise happens at boot.
+
+The check is the point, not the raise. An accessor raises when something first calls it, and *when*
+that is depends on what the library does — for one it is the first tick, for another the first player
+to connect. So a misconfigured instance starts cleanly, runs for as long as nobody exercises that path,
+and then fails somewhere that says nothing about the setting. Checking at boot turns that into one line
+at startup naming what to add.
+
+A setting has no safe default when there is no value the library could pick that is correct. An
+instance that does not know its own name, or its role in a deployment, cannot behave correctly in any
+direction — so refusing is the honest answer, and guessing hides the mistake until it costs more.
+
+`evennia-message-bus`'s `check_instance_id` and `evennia-ai-memory`'s `validate_settings` are the two
+worked examples.
 
 ## Logging
 
