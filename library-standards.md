@@ -190,12 +190,27 @@ Key points:
 - **`requires-python = ">=3.10"`** is the minimum (matches Evennia). Raise per library only if there's a
   reason.
 
-## Reading settings — always through an accessor in `config.py`
+## Reading settings
 
-**A library never reads `settings.SOMETHING` directly.** Every setting it consumes gets a named accessor
-in `src/<library_name>/config.py`, and both library code and consumer code call that rather than the
-setting. Six libraries do it this way — `evennia-shards`, `evennia-ai-memory`, `evennia-message-bus`,
-`evennia-mob-spawner`, `evennia-world-builder`, `fcm-xrpl` — and the shape is the same in all of them:
+Two kinds of setting, and they are handled differently. **What separates them is whether the library
+can supply a default.**
+
+| | Has a library default | Required, no default |
+|---|---|---|
+| How it is read | an accessor in `config.py`, returning the default when unset | an accessor in `config.py`, a plain read and nothing else |
+| Checked at boot | no | yes, in `check_settings()`, and the instance does not start without it |
+| Missing is | fine — the default applies | a refusal |
+
+Both are read through `config.py`. What differs is where the knowledge sits: for a defaulted setting the
+accessor holds the fallback, and for a required one the accessor holds nothing at all — the checking has
+already happened at boot.
+
+### A setting with a default — an accessor in `config.py`
+
+Every setting the library can fall back on gets a named accessor in `src/<library_name>/config.py`, and
+both library code and consumer code call that rather than the setting. Six libraries do it this way —
+`evennia-shards`, `evennia-ai-memory`, `evennia-message-bus`, `evennia-mob-spawner`,
+`evennia-world-builder`, `fcm-xrpl` — and the shape is the same in all of them:
 
 ```python
 SETTING_TICK_SECONDS = "MOB_SPAWNER_TICK_SECONDS"
@@ -208,6 +223,9 @@ def get_tick_seconds() -> int:
 
     return int(getattr(settings, SETTING_TICK_SECONDS, DEFAULT_TICK_SECONDS))
 ```
+
+**A setting with a default is never checked at boot.** Booting without it is the case the default
+exists for, so there is nothing to refuse.
 
 Four things are load-bearing:
 
@@ -227,24 +245,131 @@ calls a library helper from their own settings module — a `DATABASES` entry, s
 *below* that call does not exist yet, and the accessor quietly returns the default rather than raising.
 Document the ordering next to the accessor; do not engineer around it.
 
-### Required settings are checked at boot
-
-**A setting with no safe default is checked in `AppConfig.ready()`, and an instance missing it does not
-start.** The accessor raises `ImproperlyConfigured` naming the setting and where to put it; `ready()`
-calls the accessor so that raise happens at boot.
-
-The check is the point, not the raise. An accessor raises when something first calls it, and *when*
-that is depends on what the library does — for one it is the first tick, for another the first player
-to connect. So a misconfigured instance starts cleanly, runs for as long as nobody exercises that path,
-and then fails somewhere that says nothing about the setting. Checking at boot turns that into one line
-at startup naming what to add.
+### A required setting — validated at boot, then read directly
 
 A setting has no safe default when there is no value the library could pick that is correct. An
 instance that does not know its own name, or its role in a deployment, cannot behave correctly in any
 direction — so refusing is the honest answer, and guessing hides the mistake until it costs more.
 
-`evennia-message-bus`'s `check_instance_id` and `evennia-ai-memory`'s `validate_settings` are the two
-worked examples.
+**Validate it once, in `AppConfig.ready()`.** One guard clause per setting: read it, test it, collect
+what is wrong. Raise at the end, with everything.
+
+```python
+def check_settings():
+    """Refuse to start when a required setting is missing or unusable."""
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    problems = []
+
+    shards = getattr(settings, SETTING_SHARDS, None)
+    if not shards or isinstance(shards, str):
+        problems.append(
+            f"{SETTING_SHARDS} is {shards!r}. It must list every shard in the "
+            f"deployment; a bare string is read one letter at a time and "
+            f"matches nothing."
+        )
+
+    ...one clause per setting...
+
+    if problems:
+        raise ImproperlyConfigured(" ".join(problems))
+```
+
+**Every problem in one raise.** A consumer installing the library has typically got more than one thing
+to set, and stopping at the first turns that into fix-restart-fix-restart, once per setting. Collecting
+them means a run either starts or hands back the whole list, and a list that has been worked through
+starts.
+
+`getattr` with a `None` default rather than `settings.NAME`, so an undeclared setting reaches the
+message that says what to add instead of raising `AttributeError`. `not value` covers unset and empty
+together. A value that must be a sequence of names gets `isinstance(value, str)` as well, because a
+string satisfies every other test — it is iterable, it has a length, and membership against it silently
+succeeds one letter at a time.
+
+**A check that depends on an earlier one needs a fallback**, or the second clause crashes on the value
+the first just rejected. Give the rejected value a harmless stand-in — an empty tuple where a sequence
+was expected — so the remaining clauses still run and still report.
+
+Every required setting is checked here, in one function, in the same place in every library. Four guard
+clauses in a row beat four one-line `check_x()` functions and four calls in `ready()`.
+
+**Then give it an accessor that only reads.**
+
+```python
+def get_start_location_shard():
+    """Return ``SCALING_START_LOCATION_SHARD``. Checked at boot."""
+    from django.conf import settings
+
+    return settings.SCALING_START_LOCATION_SHARD
+```
+
+No `getattr` fallback and no `if`: boot has already guaranteed the setting is there and usable, so the
+accessor's whole job is to defer the read.
+
+**Deferral is the reason the accessor exists.** A read inside a function body is deferred already, so
+that much could be a direct `settings.NAME`. A read at *module scope* is not — a class attribute
+default, a module constant, anything evaluated when the file is imported, which happens while Django is
+still populating apps and possibly before the consumer's settings module has finished. Those need a
+callable, and a named accessor is that callable:
+
+```python
+current_shard = AttributeProperty(default=get_start_location_shard, strattr=True)
+```
+
+Without an accessor the same deferral needs a lambda at every such call site —
+`default=lambda: settings.SCALING_START_LOCATION_SHARD` — which is the same function with no name and
+no docstring, scattered wherever it is needed.
+
+Having one for every required setting rather than only the ones that need deferring keeps the setting
+name in one place and means a reader never has to work out which kind it is holding.
+
+**Do not put the validation inside the accessor and call the accessor from `ready()`.** It works, and it
+costs a re-validation on every subsequent read of a value that cannot have changed. It also gives the
+accessor a contract that includes raising, for a condition that can no longer occur.
+
+The check being at boot is the point. Validation deferred to first use fires whenever that is — the
+first tick, the first player to connect — so a misconfigured instance starts cleanly, runs until
+something exercises that path, and then fails somewhere that says nothing about the setting.
+
+## Whose problem is it — when a library raises
+
+Three kinds of failure, three different answers. The question a library asks before raising is **whose
+problem this is**, and it is answerable in every case.
+
+| The problem | What the library does |
+|---|---|
+| The consumer has not configured what the library requires | Collect it and raise, with everything else that is wrong |
+| The library itself is broken | Raise. Loudly, immediately, with the real traceback |
+| Something outside the library is broken | Say nothing. Let it raise wherever it naturally would |
+
+**A consumer's configuration is the library's business.** A required setting missing, a typeclass without
+the mixin the library needs, two settings that contradict each other — the library knows the contract and
+the consumer cannot be expected to. It refuses at boot, and it names every problem at once so a consumer
+gets one list rather than one restart per mistake. See *Reading settings* above.
+
+**The library's own bugs are the library's business.** Never swallow one. A library that hides its own
+failure is a library nobody can debug, and the consumer is entitled to find out that the fault was ours.
+
+**Everything else is not the library's business, and it must stay out of the way.** A consumer's own code
+failing — a broken module, a typo in a class they wrote, an error in a hook they implemented — is theirs
+to see and theirs to fix. If the library is holding that error when it surfaces, it lets it go rather
+than re-raising it. Three reasons, and all three matter:
+
+- **The traceback stops being honest.** Re-raised through the library, the stack reads
+  `library.ready() → library.check → their module`. The bottom line is still their bug, but the name in
+  the middle is ours, and that is what a reader anchors on.
+- **It sends them into the wrong code.** The natural move is to open the frame whose name you recognise.
+  Every minute spent reading library source is a minute not spent on the actual fault.
+- **It costs nothing to stay quiet.** The error surfaces on its own the moment anything else touches
+  that code — from Evennia, or from their own call site, with a traceback that names only them.
+
+The cost, stated plainly: a check that could not run did not run. That is acceptable, because whatever
+broke their module is stopping them anyway, and the next boot after they fix it runs the check properly.
+
+**Distinguish by content, not by exception type.** The same `TypeError` can be a mixin ordering conflict
+the library caused and can explain, or an unrelated bug in a consumer's module. Catch narrowly, test the
+message for what identifies it as the library's own, translate that case, and let everything else go.
 
 ## Logging
 
@@ -282,10 +407,6 @@ imports Evennia) as a test case rather than the broad one.
 Copy [evennia-message-bus's `log.py`](../libraries/evennia-message-bus/src/evennia_message_bus/log.py)
 and change the function name and the filename. It is verbatim across the libraries that have it, and
 should stay that way — a difference between two copies is a defect, not a variation.
-
-`[TBD — needs discussion: whether the shim eventually becomes a shared dependency rather than a file
-copied into each library. Copying is deliberate for now — the shim is small, it has no reason to
-change, and a shared logging package would be a dependency every library carries for thirty lines.]`
 
 ## Database aliases and routers
 
