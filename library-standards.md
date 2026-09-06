@@ -73,6 +73,15 @@ Two consequences, both narrow:
   because Python identifiers can't contain hyphens.
 - **Repo location**: `libraries/<library-name>/`. Each library is its own git repo with its own GitHub
   remote.
+- **Mixin class names carry a prefix naming the library they came from** — `ArchivableObjectMixin`,
+  `ScalingCharacterMixin`, `SurvivalMixin`. A consumer's typeclass declaration is a list of mixins from
+  several libraries and Evennia, and the prefix is what says which is whose when one of them
+  misbehaves.
+
+  **At least one full word, never an abbreviation.** Where the library's name is a single word, that
+  word is the prefix. Where it is several, one of them is enough — `evennia-portal-multiplex` would
+  give `Multiplex…`, not `PortalMultiplex…`. Abbreviations are the thing to avoid: they read fine to
+  whoever picked them and to nobody afterwards.
 
 ## Source layout
 
@@ -367,6 +376,63 @@ answer**, and a library inventing a fourth is what this section exists to preven
 | Config or definitions the consumer authors | A setting naming a module path |
 | Data of the library's own | The game database, or its own alias behind its own router |
 | Log output | `settings.LOG_DIR`, through the shim in `log.py` |
+
+## Reading and writing object state
+
+**Prefer to validate in `at_set()`, wherever an attribute has a rule that can be stated.** A number
+that cannot go negative, a value from a fixed set, a type that should be coerced — the check belongs
+in the descriptor rather than at each call site. It then runs once, wherever the value came from, and
+it fails at the assignment that caused it rather than later, inside whatever arithmetic consumed it.
+
+This is a preference and not always achievable. Some attributes have no constraint worth stating, and
+some can only be checked against state the descriptor cannot see.
+
+**Where a property is not validated in `at_set()`, a comment at the declaration says why** — checked
+somewhere else, checkable only against state the descriptor cannot reach, or deliberately unconstrained.
+That comment is what stops the decision being taken again: a session reading it sees the reasoning and
+moves on.
+
+**An unvalidated property with no such comment is an open question, not a settled one.** The first
+thing to ask of it is whether it should be validated in `at_set()`. Decide that, and where the answer
+is no, write the comment — so the next session inherits the decision instead of re-deriving it.
+
+**An `AttributeProperty` carrying validation must be set by assignment, never through `.db`.** The
+validation lives in the descriptor, and `.db` does not go through the descriptor.
+
+`AttributeProperty` is a descriptor with an `at_set()` hook, which is where a library checks or
+normalises what it stores. `obj.thing = value` runs it. `obj.db.thing = value` goes through the
+`AttributeHandler` instead, never reaches the descriptor, and stores the value unchecked. Evennia
+documents it: `at_set` "will only fire if you actually set the Attribute via this
+`AttributeProperty`".
+
+By way of example, a property whose `at_set()` refuses a negative number refuses `obj.weight = -5` and
+accepts `obj.db.weight = -5` without complaint.
+
+**So a library sets its own attributes by assignment throughout**, whether or not a given one
+validates today. An unvalidated property is one commit away from a validated one, and every `.db`
+write that was harmless before is then silently wrong, with nothing failing to say so.
+
+**The bypass cannot be closed from the library side.** Document it rather than defending against it: a
+consumer who writes through `.db` gets whatever they set. Pin it with a case, so the limit is stated
+rather than discovered.
+
+## Overriding a hook or a method
+
+**An override calls `super()` unless there is an explicit reason not to.** A consumer's typeclass is a
+stack of mixins from several libraries plus Evennia, and an override that does not call up removes
+everyone below it from the chain. Nothing reports that: the other library simply stops working, in a
+game where it was installed correctly.
+
+**Where an override deliberately does not call `super()`, a comment in the method says why.** Blocking
+the chain is occasionally right — a mixin whose whole job is to refuse something. The comment is what
+stops the decision being taken again.
+
+**An override with no `super()` call and no such comment is an open question, not a settled one.** The
+first thing to ask of it is whether it should call up. Decide that, and where the answer is no, write
+the comment — so the next session inherits the decision instead of re-deriving it.
+
+Note the ordering where an override both consults `super()` and adds its own veto: take the parent's
+answer first and pass on a refusal, rather than returning your own result over the top of it.
 
 ## Whose problem is it — when a library raises
 
