@@ -332,6 +332,42 @@ The check being at boot is the point. Validation deferred to first use fires whe
 first tick, the first player to connect — so a misconfigured instance starts cleanly, runs until
 something exercises that path, and then fails somewhere that says nothing about the setting.
 
+## Consumer-authored config — a setting names a module
+
+Some libraries need more from a consumer than a value. A list of meter stages, a set of rules, a table
+of definitions — content the consumer writes as Python, which the library reads and works from.
+
+**That is a setting naming a module path, resolved by the library.** Nothing else. The library does not
+read a file from a location it chose, and it does not create a folder in the consumer's gamedir.
+
+```python
+SURVIVAL_HUNGER_STAGES = "world.survival_stages.HUNGER"
+```
+
+Resolve it with `evennia.utils.utils.variable_from_module` (or `class_from_module` for a class), the
+same call Evennia makes for its own module-path settings. Which kind of setting it is follows the rules
+above: a definition the library cannot invent has no safe default, so it is checked in
+`check_settings()` and refused at boot.
+
+**A consumer already knows this shape**, because Evennia uses it throughout —
+`BASE_CHARACTER_TYPECLASS`, `PROTOTYPE_MODULES`, `CMDSET_CHARACTER`, `LOCK_FUNC_MODULES`. A library
+that invents its own mechanism is asking them to learn a second one for no gain.
+
+**Where those modules sit in the gamedir is the consumer's business and no part of ours.** A game
+running ten of our libraries may well want them gathered in one folder rather than scattered; that is
+theirs to decide, and it costs them nothing but the paths they put in their own settings. A library
+that creates directories at boot takes that decision away and leaves something behind in a repo it does
+not own.
+
+The wider rule this follows from: **every kind of thing a library needs to store already has an
+answer**, and a library inventing a fourth is what this section exists to prevent.
+
+| What the library needs | Where it goes |
+|---|---|
+| Config or definitions the consumer authors | A setting naming a module path |
+| Data of the library's own | The game database, or its own alias behind its own router |
+| Log output | `settings.LOG_DIR`, through the shim in `log.py` |
+
 ## Whose problem is it — when a library raises
 
 Three kinds of failure, three different answers. The question a library asks before raising is **whose
@@ -370,6 +406,36 @@ broke their module is stopping them anyway, and the next boot after they fix it 
 **Distinguish by content, not by exception type.** The same `TypeError` can be a mixin ordering conflict
 the library caused and can explain, or an unrelated bug in a consumer's module. Catch narrowly, test the
 message for what identifies it as the library's own, translate that case, and let everything else go.
+
+## One call, one return type
+
+**A function returns the same type however it was reached.** Not one type when it created something and
+another when it found it already there; not one type on the first call and another on the second. The
+caller writes one line to handle the result, and that line is either right or wrong — never right on
+Tuesday.
+
+The failure is quiet, which is what makes it worth a standard. Code that compares the result to
+something works for as long as the other branch is never taken, and the first time it is, the comparison
+returns false instead of raising. `evennia-archive` had exactly this: `archive()` handed back a record
+whose identity was a `uuid.UUID` when the row already existed and a `str` when it had just been created,
+because Django does not coerce a field until the row is reloaded. Nothing noticed until archiving twice
+became the normal case.
+
+**Coerce at the boundary, not in the storage.** The fix is not to change the column — `archive_id` stays
+a `UUIDField`, which is the right storage type and 16 bytes rather than 36 on Postgres. It is to hand
+back what the library's API says it deals in. Everywhere else in that library speaks strings: the mixins
+mint and store them, and both finders coerce. So the return does too.
+
+**Vary it only for a clear and specific reason, and document it where a caller will read it.** The
+distinction is whether the caller can see the reason. Returning the thing or `None` — "the archive id,
+or `None` when nothing is archived under that name" — is one signature with a sentinel in it, stated in
+the docstring and covered by a case. The caller knows both outcomes and which one they are handling.
+That is a contract.
+
+What this standard refuses is a type that varies with an internal branch nobody outside can see: which
+one you get depends on state the caller has no view of, so there is no line they can write that is
+reliably correct. If a return genuinely has to vary, the reason goes in the docstring in the same
+sentence as the types, and each shape gets a case.
 
 ## Logging
 
