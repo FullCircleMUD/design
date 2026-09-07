@@ -353,10 +353,26 @@ read a file from a location it chose, and it does not create a folder in the con
 SURVIVAL_HUNGER_STAGES = "world.survival_stages.HUNGER"
 ```
 
-Resolve it with `evennia.utils.utils.variable_from_module` (or `class_from_module` for a class), the
-same call Evennia makes for its own module-path settings. Which kind of setting it is follows the rules
-above: a definition the library cannot invent has no safe default, so it is checked in
-`check_settings()` and refused at boot.
+Which kind of setting it is follows the rules above: a definition the library cannot invent has no
+safe default, so it is checked in `check_settings()` and refused at boot.
+
+**The shape is fixed; the call that resolves it is the library's choice.** One setting naming a dotted
+path, resolved in `config.py` behind a named accessor, checked once at boot. Which loader gets used
+depends on what is being loaded, and any of these is compliant:
+
+| Call | Loads | On failure |
+|---|---|---|
+| `evennia.utils.utils.class_from_module` | a class | raises `ImportError` |
+| `django.utils.module_loading.import_string` | a class or a variable | raises `ImportError` |
+| `evennia.utils.utils.variable_from_module` | a variable | **returns `None`** |
+
+**The one requirement is that a failure is loud.** `variable_from_module` is the one to watch: it
+returns `None` for a missing module, a missing name, and a name whose value genuinely is `None`, with
+nothing to tell them apart — `mod_import` catches `ImportError` and returns `None`, despite a
+docstring saying it logs. Use it only where the default is right, or check the result and raise.
+
+Anything else a library needs is fine on the same terms: resolve it, and either it raises or you turn
+what it does into an exception yourself.
 
 **A consumer already knows this shape**, because Evennia uses it throughout —
 `BASE_CHARACTER_TYPECLASS`, `PROTOTYPE_MODULES`, `CMDSET_CHARACTER`, `LOCK_FUNC_MODULES`. A library
