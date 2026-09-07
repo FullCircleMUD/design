@@ -563,6 +563,37 @@ a `log.py` that imported `config.py` would be a module-scope cycle. `log.py` is 
 has to keep working when everything else is broken, and the module most likely to be mid-failure is
 exactly the one it must not depend on.
 
+## Importing Evennia
+
+**`log.py` is where a library imports Evennia, and every other import site is an exception that says
+why.** Wherever a module can do its work without reaching for Evennia, it should. The narrower the
+coupling, the more of the library runs without an engine — in a test, a management command, a
+migration — and the less of it moves when Evennia does.
+
+**The test suite is exempt.** `src/<library_name>/tests.py` and the `tests/` scaffolding exist to
+emulate a running game, so an Evennia import there is the job rather than a coupling to justify. This
+rule is about library code.
+
+An import outside `log.py` is not forbidden. A library extending Evennia's typeclasses cannot avoid
+them, and in practice most libraries have two or three. What is required is a comment at the import
+site saying why this module needs it:
+
+```python
+# Attributes hang off ObjectDB through Evennia's own m2m tables, so copying a row
+# means reaching for the model rather than the typeclass.
+from evennia.typeclasses.models import Attribute, Tag
+```
+
+**An import outside `log.py` with no such comment is an open question, not a settled one.** The first
+thing to ask of it is whether the module needs Evennia at all — often a value can be passed in, or the
+call deferred to a caller that already has the engine. Decide that, and where the answer is that it is
+genuinely necessary, write the comment, so the next session inherits the decision rather than
+re-deriving it.
+
+This is the same protocol as *Overriding a hook or a method* and *Reading and writing object state*
+above: a default, an exception that is allowed, and a comment that stops the exception being
+re-litigated.
+
 ## Logging
 
 **Every library logs to a file of its own, through a shim in `src/<library_name>/log.py`.** A library
@@ -592,9 +623,8 @@ The shim is small and its shape is fixed:
 
 The shim is internal — not part of the consumer-facing API, and not re-exported from `__init__.py`.
 
-**This is the one place a library may import Evennia when it otherwise has no need to.** A library
-whose logic is framework-neutral still logs through the shim; it asserts the narrow rule (only `log.py`
-imports Evennia) as a test case rather than the broad one.
+**A library whose logic is framework-neutral still logs through the shim**, which is why `log.py` is
+the default home for a library's Evennia import — see *Importing Evennia* above.
 
 Copy [evennia-message-bus's `log.py`](../libraries/evennia-message-bus/src/evennia_message_bus/log.py)
 and change the function name and the filename. It is verbatim across the libraries that have it, and
