@@ -767,6 +767,7 @@ Other principles are library-specific.
 Required:
 
 - **`INDEX.md`** — lists every design document with a one-line description, organised by category.
+- **`installing.md`** — everything a consumer does to get the library running. See below.
 - **`progress.md`** — reverse-chronological milestone log with links to evidence.
 - **`test-plan.md`** — every test case the library commits to covering, and the test function
   covering it. See [Testing](#testing).
@@ -776,6 +777,37 @@ Required:
 Conventions for new design documents are the umbrella's — see [doco-structure.md](doco-structure.md):
 kebab-case filename; first line an `# H1 Title` matching the filename; a one-paragraph summary as the
 second block; index every document in `INDEX.md` (an un-indexed document is invisible).
+
+## The installation document
+
+**Every library carries `docs/installing.md`**, and it is always called that. A consumer running
+several of our libraries installs them all the same way and looks for the same filename each time;
+one library calling it `installation.md` and another `<name>-settings.md` costs them a search per
+library for no gain.
+
+It is the page `README.md`'s install section links to, and the first thing someone who has just run
+`pip install` goes looking for.
+
+**A numbered step list, in the order a consumer does them** — this is *Describing a process* above,
+applied. Install the package, add the app, declare the settings, mix in the typeclasses, answer the
+hooks, start whatever needs starting. One step per heading, each carrying the code to paste. Why a
+step is needed goes below it or in a design doc it links to: someone working down the list should
+not have to read an essay to find the next thing to type.
+
+Three things every copy carries:
+
+- **The required settings** — name, what it does, and what happens without it.
+- **The optional settings** — name, default, and why the default is what it is.
+- **What is not checked for you** — the mistakes `check_settings()` cannot catch, so a consumer
+  knows where the safety net ends. `INSTALLED_APPS` is always here: leave the library out of it and
+  `AppConfig.ready()` never runs, so nothing validates anything.
+
+A library with no settings of its own says so in one line rather than dropping the section. An
+absent section reads as an oversight; "this library reads no settings" is an answer.
+
+[evennia-survival's](../libraries/evennia-survival/docs/installing.md) numbered spine and
+[evennia-portal-multiplex's](../libraries/evennia-portal-multiplex/docs/installing.md)
+not-checked section are the reference shapes.
 
 ## Describing a process — the step list comes first
 
@@ -876,6 +908,9 @@ When creating a new library in this folder:
 - [ ] Create `docs/interoperability.md` from the template — every sibling section present, each either
       a stated consideration or an explicit clearance.
 - [ ] Write `README.md` answering: what is it, status, is it for me, install, learn more.
+- [ ] Create `docs/installing.md` — the numbered steps, the required and optional settings, and what
+      is not checked for you. Link it from `README.md`'s install section. See *The installation
+      document*.
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
 - [ ] Copy `log.py` from a sibling; rename the function and the log filename. See *Logging*.
