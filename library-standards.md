@@ -966,6 +966,36 @@ of what this library actually does:
 the rule constrains. The other library's section links to it rather than restating, so the pair cannot
 drift. Owning a constraint does not depend on which library triggers it.
 
+## Targeting callables live in `targeting.py`
+
+`evennia-targeting` names its three kinds of callable by prefix, and a consumer writing its own
+follows the same convention:
+
+| Prefix | Takes | Returns |
+|---|---|---|
+| `p_` | `(obj, caller)` | `True` / `False` — a bare predicate |
+| `f_` | data — classes, objects, a lock name | a predicate |
+| `op_` | other predicates | a predicate |
+
+**A library that depends on `evennia-targeting` declares its targeting callables in
+`src/<library_name>/targeting.py`, and nowhere else.** Two rules:
+
+1. A hard dependency on `evennia-targeting` means the library has a `targeting.py`.
+2. No `p_`, `f_` or `op_` name is declared anywhere else in the library code.
+
+The reason is discovery across the corpus rather than tidiness within a library. Targeting logic
+spreads by nature: the library ships a handful, every consumer adds its own, and a game running eight
+of ours has them scattered over eight repositories. One filename makes the whole set findable — open
+every `targeting.py` and you have the corpus, which is what lets a session about to write
+`p_is_wielded` discover that somebody already did.
+
+That is *Where constants are declared* applied across repositories instead of within one, and it
+matters more here: a duplicate constant is a tidiness problem, while two predicates answering the same
+question slightly differently is a behavioural one.
+
+The consumer game follows the same rule for the same reason. It is not bound by this document, but it
+is the largest single author of predicates and the likeliest source of duplicates.
+
 ## Documentation discipline
 
 Follows the umbrella's working-discipline rules (the umbrella `CLAUDE.md` and [doco-structure.md](doco-structure.md)); each library's `CLAUDE.md` carries a discipline section reflecting them.
