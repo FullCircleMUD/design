@@ -519,6 +519,50 @@ one you get depends on state the caller has no view of, so there is no line they
 reliably correct. If a return genuinely has to vary, the reason goes in the docstring in the same
 sentence as the types, and each shape gets a case.
 
+## Where constants are declared
+
+**Every module-level constant a library declares lives in `config.py`**, and every other module
+imports it from there.
+
+```python
+from .config import ARCHIVE_ALIAS
+```
+
+The reason is discovery, and it is the whole reason. One file holds them all, so anyone about to
+declare a constant — a human or a session — checks one place first and finds the existing name
+rather than minting a second for the same value. Scattered constants are constants nobody can
+enumerate, and what follows is two names for one value in two modules with nothing to say they are
+the same thing. `evennia-archive` had exactly that: `ARCHIVE_ALIAS = "archive"` in `api.py` and
+`alias = "archive"` in `db_router.py`, declared independently, neither aware of the other.
+
+**It applies whether or not the constant is used more than once.** A constant read by a single
+function in a single module still goes in `config.py`. The moment placement depends on a judgement
+about how widely something is used, the rule stops being decidable and the duplicates come back.
+
+A constant a consumer is meant to use is re-exported from `__init__.py`, so where it is declared
+does not leak into the public surface.
+
+### The one exemption — `log.py`
+
+**`log.py` declares two constants of its own, and only these two:**
+
+```python
+import traceback
+
+_LOG_FILENAME = "<library>.log"
+_VALID_LEVELS = ("INFO", "WARN", "ERROR")
+```
+
+Those names, in that order, at the top of the file — `import traceback` is the only thing above
+them. Nothing else in `log.py` is a constant, and nothing else may be moved there to escape the rule
+above.
+
+The exemption exists because the dependency runs the other way. `config.py` imports the log shim to
+report its own failures — `check_settings()` refusals, the line naming which database resolved — so
+a `log.py` that imported `config.py` would be a module-scope cycle. `log.py` is also the module that
+has to keep working when everything else is broken, and the module most likely to be mid-failure is
+exactly the one it must not depend on.
+
 ## Logging
 
 **Every library logs to a file of its own, through a shim in `src/<library_name>/log.py`.** A library
