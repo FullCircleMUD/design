@@ -711,6 +711,11 @@ out of a URL, and they must never reach a log file.
 
 `evennia-message-bus` and `evennia-ai-memory` both implement this; copy from either.
 
+`[TBD — needs discussion: `evennia-database-cascade` is being built to formalise this resolution as a
+library rather than a pattern each library copies. Once it has settled and been proven, this section
+is expected to become "depend on the cascade" instead of "ship a helper of your own". Until then the
+rule above stands, but a library starting now may be writing something it will replace.]`
+
 **The middle rung is not available to every library.** Sharing the game's database works because a
 library's tables have names of their own — `evennia_message_bus_*`, `evennia_ai_memory_*` — so they sit
 alongside Evennia's and nothing collides. A library whose tables share names with the framework's
