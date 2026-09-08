@@ -711,6 +711,26 @@ out of a URL, and they must never reach a log file.
 
 `evennia-message-bus` and `evennia-ai-memory` both implement this; copy from either.
 
+**The middle rung is not available to every library.** Sharing the game's database works because a
+library's tables have names of their own — `evennia_message_bus_*`, `evennia_ai_memory_*` — so they sit
+alongside Evennia's and nothing collides. A library whose tables share names with the framework's
+cannot use it: pointing its alias at the game's database does not give it a second set of tables, it
+hands it Evennia's. Writes that look like the library's own land in the live data, and a rebuild takes
+both.
+
+`evennia-archive` is the case, and it is the whole design — the archive is a clone of Evennia's schema,
+so `objectdb` in the archive and `objectdb` in the game are the same forty-two table names. Its cascade
+is two rungs, and `DATABASE_URL` alone is refused rather than followed.
+
+**A library in that position checks it at boot** rather than trusting the consumer's cascade to have
+excluded it. Compare the resolved entry against `default` — engine, name, host, port — and refuse if
+they match. It is a dict comparison and needs no query, and it catches the case a consumer reaches by
+setting `DATABASE_URL` and not the library's own variable, which is the easy mistake and a silent one.
+
+The limit is worth stating: this compares what the settings say, not what the server is. Two entries
+reaching one database by different hostnames pass. Closing that needs a query from `ready()`, which
+costs more than it returns.
+
 ## Licensing
 
 - **BSD-3-Clause** for all libraries in this folder. The LICENSE file at repo root contains the full text.
