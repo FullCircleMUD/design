@@ -630,6 +630,41 @@ Copy [evennia-message-bus's `log.py`](../libraries/evennia-message-bus/src/evenn
 and change the function name and the filename. It is verbatim across the libraries that have it, and
 should stay that way — a difference between two copies is a defect, not a variation.
 
+### Nothing can be logged from `AppConfig.ready()`
+
+**A log call made during `django.setup()` writes nothing. Not usually — ever.**
+
+Evennia's `logger.log_file()` opens the file and then hands the write to
+`deferToThread(callback, filehandle, msg)`. At `ready()` time there is no reactor and no thread pool,
+so the deferred is created, never runs, and dies with the process. What is left behind is a zero-byte
+log file and no line in it.
+
+This bites `check_settings()` hardest, because that is the one thing every library does from
+`ready()`. A refusal that logs before it raises logs nothing, and there is no way to fix it inside the
+shim: falling back to stderr or a local file is forbidden above, and rightly — a library that logs
+somewhere unexpected is worse than one that stays quiet.
+
+**So at boot, the exception is the log.** Anything a consumer needs to know before the reactor exists
+has to be in the message raised, which reaches whoever ran the command and stops the server. That is
+already the required shape for a refusal, so nothing changes except the removal of a log call that
+never worked.
+
+Two consequences worth stating plainly:
+
+- **Do not log from `ready()`,** for a refusal or for anything else — a resolved database name, an
+  installed override, a mode this instance came up in. It will not be written.
+- **Do not write a case asserting it was.** A test that mocks the shim and asserts it was called
+  passes whether or not a line lands, which is how this survived a full suite. If a library needs to
+  prove a line reaches a file, the only honest test is a live boot.
+
+Logging works normally from anything the reactor drives — `at_server_start()`, a `LoopingCall`, a
+command, a hook on an object. `evennia-calendar`'s clock logs from `at_server_start()` and its lines
+appear; its boot check logged from `ready()` and its lines never did.
+
+Found by a live boot of `evennia-calendar`'s demo gamedir, after 88 unit tests had said the logging
+worked. **Every library with a log call in `ready()` has the same dead line**, and should have it
+removed when next touched.
+
 ## Database aliases and routers
 
 **A library that owns tables puts them on an alias of its own, behind its own router, when its data
