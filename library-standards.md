@@ -50,7 +50,7 @@ when abstracting the game concepts out would destroy the library, not when doing
 work.
 
 **Everything structural and procedural is identical across both families.** Src layout, `pyproject.toml`
-shape, the logging shim, database aliases and routers, the test framework, test-first and its test plan,
+shape, logging, database aliases and routers, the test framework, test-first and its test plan,
 the documentation surfaces, the `CLAUDE.md` shape, `docs/` structure, interoperability — all the same.
 The family decides what the code is allowed to *know*, and nothing else.
 
@@ -101,7 +101,7 @@ development, which catches packaging bugs early.
 ├── src/
 │   └── <library_name>/       # the package
 │       ├── __init__.py
-│       ├── log.py            # the logging shim — see below
+│       ├── log.py            # names the library's log file — see Logging
 │       ├── contrib/          # ONLY if contrib modules exist — see below
 │       └── tests.py          # tests live inside the package (Django convention)
 ├── tests/                    # standalone test infrastructure
@@ -391,7 +391,7 @@ answer**, and a library inventing a fourth is what this section exists to preven
 |---|---|
 | Config or definitions the consumer authors | A setting naming a module path |
 | Data of the library's own | The game database, or its own alias behind its own router |
-| Log output | `settings.LOG_DIR`, through the shim in `log.py` |
+| Log output | `settings.LOG_DIR`, through `log.py` and `evennia-logging-extension` |
 
 ## Reading and writing object state
 
@@ -542,41 +542,24 @@ about how widely something is used, the rule stops being decidable and the dupli
 A constant a consumer is meant to use is re-exported from `__init__.py`, so where it is declared
 does not leak into the public surface.
 
-### The one exemption — `log.py`
-
-**`log.py` declares two constants of its own, and only these two:**
-
-```python
-import traceback
-
-_LOG_FILENAME = "<library>.log"
-_VALID_LEVELS = ("INFO", "WARN", "ERROR")
-```
-
-Those names, in that order, at the top of the file — `import traceback` is the only thing above
-them. Nothing else in `log.py` is a constant, and nothing else may be moved there to escape the rule
-above.
-
-The exemption exists because the dependency runs the other way. `config.py` imports the log shim to
-report its own failures — `check_settings()` refusals, the line naming which database resolved — so
-a `log.py` that imported `config.py` would be a module-scope cycle. `log.py` is also the module that
-has to keep working when everything else is broken, and the module most likely to be mid-failure is
-exactly the one it must not depend on.
-
 ## Importing Evennia
 
-**`log.py` is where a library imports Evennia, and every other import site is an exception that says
-why.** Wherever a module can do its work without reaching for Evennia, it should. The narrower the
-coupling, the more of the library runs without an engine — in a test, a management command, a
-migration — and the less of it moves when Evennia does.
+**Every Evennia import is an exception that says why.** Wherever a module can do its work without
+reaching for Evennia, it should. The narrower the coupling, the more of the library runs without an
+engine — in a test, a management command, a migration — and the less of it moves when Evennia does.
+
+**A library can have none at all.** `log.py` imports `evennia-logging-extension`, and the extension
+holds the Evennia coupling on its behalf — so where a library has no other need for the engine, the
+right number of Evennia imports in it is zero. **`log.py` is not a place to put one**; a module that
+needs Evennia imports it where it needs it, with the comment.
 
 **The test suite is exempt.** `src/<library_name>/tests.py` and the `tests/` scaffolding exist to
 emulate a running game, so an Evennia import there is the job rather than a coupling to justify. This
 rule is about library code.
 
-An import outside `log.py` is not forbidden. A library extending Evennia's typeclasses cannot avoid
-them, and in practice most libraries have two or three. What is required is a comment at the import
-site saying why this module needs it:
+An import is not forbidden. A library extending Evennia's typeclasses cannot avoid them, and in
+practice most libraries have two or three. What is required is a comment at the import site saying why
+this module needs it:
 
 ```python
 # Attributes hang off ObjectDB through Evennia's own m2m tables, so copying a row
@@ -584,8 +567,8 @@ site saying why this module needs it:
 from evennia.typeclasses.models import Attribute, Tag
 ```
 
-**An import outside `log.py` with no such comment is an open question, not a settled one.** The first
-thing to ask of it is whether the module needs Evennia at all — often a value can be passed in, or the
+**An import with no such comment is an open question, not a settled one.** The first thing to ask of
+it is whether the module needs Evennia at all — often a value can be passed in, or the
 call deferred to a caller that already has the engine. Decide that, and where the answer is that it is
 genuinely necessary, write the comment, so the next session inherits the decision rather than
 re-deriving it.
@@ -596,74 +579,129 @@ re-litigated.
 
 ## Logging
 
-**Every library logs to a file of its own, through a shim in `src/<library_name>/log.py`.** A library
-that writes into the main server log makes an operator search for its lines among everything else the
-game emitted; one that uses stdlib `logging` with no handler configured emits records nobody ever sees.
-Neither is acceptable, and neither is a per-library judgement call — this is the pattern, and a session
-bootstrapping a new library copies it rather than choosing again.
+**Every library logs to a file of its own, through `evennia-logging-extension`.** A library that
+writes into the main server log makes an operator search for its lines among everything else the game
+emitted; one that uses stdlib `logging` with no handler configured emits records nobody ever sees.
+Neither is acceptable, and neither is a per-library judgement call.
 
-The shim is small and its shape is fixed:
+**`evennia-logging-extension` is a hard dependency of every library**, declared in `pyproject.toml`
+alongside `evennia`:
 
-- **One public function**, named for the library — `bus_log`, `ai_memory_log`. Signature
-  `(message: str, level: str = "INFO", trace: bool = False) -> None`.
-- **A lazy `from evennia.utils import logger` inside a `try`.** Outside an Evennia engine — the test
-  suite, a standalone tool — an `ImportError` is swallowed and the call is a silent no-op. It does not
-  fall back to stderr or to a local file: a library that logs somewhere unexpected is worse than one
-  that stays quiet.
-- **`logger.log_file(f"[{level}] {message}", filename="<library>.log")`.** The file lands in the running
-  instance's `settings.LOG_DIR` beside `server.log`.
-- **No timestamp of its own.** `log_file` already prefixes `<timestamp> [-] ` in UTC, the same format
-  the rest of the server logs use, so a library line and a `server.log` line can be read against each
-  other. Adding another would stamp every line twice.
-- **Levels are `INFO` / `WARN` / `ERROR`**, and anything else coerces to `INFO`. A log call must never
-  raise into its caller, so an unknown level degrades rather than rejecting.
-- **`trace=True` appends `traceback.format_exc()`**, for calls made from inside an `except` block.
-  Outside one, `format_exc()` returns `"NoneType: None"` and the shim suppresses it rather than logging
-  noise.
+```toml
+dependencies = [
+    "evennia",
+    "evennia-logging-extension",
+]
+```
 
-The shim is internal — not part of the consumer-facing API, and not re-exported from `__init__.py`.
+A library that genuinely cannot take it records the divergence in its own `CLAUDE.md`, as it would
+any other. `evennia-yaml-reader` is the standing example: it depends only on `pyyaml`, has no Evennia
+dependency, and taking one on for logging would change what the library is.
 
-**A library whose logic is framework-neutral still logs through the shim**, which is why `log.py` is
-the default home for a library's Evennia import — see *Importing Evennia* above.
+### `log.py` — three lines
 
-Copy [evennia-message-bus's `log.py`](../libraries/evennia-message-bus/src/evennia_message_bus/log.py)
-and change the function name and the filename. It is verbatim across the libraries that have it, and
-should stay that way — a difference between two copies is a defect, not a variation.
+`src/<library_name>/log.py` names the library's log file and does nothing else:
 
-### Nothing can be logged from `AppConfig.ready()`
+```python
+# SPDX-License-Identifier: BSD-3-Clause
+"""Logging shim for evennia-archive.
 
-**A log call made during `django.setup()` writes nothing. Not usually — ever.**
+Every line the library emits goes to its own ``archive.log`` under
+``settings.LOG_DIR``. The mechanism belongs to ``evennia-logging-extension``;
+this file names the file and nothing else.
 
-Evennia's `logger.log_file()` opens the file and then hands the write to
-`deferToThread(callback, filehandle, msg)`. At `ready()` time there is no reactor and no thread pool,
-so the deferred is created, never runs, and dies with the process. What is left behind is a zero-byte
-log file and no line in it.
+Internal to the library, not part of the consumer-facing API.
+"""
 
-This bites `check_settings()` hardest, because that is the one thing every library does from
-`ready()`. A refusal that logs before it raises logs nothing, and there is no way to fix it inside the
-shim: falling back to stderr or a local file is forbidden above, and rightly — a library that logs
-somewhere unexpected is worse than one that stays quiet.
+from evennia_logging_extension import make_logger
 
-**So at boot, the exception is the log.** Anything a consumer needs to know before the reactor exists
-has to be in the message raised, which reaches whoever ran the command and stops the server. That is
-already the required shape for a refusal, so nothing changes except the removal of a log call that
-never worked.
+archive_log = make_logger("archive.log")
+```
 
-Two consequences worth stating plainly:
+- **The function is named for the library** — `archive_log`, `bus_log`. A game running several of
+  these has one namespace, and the name in a traceback is what says whose line it was.
+- **Whether the filename is hardcoded or settable is the library's own decision.**
+  `evennia-logging-extension` has no opinion: it takes a string, validates its shape, and does not
+  care where the string came from. Both of these are compliant, and neither is a divergence:
 
-- **Do not log from `ready()`,** for a refusal or for anything else — a resolved database name, an
-  installed override, a mode this instance came up in. It will not be written.
-- **Do not write a case asserting it was.** A test that mocks the shim and asserts it was called
-  passes whether or not a line lands, which is how this survived a full suite. If a library needs to
-  prove a line reaches a file, the only honest test is a live boot.
+  ```python
+  archive_log = make_logger("archive.log")        # hardcoded
+  archive_log = make_logger(get_log_filename())   # a setting, with a default
+  ```
 
-Logging works normally from anything the reactor drives — `at_server_start()`, a `LoopingCall`, a
-command, a hook on an object. `evennia-calendar`'s clock logs from `at_server_start()` and its lines
-appear; its boot check logged from `ready()` and its lines never did.
+  Hardcode it unless there is a reason not to. A library offers the setting when a consumer might
+  plausibly want to move its log — most obviously to disambiguate two libraries whose names would
+  otherwise collide — and it is the library that knows whether that case is real. Where it does, the
+  setting follows *Reading settings* above: a defaulted setting, read through an accessor in
+  `config.py`, with the default named beside it.
 
-Found by a live boot of `evennia-calendar`'s demo gamedir, after 88 unit tests had said the logging
-worked. **Every library with a log call in `ready()` has the same dead line**, and should have it
-removed when next touched.
+  **Either way nothing is declared in `log.py`.** A hardcoded name is a literal in the one call that
+  uses it; a settable one has its name and default in `config.py` like every other constant. That is
+  why the constants rule has nothing to exempt here.
+
+  **A settable filename is read at bind time**, so it falls under the same ordering rule as `LOG_DIR`:
+  declared below whatever imports the library, the accessor quietly returns the default and the log
+  lands somewhere the consumer did not choose. The library's own `installing.md` says so.
+
+- **`config.py` imports the log function lazily — inside the functions that call it, never at module
+  scope.**
+
+  ```python
+  def check_settings():
+      from .log import archive_log   # lazy — the module-scope form is a cycle
+      ...
+  ```
+
+  The settable form has `log.py` import `config.py` at module scope for the accessor, and `config.py`
+  imports the log function back to report its refusals — two module-scope imports of each other
+  resolve or crash on declaration order. The rule is unconditional, not just for libraries using the
+  settable form: whether `log.py` imports `config.py` is a choice that can change later, and a
+  module-scope log import sitting in `config.py` would re-create the cycle silently the day it does.
+  By the time `check_settings()` or an accessor runs, both modules are loaded and the lazy import is a
+  cached lookup — the same idiom, for the same reason, as `from django.conf import settings` inside a
+  function body.
+- **The signature is `(message, level="INFO", trace=False)`**, supplied by the extension. Levels are
+  `INFO` / `WARN` / `ERROR` and anything else coerces to `INFO`; `trace=True` appends the active
+  traceback when called from inside an `except` block. A log call never raises into its caller.
+- **`log.py` is internal** — not part of the consumer-facing API, and not re-exported from
+  `__init__.py`.
+
+**A library whose logic is framework-neutral still logs through `log.py`.** It costs one import of a
+library that itself imports Evennia lazily, so the coupling does not spread.
+
+### What the extension does, and why a library does not do it itself
+
+Evennia's `logger.log_file()` hands every write to `deferToThread`. With a reactor running that is
+right — disk I/O stays off the reactor thread while players are connected. Before one exists the
+deferred is created, never runs, and dies with the process, leaving a zero-byte file. The extension
+branches on whether a reactor is running and writes the line synchronously when there is not, in the
+same format, to the same file.
+
+**So a library may log from anywhere**, including the places where a line used to vanish:
+
+| Where | What happens |
+|---|---|
+| The consumer's settings module, below `from evennia.settings_default import *` | Written synchronously |
+| `AppConfig.ready()`, during `django.setup()` | Written synchronously |
+| A management command, with no reactor at all | Written synchronously |
+| A `LoopingCall`, a command, an object hook | Handed to Evennia, deferred |
+
+Full behaviour, including what happens before `LOG_DIR` can be resolved, is in that library's
+[installing.md](../libraries/evennia-logging-extension/docs/installing.md) and
+[architecture.md](../libraries/evennia-logging-extension/docs/architecture.md).
+
+### Two things that follow, and both are easy to get wrong
+
+**A library import in a consumer's settings file goes below the Evennia import.** `LOG_DIR` is set by
+`from evennia.settings_default import *`, so a library imported above that line is refused at boot,
+naming the setting. Where a game overrides `LOG_DIR`, the override goes directly under that import —
+the directory is resolved once, at the first library import, and an override below it is read too
+late with nothing reporting the mismatch.
+
+**A test that mocks the log function and asserts it was called proves nothing.** It passes whether or
+not a line lands, which is how a dead log call survived a full suite in `evennia-calendar`. Where a
+library needs to prove a line reaches a file, the honest test reads the file back — and a live boot
+is what proves the mechanism.
 
 ## Database aliases and routers
 
@@ -1077,7 +1115,8 @@ When creating a new library in this folder:
       document*.
 - [ ] Populate `pyproject.toml` using the standard shape.
 - [ ] Create `src/<library_name>/__init__.py` with `__version__ = "0.0.1"`.
-- [ ] Copy `log.py` from a sibling; rename the function and the log filename. See *Logging*.
+- [ ] Declare `evennia-logging-extension` in `dependencies`, and write the three-line `log.py`
+      naming this library's log file. See *Logging*.
 - [ ] If the library owns tables: decide where they go. Its own alias if the data must outlive the game
       database or be read by more than one instance — then add the router and resolution helper, and
       document the append-don't-assign setup form. Otherwise the game database, said so in `CLAUDE.md`
