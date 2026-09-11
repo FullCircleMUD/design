@@ -210,10 +210,10 @@ The zone and district tags already exist on rooms. NPCs inherit their room's tag
 
 ### Lore repository
 
-Lore YAML files live in a dedicated repository: `FCM/lore/`. This repo is separate from the game code and can be edited collaboratively. The directory structure mirrors the scope hierarchy:
+Lore YAML files live in a dedicated repository: `FCM/content/lore/`. This repo is separate from the game code and can be edited collaboratively. The directory structure mirrors the scope hierarchy:
 
 ```
-FCM/lore/
+FCM/content/lore/
     continental.yaml              # world-wide common knowledge
     millholm/
         regional.yaml             # Millholm zone-level lore
@@ -391,6 +391,6 @@ Knowledge gating happens naturally through scope tags. Rowan doesn't awkwardly k
 | `{lore_context}` prompt variable | Built | `typeclasses/mixins/llm_mixin.py` — `_get_context_variables()` |
 | Prompt templates | Built | NPC personality templates in `llm/prompts/` accept `{lore_context}` |
 | `lore import` / `lore wipe` | Built | `evennia-ai-memory` — superuser commands, reading the lore repo through `evennia-yaml-reader` |
-| Lore YAML repo | Built | `FCM/lore/` — content only: YAML organised by scope, plus the `index.yaml` manifest |
+| Lore YAML repo | Built | `FCM/content/lore/` — content only: YAML organised by scope, plus the `index.yaml` manifest |
 | Faction tags on NPCs | Built | Faction tags applied to NPCs across multiple guilds (mages, temple, thieves, warriors) |
 | Evennia tag system | Built | Zone + district tags on all rooms |

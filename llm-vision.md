@@ -152,7 +152,7 @@ Full detail: [combat-ai-memory.md § Early Warning Pattern](combat-ai-memory.md#
 
 ## Authoring Model
 
-Lore is not written into code. It lives in a separate repository (`FCM/lore/`) as YAML files organised by scope — continental, regional, local, faction. A standalone importer runs in a Railway service with access to the game's `ai_memory` database, embedding new entries on push. Adding new lore never requires a game restart or code change.
+Lore is not written into code. It lives in a separate repository (`FCM/content/lore/`) as YAML files organised by scope — continental, regional, local, faction. A standalone importer runs in a Railway service with access to the game's `ai_memory` database, embedding new entries on push. Adding new lore never requires a game restart or code change.
 
 Full authoring workflow: [lore-memory.md § Lore Authoring Workflow](lore-memory.md#lore-authoring-workflow).
 
@@ -162,7 +162,7 @@ NPC personality templates live alongside code in `src/game/llm/prompts/`. They a
 
 ## Testing and Validation
 
-LLM behaviour is non-deterministic, so FCM has a dedicated testing harness (`FCM/llm-test-harness/`) that drives virtual clients against a running server, scripts conversations, detects loops, and compares outputs across model versions. See the harness README for bot configuration format and usage.
+LLM behaviour is non-deterministic, so FCM has a dedicated testing harness (`FCM/utilities/llm-test-harness/`) that drives virtual clients against a running server, scripts conversations, detects loops, and compares outputs across model versions. See the harness README for bot configuration format and usage.
 
 Validation goals:
 

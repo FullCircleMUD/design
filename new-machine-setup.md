@@ -31,20 +31,30 @@ Folder names must match the umbrella `.gitignore` entries exactly. All remotes a
 
 | Repo | Private? | Default branch |
 |---|---|---|
-| cosigner | public | main |
 | design | public | main |
-| fullcirclemud | public | main |
-| lore | public | main |
-| nft_api | public | main |
-| transparency | public | main |
-| fcm-mobs | **private** | main |
-| fcm-world | **private** | main |
-| llm-test-harness | **private** | main |
 | ops | **private** | main |
-| xrpl-tools | **private** | main |
 
 > `design` is this wiki — the source of truth for FCM design documentation. Clone it before anything
 > else; the rest of the setup refers to it.
+
+### `content/` (clone into `content/` — the game-content repos)
+
+| Repo | Private? | Default branch |
+|---|---|---|
+| fullcirclemud | public | main |
+| lore | public | main |
+| transparency | public | main |
+| fcm-mobs | **private** | main |
+| fcm-world | **private** | main |
+
+### `utilities/` (clone into `utilities/` — the supporting tools)
+
+| Repo | Private? | Default branch |
+|---|---|---|
+| cosigner | public | main |
+| nft_api | public | main |
+| llm-test-harness | **private** | main |
+| xrpl-tools | **private** | main |
 
 ### `libraries/` (clone into `libraries/` — see `libraries/README.md`)
 

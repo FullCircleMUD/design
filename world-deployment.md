@@ -149,7 +149,7 @@ The YAML side of FCM. For an author landing here, the loop is:
 1. **Edit YAML** in `fcm-world/shard0/<zone>/<district>/<file>.yaml`, on the branch that owns it — live content on `main`, test-world content on `test`. See [Content Branches](#content-branches).
 2. **Validate locally**: from `FCM/src/game/` with the venv active:
    ```
-   wb-validate --reader local --root ../../fcm-world
+   wb-validate --reader local --root ../../content/fcm-world
    ```
    This runs Reader → Definitions → Finder → Loader → Validator and prints any findings. No DB mutation. Run before committing.
 3. **Commit + push** in fcm-world.
