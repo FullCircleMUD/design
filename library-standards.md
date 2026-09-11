@@ -542,6 +542,10 @@ about how widely something is used, the rule stops being decidable and the dupli
 A constant a consumer is meant to use is re-exported from `__init__.py`, so where it is declared
 does not leak into the public surface.
 
+**The one exemption is `SPEC` in `db_spec.py`** — the cascade's discovery imports that module and
+reads that attribute, so it is the one name this rule cannot house in `config.py`. The exemption is
+the name, not the file: any other constant declared in `db_spec.py` breaks the rule as usual.
+
 ## Importing Evennia
 
 **Every Evennia import is an exception that says why.** Wherever a module can do its work without
