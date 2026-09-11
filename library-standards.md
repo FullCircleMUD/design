@@ -341,6 +341,92 @@ The check being at boot is the point. Validation deferred to first use fires whe
 first tick, the first player to connect — so a misconfigured instance starts cleanly, runs until
 something exercises that path, and then fails somewhere that says nothing about the setting.
 
+### Layering over a setting — an override, not a read
+
+Everything above governs a setting the library reads **in order to use its value**. Layering over a
+setting is a different operation that happens to contain a `getattr`, and the accessor rule does not
+reach it.
+
+The shape is: **read what is installed, build on it, put it back.** The library cannot know what a
+consumer configured until it is standing there at boot looking at it, and it has to end up in the
+result without displacing what it found.
+
+The common case is a class setting. Evennia resolves a number of them by dotted path —
+`PORTAL_SESSION_HANDLER_CLASS`, `EVENNIA_SERVER_SERVICE_CLASS`, `AMP_CLIENT_PROTOCOL_CLASS`,
+`EVENNIA_PORTAL_SERVICE_CLASS`, `SERVER_SESSION_CLASS` — and a consumer may point any of them at a
+class of their own, for their own reasons. A library needing its behaviour in one of those classes has
+two options. It can assign the setting, which silently discards whatever the consumer chose. Or it can
+read what is installed, subclass it, and point the setting at the subclass — so the consumer's class
+survives underneath.
+
+**It is not only classes.** A list setting a library adds itself to is the same operation:
+`AT_SERVER_STARTSTOP_MODULE`, `MIDDLEWARE`, `PORTAL_SERVICES_PLUGIN_MODULES`. Read the current list,
+append, write it back. Overwriting would throw away the consumer's entries exactly as overwriting a
+class setting throws away their class, and the read exists for the same reason: to preserve whatever it
+finds. What makes something a layer-over is the shape, not the type of the value.
+
+```python
+def _layer_over(self, setting, stash, module, attribute, factory):
+    """Subclass whatever class a setting names, and repoint it at ours."""
+    from django.conf import settings
+    from evennia.utils.utils import class_from_module
+
+    ours = f"{module.__name__}.{attribute}"
+    original = getattr(settings, setting)
+    if original == ours:
+        return
+
+    setattr(settings, stash, original)
+    setattr(module, attribute, factory(class_from_module(original)))
+    setattr(settings, setting, ours)
+```
+
+The list form is the same block, shorter:
+
+```python
+modules = list(make_iter(settings.AT_SERVER_STARTSTOP_MODULE))
+if ours not in modules:
+    settings.AT_SERVER_STARTSTOP_MODULE = modules + [ours]
+```
+
+**Read the block, not the line.** What that code does is override a setting while respecting the
+consumer's choice of what it is overriding. The `getattr` is machinery inside that — you cannot
+subclass what is installed, or append to it, without asking what is installed. The value is never
+consumed: nothing branches on it, no behaviour depends on it, and the library never asks what the
+consumer configured. It goes straight back out as a base class, or as the front of the list it was
+taken from.
+
+There is one branch on the value in each, and neither is a consumption: `if original == ours` and
+`if ours not in modules` guard against `ready()` running twice. They ask *have I already installed*,
+not *what did the consumer choose*.
+
+**So an accessor in `config.py` would add nothing.** The rule's stated failure is a direct read raising
+`AttributeError` for the consumer who declared nothing — and that cannot happen here. These are
+Evennia's settings, set in its own `default_settings.py`, so there is no undeclared case to protect. An
+accessor would be a pass-through wrapping a value that leaves again on the next line.
+
+**The test, where it is not obvious:** is the value consumed, or does it only feed the write? A setting
+the library *reads* changes what the library does. A setting the library *layers over* changes only
+what the library's own entry sits on top of.
+
+Things the pattern carries, and they are what keep the exemption narrow:
+
+- **Install time only** — inside `AppConfig.ready()`, paired with the write of the same setting. A read
+  anywhere else is an ordinary settings read and the accessor rule applies to it.
+- **Idempotent.** `ready()` can run more than once, so a second pass finds its own entry and returns
+  rather than layering twice.
+- **Ours is the leaf** (class form). The library's method runs and `super()` runs the consumer's.
+  Subclassing the other way round would put the consumer's class on top and defeat the point.
+- **The generated class is assigned onto a module** (class form). Evennia resolves these by dotted
+  path, not by value, so there has to be a real importable name at the end of the string.
+- **The original is stashed** under a prefixed key where one class is being replaced, so the class
+  underneath stays recoverable and readable. A list keeps its own history: the entries are all still
+  in it.
+
+**Comment at the site**, naming the setting being layered and why that module needs to be in the chain
+— the same protocol as *Importing Evennia* below. The exemption is allowed; it is not allowed to be
+invisible.
+
 ## Consumer-authored config — a setting names a module
 
 Some libraries need more from a consumer than a value. A list of meter stages, a set of rules, a table
