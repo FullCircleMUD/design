@@ -390,7 +390,7 @@ answer**, and a library inventing a fourth is what this section exists to preven
 | What the library needs | Where it goes |
 |---|---|
 | Config or definitions the consumer authors | A setting naming a module path |
-| Data of the library's own | The game database, or its own alias behind its own router |
+| Data of the library's own | The game database, or an alias declared to `evennia-database-cascade` |
 | Log output | `settings.LOG_DIR`, through `log.py` and `evennia-logging-extension` |
 
 ## Reading and writing object state
@@ -705,109 +705,69 @@ is what proves the mechanism.
 
 ## Database aliases and routers
 
-**A library that owns tables puts them on an alias of its own, behind its own router, when its data
-has to outlive the game database or be reachable from more than one instance.** Either alone is enough:
+**A library that owns tables on an alias depends on `evennia-database-cascade` and declares a spec. It
+writes no router, no `DATABASES` entry and no resolution code of its own.** The cascade resolves every
+alias from the environment — a database of its own, the game's, or a local SQLite file — and derives
+the routers and the migration list from the same answer, so they cannot disagree. Hand-rolled, they
+can, and that failure is silent: a router refuses the tables while Django records the migrations as
+applied, leaving a database that looks migrated and holds nothing.
+
+The dependency is declared in `pyproject.toml` alongside `evennia`, and the spec is a module named
+`db_spec` in the package:
+
+```python
+# src/<library_name>/db_spec.py
+from evennia_database_cascade import AliasSpec
+
+SPEC = AliasSpec(
+    app_label="my_library",
+    alias="my_library",
+)
+```
+
+`db_spec` sits on the consumer's settings path, so it imports nothing from Django — a spec is data.
+The full field table, the one `configure()` call the consumer makes and `evennia cascade_migrate` live
+in the cascade's own `docs/installing.md`; a library's `installing.md` names the dependency and points
+there, and does not document `DATABASES` or `DATABASE_ROUTERS` itself.
+
+### When to declare a spec
+
+**Declare one when the library's data has to be separable from the game database.** Either alone is
+enough:
 
 - **It must survive a rebuild.** A game database gets wiped and rebuilt from source; anything the
-  library is holding that matters afterwards cannot be in there. It also means a consumer can move that
-  data onto separate hardware without the library knowing.
+  library is holding that matters afterwards cannot be in there.
 - **More than one instance reads it.** A game database belongs to one instance. Data that has to cross
   between them needs somewhere both can see.
 
+The spec does not itself split the alias — where each alias lands is the deployment's decision, made
+by setting `DATABASE_URL_<ALIAS>` or not. The spec is what makes that decision available.
+
 **A library whose data is scoped to one instance and worth nothing after a wipe puts its tables in the
-game database.** An alias would cost a database, a router and a migration step a consumer has to
-configure, to protect rows that are stale within seconds and meaningless after a restart. Say so in the
-library's `CLAUDE.md` and pin it with a case, so it is not later "fixed" into an alias by someone
+game database** — plain models, no spec, no alias. Separation would cost the consumer a database and a
+migration step, to protect rows that are stale within seconds and meaningless after a restart. Say so
+in the library's `CLAUDE.md` and pin it with a case, so it is not later "fixed" into a spec by someone
 applying the first rule without reading the reason.
 
-### The router
+### What travels on the spec
 
-Three rules, all load-bearing:
+Concerns that belong to the library go on its spec, not in the consumer's settings:
 
-- **Answer only for your own app label.** Return `None` for every model you do not own. Django consults
-  routers in order and takes the first non-`None` answer, so a router that answers for a foreign model
-  silently captures its queries and sends them to the wrong database. A consumer running two of our
-  libraries has two routers in the list; each must leave the other's models alone.
-- **`allow_migrate` returns `False` for your app on every other alias.** Without it a plain
-  `evennia migrate` creates your tables in the game database as well, and the separation you just built
-  exists only on paper.
-- **`allow_relation` expresses no opinion unless both models are yours.** A library holding no foreign
-  key to anything should return `None` throughout; one with relations between its own models may return
-  `True` for that case and `None` otherwise.
+- **`allow_sharing_common_db=False`** where the library's tables share names with the framework's.
+  Pointing such an alias at the game's database does not give it a second set of tables, it hands it
+  Evennia's — writes land in the live data, and a rebuild takes both. `evennia-archive` is the case:
+  the archive is a clone of Evennia's schema, so `objectdb` there and `objectdb` in the game are the
+  same forty-two table names. The cascade refuses `DATABASE_URL` alone for such an alias rather than
+  following it.
+- **`conn_max_age` and `session_options`** where the library's access pattern genuinely differs from
+  the game-wide value — `evennia-ai-memory` setting `hnsw.iterative_scan` for pgvector is the case.
 
-### How a consumer installs it
+### Diverging
 
-A library's setup snippet is pasted into a settings file whose prior state the library cannot see. It
-might be the first router the consumer has ever added, or the fourth. **The documented form has to be
-correct in both cases**, and the obvious one is not:
-
-```python
-DATABASE_ROUTERS += ["your_library.db_router.YourRouter"]
-```
-
-Evennia's default settings do not define `DATABASE_ROUTERS`, so that works only when something else has
-already created the list. Install this library first and it raises `NameError` before the server
-starts; install it third and it works — which is worse, because the instruction then looks correct
-until the day someone follows it on a clean gamedir.
-
-Document this instead, and copy it verbatim between libraries so a consumer running several sees one
-familiar shape:
-
-```python
-_YOUR_ROUTER = "your_library.db_router.YourRouter"
-DATABASE_ROUTERS = list(globals().get("DATABASE_ROUTERS", []))
-if _YOUR_ROUTER not in DATABASE_ROUTERS:
-    DATABASE_ROUTERS.append(_YOUR_ROUTER)
-```
-
-It builds the list whether or not one exists, appends rather than replacing — so it cannot silently
-drop a router another library added — and the membership check makes re-running it harmless.
-
-### Resolving the alias
-
-A library that needs an alias should ship a helper the consumer calls in their settings, rather than
-making them hand-write a `DATABASES` entry:
-
-```python
-DATABASES["your_alias"] = your_library_database(os.path.join(GAME_DIR, "your_library.db3"))
-```
-
-Three rungs, in order: a `DATABASE_URL_<LIBRARY>` environment variable naming a database of its own,
-then `DATABASE_URL` to share the game's, then the SQLite path passed in. Which rung is *right* depends
-on something no single instance can see, so the helper does not guess and does not warn — it ships a
-companion `describe_*_database()` that names the resolved database and the rung that produced it, and
-the library writes that line to its log at startup. Two instances that should share a database are then
-confirmed by reading two log lines rather than by reasoning about where each variable was set.
-
-That description must carry the database name and host only. The configuration holds credentials parsed
-out of a URL, and they must never reach a log file.
-
-`evennia-message-bus` and `evennia-ai-memory` both implement this; copy from either.
-
-`[TBD — needs discussion: `evennia-database-cascade` is being built to formalise this resolution as a
-library rather than a pattern each library copies. Once it has settled and been proven, this section
-is expected to become "depend on the cascade" instead of "ship a helper of your own". Until then the
-rule above stands, but a library starting now may be writing something it will replace.]`
-
-**The middle rung is not available to every library.** Sharing the game's database works because a
-library's tables have names of their own — `evennia_message_bus_*`, `evennia_ai_memory_*` — so they sit
-alongside Evennia's and nothing collides. A library whose tables share names with the framework's
-cannot use it: pointing its alias at the game's database does not give it a second set of tables, it
-hands it Evennia's. Writes that look like the library's own land in the live data, and a rebuild takes
-both.
-
-`evennia-archive` is the case, and it is the whole design — the archive is a clone of Evennia's schema,
-so `objectdb` in the archive and `objectdb` in the game are the same forty-two table names. Its cascade
-is two rungs, and `DATABASE_URL` alone is refused rather than followed.
-
-**A library in that position checks it at boot** rather than trusting the consumer's cascade to have
-excluded it. Compare the resolved entry against `default` — engine, name, host, port — and refuse if
-they match. It is a dict comparison and needs no query, and it catches the case a consumer reaches by
-setting `DATABASE_URL` and not the library's own variable, which is the easy mistake and a silent one.
-
-The limit is worth stating: this compares what the settings say, not what the server is. Two entries
-reaching one database by different hostnames pass. Closing that needs a query from `ready()`, which
-costs more than it returns.
+A library that genuinely cannot take the cascade records the divergence in its own `CLAUDE.md`, as it
+would any other — naming the specific, concrete reason, not a preference. `evennia-database-cascade`
+itself is the standing exemption: it owns no tables and cannot depend on itself, and its `router.py`
+*is* the mechanism.
 
 ## Licensing
 
