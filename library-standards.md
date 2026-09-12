@@ -1100,6 +1100,9 @@ Each sibling section opens by naming the **relationship** — one of:
 - **Hard dependency** — imported unconditionally; the sibling must be installed.
 - **Optional integration** — imported behind a `try` with a documented fallback; both co-installed and
   standalone are supported.
+- **Indirect dependency** — not imported here, but a hard dependency of one that is. Every install of
+  this library brings it in, so it is present and the consumer may have to configure it — but nothing
+  in this library's code touches it.
 - **No coupling** — neither imports the other.
 
 Then either the considerations, or an explicit clearance. A clearance states *why* it is clear, in terms
