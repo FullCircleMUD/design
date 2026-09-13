@@ -30,6 +30,7 @@ as this wiki (an `INDEX.md` entry point, one kebab-case topic per file).
 | [evennia-mob-spawner](../libraries/evennia-mob-spawner/docs/INDEX.md) | `docs/` | Declarative YAML mob spawn system for Evennia. |
 | [evennia-targeting](../libraries/evennia-targeting/docs/INDEX.md) | `docs/` | Composable targeting predicates & content filters. |
 | [evennia-yaml-reader](../libraries/evennia-yaml-reader/docs/INDEX.md) | `docs/` | Source-agnostic YAML reader for the Evennia ecosystem. |
+| [evennia-effects-conditions](../libraries/evennia-effects-conditions/docs/INDEX.md) | `docs/` | Consumer-declared conditions and timed effects, with the lifecycle machinery. |
 
 > These links point into the cloned sub-repos (gitignored by the umbrella) — they resolve when you work
 > from the umbrella root with the libraries cloned. Each library's own `CLAUDE.md` also points at its
