@@ -1,5 +1,8 @@
 # Design principles
 
+> Always try these first. Varying from one is allowed only when it genuinely cannot work — which
+> should be rare — and the code comments must say why it couldn't be done this way.
+
 The first principles currently applied across FCM development: how each aspect of the game is built,
 independent of any one component.
 
@@ -35,3 +38,17 @@ independent of any one component.
 - A component tests only its own behaviour.
 - Another component it touches is mocked or stubbed at its public interface.
 - A component sending a signal tests that it sends it, never what the receiver does with it.
+
+## 5. Typeclasses compose, they don't own
+
+- An in-game typeclass declares no attributes of its own. Every attribute comes from a mixin provided
+  by a component or library.
+- A typeclass may assign values to attributes its mixins declare.
+- The only methods on a typeclass are overrides of hooks — Evennia's or a mixin's — that coordinate
+  behaviour across components and libraries.
+
+## 6. Commands decide, then execute
+
+- A command decides whether it may run, then calls the method that does the work.
+- A brief decision lives in the command. A long or complex one moves to its own helper or helpers.
+- The execution method never decides whether to run. By the time it is called, that is settled.
