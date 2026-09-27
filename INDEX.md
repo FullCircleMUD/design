@@ -1,5 +1,8 @@
 # Design — index
 
+> **No session adds to or changes anything in this repository without explicit permission from a
+> human.**
+
 **This is the design for the FCM rebuild.** Nothing here describes or refers to the legacy game or
 its repository.
 

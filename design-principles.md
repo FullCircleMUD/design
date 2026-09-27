@@ -52,3 +52,12 @@ independent of any one component.
 - A command decides whether it may run, then calls the method that does the work.
 - A brief decision lives in the command. A long or complex one moves to its own helper or helpers.
 - The execution method never decides whether to run. By the time it is called, that is settled.
+
+## 7. Static data is a validated record
+
+- Static game data — kit classes, races, languages — is declared as frozen dataclass instances, never
+  raw dicts.
+- Each record validates its fields on construction, so bad data fails at boot, not at runtime.
+- Every dict in a record is a `MappingProxyType` over a copy. `frozen` stops a field being replaced,
+  not the dict it holds being changed.
+- Records are collected in a `StaticRegistry`.
