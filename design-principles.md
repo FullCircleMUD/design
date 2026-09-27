@@ -12,3 +12,26 @@ independent of any one component.
 - If nothing fits, write a helper in the right place, where it becomes the standard for the whole
   build. Never a one-off.
 - Log every new parser or filter helper in the inventory.
+
+## 2. Decoupling
+
+- **Reading another component's data** — through a public read method exported from its package (never reach
+  inside another component; use only its public interface).
+- **Changing data another component owns** — by signal. The owner's receiver makes the change.
+  - *Announcement*, one-to-many: something happened; each listener updates its own data.
+  - *Request*, many-to-one: any sender asks the one owner to do a job only it does.
+- **Coordinating across components** — work no single component owns — through hooks on the game's
+  typeclasses and mixins. A hook may send a signal for any part that is a component's own data.
+- The test: name the receiving component and the attribute it changes. If you can't, it's a hook.
+- Signals are declared in `components.signals`; sender and receiver import it, never each other.
+
+## 3. Decompose, test each unit, then compose
+
+- Break a complex task into units, test each unit on its own, then compose them.
+- Every unit has its own tests. A top-level test alone is not coverage.
+
+## 4. Test in isolation
+
+- A component tests only its own behaviour.
+- Another component it touches is mocked or stubbed at its public interface.
+- A component sending a signal tests that it sends it, never what the receiver does with it.
