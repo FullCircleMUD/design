@@ -76,3 +76,8 @@ independent of any one component.
 - A configuration value, usually held in a constant, an enum or a static data structure, is there to
   be changed as the game is tweaked and balanced. A test that asserts its value breaks when it is.
 - Test the machinery around the value, with configurations mocked as the test needs.
+
+## 9. A component's mixin adds its commands
+
+- A component with a suitable mixin adds its command set in the mixin's `at_object_creation`.
+- Only a component without one adds its commands to a command set in `commands/`.
