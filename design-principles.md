@@ -49,9 +49,11 @@ independent of any one component.
 
 ## 6. Commands decide, then execute
 
-- A command decides whether it may run, then calls the method that does the work.
+- A command identifies its target and decides whether it may run, then calls the method that does
+  the work.
 - A brief decision lives in the command. A long or complex one moves to its own helper or helpers.
-- The execution method never decides whether to run. By the time it is called, that is settled.
+- The execution method never targets and never decides whether to run. By the time it is called, both
+  are settled.
 
 ## 7. Static data is a validated record
 
