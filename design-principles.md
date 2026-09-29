@@ -61,3 +61,18 @@ independent of any one component.
 - Every dict in a record is a `MappingProxyType` over a copy. `frozen` stops a field being replaced,
   not the dict it holds being changed.
 - Records are collected in a `StaticRegistry`.
+
+## 8. Test first
+
+1. Discuss and agree the test cases.
+2. Write the tests, with stubs or placeholders where the code does not exist yet.
+3. Red run. Note any test that passes.
+4. Write the code until the tests pass.
+5. Mutate the code under each test noted in step 3 to confirm it can fail. One that cannot is vacuous — rewrite it
+   or drop it.
+
+### 8a. Don't test configuration
+
+- A configuration value, usually held in a constant, an enum or a static data structure, is there to
+  be changed as the game is tweaked and balanced. A test that asserts its value breaks when it is.
+- Test the machinery around the value, with configurations mocked as the test needs.

@@ -26,6 +26,7 @@ One way to do each job. Use it; don't write another.
 | Filter a room's or object's contents | `walk_contents`, `bucket_contents`, with `p_` / `f_` / `op_` predicates | `evennia_targeting` |
 | Match a name against keys and aliases | `f_key_matches` | `evennia_targeting` |
 | Resolve one word that could be a plain name **or** an object — a resource held or an item carried | `match_named(caller, text, names, candidates)` — a name in full, then the objects through `caller.search(quiet=True)`, then a start of a name. Filter both lists first; it filters nothing and messages nobody. Decide by the total it returns: one is the answer, more is a question | `evennia_targeting` |
+| Find the target of anything violent — an attack, a bash, a backstab, a combat spell | `find_combat_target(caller, name, messages=None)` — a combat actor the caller can see in the room, or `None` once the caller has been told why not. `messages` rewords the refusals for the command | `components.combat` |
 | Every resource a holder has — details and quantity | `holder.get_held_resource_data()` → `{resource_id: (info, quantity)}`. Gold is not in it | `fcm_xrpl` `XRPLFungibleInventoryMixin` |
 | A resource's details by id — name, unit, weight, code | `ResourceService.get_resource_type(resource_id)` | `fcm_xrpl` |
 | Gold's details — name, unit, weight, code | `GoldService.get_gold_type()` | `fcm_xrpl` |
