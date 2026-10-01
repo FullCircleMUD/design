@@ -14,7 +14,6 @@ component's `DEPENDS_ON`, declared in its `__init__.py`.
 | `preferences` | The switches a player sets about their own play, and the `toggle` command. | custom_properties | |
 | `water_container` | What holds drinkable water, what fills it, and the commands between them. | custom_properties | |
 | `queued_cmds` | Commands that wait their turn in a fight. | combat | |
-| `telemetry_spawn` | Measures the game economy each hour, and spawns into it what the measurements call for. | fcm_xrpl | |
 | `alignment` | A moral standing, as one number from pure evil to pure good. | custom_properties, signals | |
 | `busy` | An action that takes time, holding the character while it runs. | messaging, signals | |
 | `damage_resistance` | How much a blow is reduced or amplified by what it lands on. | damage_type, signals | |
@@ -38,6 +37,7 @@ component's `DEPENDS_ON`, declared in its `__init__.py`.
 | `item_restrictions` | Whether an actor is permitted to use an item. | alignment, core_actor_stats, custom_properties, kit_classes, races, size, skills | |
 | `weapons` | What a weapon is, what mastery of it buys, and what it does in an attack. | custom_properties, damage_type, dice, kit_classes, mastery, signals, size, skills | |
 | `death` | What follows an actor dying: the sequence, the corpse, looting it, and purgatory. | busy, custom_properties, experience, messaging, perception, position, room_types, signals | |
+| `telemetry_spawn` | Measures the game economy each hour, and spawns into it what the measurements call for. | crafting, kit_classes, skills, spells, evennia_archive, evennia_calendar, evennia_database_cascade, evennia_scaling, fcm_xrpl | |
 | `spells` | What a spell is, which exist, what an actor knows and has memorised, and casting. | busy, combat, custom_properties, dice, kit_classes, mastery, messaging, perception, position, signals, skills, static_registry, weapons | |
 | `room_types` | Room mixins with no feature component of their own. A mixin tied to a component's feature lives in that component. | not declared | |
 | `exit_types` | Exit mixins with no feature component of their own. A mixin tied to a component's feature lives in that component. | not declared | |
