@@ -1,11 +1,12 @@
-# Parser and filter inventory
+# Parser, filter and helper inventory
 
-The standard way to parse what a player typed, or to find and filter something. Check here before
-writing one; log any new parser or filter helper here.
+The standard way to do a common job — parse what a player typed, find or filter something, word what
+happened, move an asset. Check here before writing any helper; log any new one here.
 
 - **Parser** — takes a string and splits it into arguments.
 - **Filter** — takes parsed arguments and locates something: in contents, exits, a registry, the
   database. Includes the predicates that narrow candidates.
+- **Helper** — any other job a second piece of code would otherwise write again.
 
 One way to do each job. Use it; don't write another.
 
@@ -37,6 +38,13 @@ One way to do each job. Use it; don't write another.
 | Count what a player named against the number they asked for — `get 2 sword` | `match_count(caller, text, candidates, quantity=1)` → `(found, CountOutcome)`: `EXACT`, `TOO_MANY`, `TOO_FEW` or `NONE`. One quiet search; filters nothing and messages nobody | `evennia_targeting` |
 | Tell the caller why a count found no answer | `msg_count_outcome(caller, name, found, outcome, nofound, too_few=None)` — `nofound`, `too_few`, or Evennia's numbered list. Raises on `EXACT` | `components.parsers_filters` |
 | Find what a player named in a holder — gold, a resource, or objects, counted | `find_in_holder(caller, holder, name, candidates, nofound, too_few, quantity=None)` → `(AssetKind, subject)`, or `None` once the caller is told why. The command narrows `candidates` and supplies the wording | `components.parsers_filters` |
+| Find the container a player named — carried, or seen in the room — refusing a closed one or anything that is not a container | `find_container(name, no_container, not_a_container, closed, corpse=None)` on `ItemActingMixin`. A container is anything composing `EquipmentContainerMixin`; `corpse`, when given, answers a corpse. The item commands' own | `commands/item_interaction/acting.py` |
+| Move gold or a resource for a typed amount — judge it against the holding, then transfer | `ItemActingMixin.move_fungible(source, destination, kind, resource_id, quantity, moved)`. The item commands' own | `commands/item_interaction/acting.py` |
+| Tell the caller what moved in one line, and the room once | `ItemActingMixin.report(moved, line, others=(), mapping=None, **fields)` — answers the wording; `others` are left out of the room's telling. The item commands' own | `commands/item_interaction/acting.py` |
+| Cost a turn in a fight, and nothing out of one | `ItemActingMixin.spend_turn()`. The item commands' own | `commands/item_interaction/acting.py` |
+| Word a list — `a`, `a and b`, `a, b and c` | `joined(parts)` | `components.messaging` |
+| Word a number as a player reads it — `12`, not `12.000000` | `plain_amount(value)` | `components.messaging` |
+| Word gold and resources — `["12 gold", "5 wheat"]` | `fungible_parts(gold, resources)` — gold first, then each resource by name, leaving out a zero | `components.messaging` |
 | How much of a holding a typed amount moves — `get 50 gold`, `loot all wheat` | `judge_amount(quantity, held, kind)` → the amount, or `0`. `None` and `all` are everything held; more than held is what is held; zero, a negative or a fraction of gold is nothing. Arithmetic only | `components.parsers_filters` |
 | The objects in a holder the caller can see | `seen_items(caller, holder)` — sight is the test; every object in the holder is considered | `components.parsers_filters` |
 | Find the target of anything violent, or of a spell at an actor — an attack, a bash, a backstab, a spell | `find_combat_target(caller, name, messages=None, include_self=False, hostile_act=True)` — a combat actor the caller can see in the room, or `None` once the caller has been told why not. `messages` rewords the refusals for the command; `include_self` lets the caller be the target; `hostile_act` applies the peaceful-room and PvP gates, and is off for a friendly act | `components.combat` |

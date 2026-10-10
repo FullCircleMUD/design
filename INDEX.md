@@ -39,4 +39,4 @@ One topic per file, listed by priority with a one-line summary.
 
 | Document | Summary |
 |---|---|
-| [parser-filter-inventory.md](parser-filter-inventory.md) | The standard parser or filter for each job — check before writing one. |
+| [parser-filter-helper-inventory.md](parser-filter-helper-inventory.md) | The standard parser, filter or helper for each job — check before writing one. |
