@@ -20,6 +20,7 @@ One way to do each job. Use it; don't write another.
 | Read `#<n>` as an NFT's `uri_id` — a bare number is an amount, not an id | `NFTService.parse_uri_id` | `fcm_xrpl` |
 | Split `X <keyword> Y` | `parse_split` | `evennia_targeting` |
 | Separate switches | `parse_switches` | `evennia_targeting` |
+| Put what a player typed into a line `tell_actor`, `tell_room` or `str.format` will fill — braces kept as typed, not read as placeholders | `escape_braces(text)` — every `{` and `}` doubled | `evennia_targeting` |
 | Split a typed line into the commands it holds, on `;` — `py`, `nick` and interactive-py lines kept whole | `parse_stacked(line, in_prompt=False)` | `evennia_targeting` |
 | Match a typed word against a known list of names — skills, switch words, enum values | `parse_match` — exact first, then word-start, then substring with `substring=True`; returns every match for the command to judge | `evennia_targeting` |
 | Find the spell a player names among a set of spells — known, memorised | `match_spell(command, typed, spells, not_found)` — `parse_match` over the spells' names; the spell, or `None` once the command's caller has been told why not, through `tell_actor` as `COMMAND_REFUSED` with the command's key and `not_found` or `which` as the reason. The spells commands' own | `components/spells/commands/matching.py` |
