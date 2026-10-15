@@ -20,6 +20,7 @@ One way to do each job. Use it; don't write another.
 | Read `#<n>` as an NFT's `uri_id` — a bare number is an amount, not an id | `NFTService.parse_uri_id` | `fcm_xrpl` |
 | Split `X <keyword> Y` | `parse_split` | `evennia_targeting` |
 | Separate switches | `parse_switches` | `evennia_targeting` |
+| Turn enum members into words a player reads — a refusal naming a class, a description listing races | `named(members)` — each member's name, underscores as spaces and title-cased, joined with `", "`: `"Warrior, Mage"`. `levels(entries)` — a mapping of members to numbers the same way: `"Warrior 5, Mage 3"`. The name, never the stored value | `components.parsers_filters` |
 | Put what a player typed into a line `tell_actor`, `tell_room` or `str.format` will fill — braces kept as typed, not read as placeholders | `escape_braces(text)` — every `{` and `}` doubled | `evennia_targeting` |
 | Split a typed line into the commands it holds, on `;` — `py`, `nick` and interactive-py lines kept whole | `parse_stacked(line, in_prompt=False)` | `evennia_targeting` |
 | Match a typed word against a known list of names — skills, switch words, enum values | `parse_match` — exact first, then word-start, then substring with `substring=True`; returns every match for the command to judge | `evennia_targeting` |
