@@ -5,6 +5,7 @@ component's `DEPENDS_ON`, declared in its `__init__.py`.
 
 | Component | What it does | Dependencies | Docs |
 |---|---|---|---|
+| `cooldowns` | How long before an actor may try something again on something. | — | |
 | `custom_properties` | The `AttributeProperty` subclasses the game declares its attributes with. | — | |
 | `damage_type` | The kinds of damage a blow can deal, and the verbs each is described with. | — | |
 | `dice` | Rolls dice from a standard RPG roll string. | — | |
