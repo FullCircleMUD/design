@@ -9,6 +9,7 @@ component's `DEPENDS_ON`, declared in its `__init__.py`.
 | `custom_properties` | The `AttributeProperty` subclasses the game declares its attributes with. | — | |
 | `damage_type` | The kinds of damage a blow can deal, and the verbs each is described with. | — | |
 | `dice` | Rolls dice from a standard RPG roll string. | — | |
+| `keepalives.websocket` | Pings an idle webclient connection, so Cloudflare does not close it. | — | |
 | `mastery` | How good someone is at something, on a six-step scale. | — | |
 | `signals` | The game's signal declarations, in one place. | — | |
 | `static_registry` | The base every registry in the game is built on. | — | |
@@ -26,7 +27,7 @@ component's `DEPENDS_ON`, declared in its `__init__.py`.
 | `perception` | By which senses one perceiver reaches one subject. | custom_properties, position | |
 | `remort` | Going round again: how many times, what was taken for it, and what that is worth. | custom_properties, static_registry | |
 | `xaman_login` | Signing in with a Xaman wallet. | fcm_xrpl, evennia_archive | |
-| `cosigner_keepalive` | Keeps the co-signing service awake while anyone is logged in, on a host that sleeps an idle service. | signals, evennia_calendar, evennia_database_cascade | |
+| `keepalives.cosigner` | Keeps the co-signing service awake while anyone is logged in, on a host that sleeps an idle service. | signals, evennia_calendar, evennia_database_cascade | |
 | `experience` | Experience points, levels, and what killing an actor pays. | custom_properties, groups, signals | |
 | `messaging` | What each perceiver in a room is told, given what their senses reach. | directions, perception, preferences | |
 | `position` | An actor's posture, what it is worth, and what it lets them do. | custom_properties, messaging, perception | |
